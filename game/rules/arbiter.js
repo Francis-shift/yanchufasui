@@ -1,0 +1,173 @@
+// @ts-check
+/**
+ * 裁决器：把清洗过的法术意图变成"这一发到底花多少、打多疼、打谁"。
+ * 全部是纯函数（不碰画面、不读时间、不用随机数），所以能逐条写单测；
+ * 会影响胜负的数字只在这里算，模型说"威力 999"也只按上限算。
+ */
+import {
+  BOLT_COUNT_MAX, COMBO_DISCOUNT, ELEMENTS, ENEMIES, FIRST_DISCOVERY_MULT, FORMS, MANA_MAX, MANA_REGEN,
+  MOMENTUM_MULT, REACTIONS, REPEAT_DECAY, boltCostFactor, boltTotalDmgFactor, powerFactor,
+} from './numbers.js';
+
+/** 「同一句话」的判定：去掉标点和空格后完全相同 */
+export function sentenceKey(text) {
+  return String(text).replace(/[\s\p{P}\p{S}]/gu, '').toLowerCase();
+}
+
+/** @param {{ form: string, power: number, count: number }} s */
+export function stepCost(s) {
+  return FORMS[s.form].cost * powerFactor(s.power) * (s.form === 'bolt' ? boltCostFactor(s.count) : 1);
+}
+
+/** @param {{ form: string, power: number, count: number }[]} steps */
+export function totalCost(steps) {
+  const sum = steps.reduce((a, s) => a + stepCost(s), 0);
+  return Math.round(sum * (steps.length > 1 ? COMBO_DISCOUNT : 1));
+}
+
+/**
+ * @typedef {import('./intent.js').Intent} Intent
+ * @typedef {import('./intent.js').Step} Step
+ * @typedef {{ mana: number, lastCombo?: { key: string, streak: number } | null,
+ *             seen?: Iterable<string>, said?: Iterable<string>, text?: string }} CastContext
+ * @typedef {Step & { cost: number, dmgTotal: number, dmgEach: number, first: boolean, repeat: number }} PlannedStep
+ * @typedef {{ ok: boolean, steps: PlannedStep[], cost: number, momentum: number, momentumHalved: boolean,
+ *             downgrades: string[], backlash: boolean, gaugeGain: number,
+ *             lastCombo: { key: string, streak: number } | null, newlySeen: string[], saidKey: string }} CastPlan
+ */
+
+/**
+ * 规划一次施法：气势（同句减半）→ 消耗（组合八折）→ 法力不够就降级 → 每步伤害。
+ * 降级顺序：先把威力最高的一步降 1（直到全是 1）→ 再减弹的颗数 → 再去掉最后一步 → 还不够就哑火（不扣法力）。
+ * @param {Intent} intent
+ * @param {CastContext} ctx
+ * @returns {CastPlan}
+ */
+export function planCast(intent, ctx) {
+  const said = new Set(ctx.said || []);
+  const seen = new Set(ctx.seen || []);
+  const saidKey = sentenceKey(ctx.text || '');
+  let momentum = intent.momentum;
+  let momentumHalved = false;
+  if (saidKey && said.has(saidKey) && momentum > 0) { momentum = Math.floor(momentum / 2); momentumHalved = true; }
+
+  /** @type {string[]} */
+  const downgrades = [];
+  const steps = intent.steps.map((s) => ({ ...s }));
+  while (steps.length && totalCost(steps) > ctx.mana) {
+    let k = -1;
+    for (let i = 0; i < steps.length; i++) if (steps[i].power > 1 && (k < 0 || steps[i].power >= steps[k].power)) k = i;
+    if (k >= 0) {
+      steps[k].power -= 1;
+      downgrades.push(`法力不足，${label(steps[k])}威力降为 ${steps[k].power}`);
+      continue;
+    }
+    const b = steps.findLastIndex((s) => s.form === 'bolt' && s.count > 1);
+    if (b >= 0) {
+      steps[b].count -= 1;
+      downgrades.push(`法力不足，${label(steps[b])}减为 ${steps[b].count} 颗`);
+      continue;
+    }
+    const gone = steps.pop();
+    if (gone) downgrades.push(`法力不足，去掉了${label(gone)}`);
+  }
+  const ok = steps.length > 0;
+  if (!ok && intent.steps.length) downgrades.push('法力不足，哑火（不扣法力）');
+
+  let lastCombo = ctx.lastCombo || null;
+  /** @type {string[]} */
+  const newlySeen = [];
+  /** @type {PlannedStep[]} */
+  const planned = [];
+  const mm = MOMENTUM_MULT[Math.max(0, Math.min(MOMENTUM_MULT.length - 1, momentum))];
+  for (const s of steps) {
+    const key = `${s.el}+${s.form}`;
+    const streak = lastCombo && lastCombo.key === key ? lastCombo.streak + 1 : 0;
+    lastCombo = { key, streak };
+    const repeat = REPEAT_DECAY ** streak;
+    const first = !seen.has(key);
+    if (first) { seen.add(key); newlySeen.push(key); }
+    const base = FORMS[s.form].dmg * (s.form === 'bolt' ? boltTotalDmgFactor(s.count) : 1);
+    const dmgTotal = base * ELEMENTS[s.el].mult * powerFactor(s.power) * mm * repeat * (first ? FIRST_DISCOVERY_MULT : 1);
+    planned.push({ ...s, cost: Math.round(stepCost(s)), dmgTotal, dmgEach: s.form === 'bolt' ? dmgTotal / s.count : dmgTotal,
+      first, repeat });
+  }
+  return {
+    ok, steps: planned, cost: ok ? totalCost(steps) : 0, momentum, momentumHalved, downgrades,
+    backlash: intent.overreach, gaugeGain: ok ? momentum : 0,
+    lastCombo, newlySeen, saidKey,
+  };
+}
+
+/** @param {{ el: string, form: string }} s */
+const label = (s) => ELEMENTS[s.el].name + FORMS[s.form].name;
+
+/** 法力恢复 */
+export function regenMana(mana, dt) {
+  return Math.min(MANA_MAX, mana + MANA_REGEN * dt);
+}
+
+/**
+ * 语义目标 → 具体打谁。方位按屏幕说（镜头固定，屏幕左 ≈ 世界 −x）。
+ * @typedef {{ id: string, x: number, z: number, hp: number, distToCore: number }} EnemyView
+ * @param {string} target
+ * @param {EnemyView[]} enemies 活着的敌人
+ * @param {{ count?: number, caster?: { x: number, z: number }, objects?: Record<string, { x: number, z: number }>,
+ *           sideX?: number, clusterR?: number }} [opt]
+ * @returns {{ ids: string[], point: { x: number, z: number } | null }}
+ */
+export function resolveTarget(target, enemies, opt = {}) {
+  const n = Math.max(1, Math.min(BOLT_COUNT_MAX, opt.count || 1));
+  const sideX = opt.sideX ?? 1.5, R = opt.clusterR ?? 3;
+  const byFront = [...enemies].sort((a, b) => a.distToCore - b.distToCore || a.id.localeCompare(b.id));
+  const pick = (list) => {
+    const ids = list.slice(0, n).map((e) => e.id);
+    const head = list[0];
+    return { ids, point: head ? { x: head.x, z: head.z } : null };
+  };
+  if (opt.objects && target in opt.objects) {
+    const o = opt.objects[target];
+    return { ids: [], point: { x: o.x, z: o.z } };
+  }
+  switch (target) {
+    case 'self': return { ids: [], point: opt.caster ? { ...opt.caster } : null };
+    case 'strongest': return pick([...byFront].sort((a, b) => b.hp - a.hp || a.distToCore - b.distToCore));
+    case 'left': return pick(byFront.filter((e) => e.x < -sideX));
+    case 'right': return pick(byFront.filter((e) => e.x > sideX));
+    case 'center': return pick(byFront.filter((e) => Math.abs(e.x) <= sideX));
+    case 'densest': {
+      let best = null, bestN = -1;
+      for (const e of byFront) {
+        const near = byFront.filter((o) => (o.x - e.x) ** 2 + (o.z - e.z) ** 2 <= R * R);
+        if (near.length > bestN) { bestN = near.length; best = near; }
+      }
+      if (!best) return { ids: [], point: null };
+      const cx = best.reduce((a, e) => a + e.x, 0) / best.length, cz = best.reduce((a, e) => a + e.z, 0) / best.length;
+      return { ids: best.slice(0, n).map((e) => e.id), point: { x: cx, z: cz } };
+    }
+    default: return pick(byFront);
+  }
+}
+
+/**
+ * 一次命中对一个敌人造成多少伤害、附加什么效果。反应只在这里判断。
+ * @param {{ type: string, frozen: boolean, lastEl?: string }} enemy
+ * @param {{ el: string, dmg: number, fromAbove?: boolean, fromBehind?: boolean }} hit
+ * @returns {{ dmg: number, reaction: string, freezeSec: number, burnSec: number, unfreeze: boolean, push: number, aoeBonus: number }}
+ */
+export function damageTo(enemy, hit) {
+  const spec = ENEMIES[enemy.type] || ENEMIES.grunt;
+  let dmg = hit.dmg, reaction = '', unfreeze = false, aoeBonus = 0;
+  if (enemy.frozen && hit.el === 'fire') {
+    reaction = REACTIONS['ice+fire'].name; unfreeze = true; aoeBonus = REACTIONS['ice+fire'].bonusAoe;
+  } else if (enemy.frozen && hit.el === 'wind') {
+    reaction = REACTIONS['ice+wind'].name; dmg *= REACTIONS['ice+wind'].frozenMult;
+  } else if (enemy.frozen) {
+    dmg *= ELEMENTS.ice.frozenTakenMult;
+  }
+  if ('frontReduce' in spec && !hit.fromAbove && !hit.fromBehind) dmg *= 1 - spec.frontReduce;
+  const freezeSec = hit.el === 'ice' ? ELEMENTS.ice.freezeSec * ('freezeMult' in spec ? spec.freezeMult : 1) : 0;
+  const burnSec = hit.el === 'fire' ? ELEMENTS.fire.burnSec : 0;
+  const push = hit.el === 'wind' ? ELEMENTS.wind.push : 0;
+  return { dmg, reaction, freezeSec, burnSec, unfreeze, push, aoeBonus };
+}

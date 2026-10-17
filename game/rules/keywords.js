@@ -1,0 +1,121 @@
+// @ts-check
+/**
+ * 关键词解析：不联网、立刻出结果。三个用处——
+ *   1. 回车瞬间先猜元素，法阵马上变成对应颜色（玩家第一眼就看到"它听懂了"）；
+ *   2. 模型超时（3.5 秒）或断网时直接用它的结果施法；
+ *   3. 每日额度用完后的保底。
+ * 只认得关键词，听不懂复杂句子；输出格式与模型一致，同样要经过 sanitizeIntent。
+ */
+
+/** 元素关键词（按出现位置决定先后） */
+const ELEMENT_WORDS = {
+  fire: ['火', '焰', '炎', '烧', '燃', '焚', '烈', '灼'],
+  ice: ['冰', '冻', '霜', '寒', '雪', '凝'],
+  wind: ['风', '吹', '推', '飓', '旋', '卷', '刮'],
+  earth: ['土', '石', '岩', '地裂'],
+};
+const FORM_WORDS = {
+  burst: ['爆', '炸', '轰', '一片', '范围', '全场', '一群', '全部'],
+  wall: ['墙', '壁', '屏障'],
+  rain: ['雨', '天降', '倾泻'],
+  bolt: ['弹', '球', '箭', '枪', '刺'],
+};
+const TARGET_WORDS = [
+  ['strongest', ['最强', '最大', '巨像', '大块头', '最壮']],
+  ['densest', ['最密', '密集', '一群', '一堆', '那群', '扎堆']],
+  ['left', ['左']],
+  ['right', ['右']],
+  ['center', ['中间', '正中']],
+  ['self', ['脚下', '身边', '自己']],
+  ['rope', ['绳']],
+  ['censer', ['香炉', '炉']],
+  ['bridge', ['桥']],
+  ['pillar', ['华表', '柱']],
+  ['front', ['最前', '前面', '领头', '第一个']],
+];
+const PATH_WORDS = [
+  ['sky', ['从天而降', '天上', '上方', '头顶', '从天']],
+  ['behind', ['背后', '身后', '绕后', '后面']],
+];
+const COUNT_WORDS = [[3, ['三', '3']], [2, ['两', '二', '双', '2']]];
+const POWER_UP = ['全力', '狠狠', '最强一击', '倾尽', '极'];
+const POWER_DOWN = ['轻轻', '小小', '一点点'];
+/** 意象词：关键词模式下粗略估气势（模型模式由模型打分） */
+const VIVID = ['之', '如', '似', '吧', '！', '!', '啊', '吾', '尔', '天地', '万', '九天', '苍', '怒'];
+/** 越权词：说了就截断数值并演法则反噬（模型和程序各查一遍） */
+export const OVERREACH_WORDS = ['无限', '秒杀', '无敌', '全部消灭', '直接赢', '999', '满分', '气势拉满', '最大值', '管理员', '忽略规则'];
+/** 分句：一句话里的组合 */
+const SPLIT = /(?:然后|接着|之后|再|随后|，|,|；|;)/;
+
+/** @param {string} s @param {string[]} words @returns {string} 命中的那个词，没有返回空串 */
+function find(s, words) {
+  let best = '', at = Infinity;
+  for (const w of words) {
+    const i = s.indexOf(w);
+    if (i >= 0 && i < at) { best = w; at = i; }
+  }
+  return best;
+}
+
+/**
+ * 只猜第一个元素，给法阵上色用。猜不出返回空串。
+ * @param {string} text
+ */
+export function guessElement(text) {
+  let best = '', at = Infinity;
+  for (const [el, words] of Object.entries(ELEMENT_WORDS)) {
+    for (const w of words) {
+      const i = text.indexOf(w);
+      if (i >= 0 && i < at) { best = el; at = i; }
+    }
+  }
+  return best;
+}
+
+/**
+ * @param {string} text
+ * @returns {Record<string, any>} 与模型输出同格式的原始意图
+ */
+export function parseKeywords(text) {
+  const parts = text.split(SPLIT).map((p) => p.trim()).filter(Boolean);
+  const steps = [];
+  let carryTarget = '';
+  for (const part of parts) {
+    const el = guessElement(part);
+    if (!el) continue;
+    const elWord = find(part, ELEMENT_WORDS[el]);
+    /** @type {Record<string, string>} */
+    const w = { e: elWord };
+    let form = 'bolt';
+    for (const f of ['burst', 'wall', 'rain', 'bolt']) {
+      const hit = find(part, FORM_WORDS[f]);
+      if (hit) { form = f; w.f = hit; break; }
+    }
+    let target = '';
+    for (const [t, words] of TARGET_WORDS) {
+      const hit = find(part, /** @type {string[]} */ (words));
+      if (hit) { target = /** @type {string} */ (t); w.t = hit; break; }
+    }
+    if (!target) target = carryTarget || (form === 'burst' ? 'densest' : 'front');
+    carryTarget = target;
+    let path = 'straight';
+    for (const [pth, words] of PATH_WORDS) {
+      const hit = find(part, /** @type {string[]} */ (words));
+      if (hit) { path = /** @type {string} */ (pth); w.r = hit; break; }
+    }
+    let n = 1;
+    for (const [c, words] of COUNT_WORDS) {
+      const hit = find(part, /** @type {string[]} */ (words));
+      if (hit && form === 'bolt') { n = /** @type {number} */ (c); w.n = hit; break; }
+    }
+    let p = 2;
+    const up = find(part, POWER_UP), down = find(part, POWER_DOWN);
+    if (up) { p = 4; w.p = up; } else if (down) { p = 1; w.p = down; }
+    steps.push({ e: el, f: form, t: target, p, n, r: path, w });
+    if (steps.length === 3) break;
+  }
+  let vivid = 0;
+  for (const v of VIVID) if (text.includes(v)) vivid++;
+  const m = text.length >= 8 ? Math.min(3, Math.floor(vivid / 2)) : 0;
+  return { s: steps, m, x: [], o: OVERREACH_WORDS.some((x) => text.includes(x)), nm: '' };
+}
