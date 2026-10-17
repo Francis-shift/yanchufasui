@@ -1,0 +1,11 @@
+node_modules/
+.next/
+out/
+preview/
+*.tsbuildinfo
+next-env.d.ts
+
+# 密钥只放本地环境变量文件，绝不提交
+.env
+.env.local
+.env.*.local
