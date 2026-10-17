@@ -96,6 +96,12 @@ export function parseKeywords(text) {
       const hit = find(part, /** @type {string[]} */ (words));
       if (hit) { target = /** @type {string} */ (t); w.t = hit; break; }
     }
+    // 同一个元素、这半句又没说新形态：是在补充上一步（如「狂风爆裂，把那群吹下悬崖」），并进上一步，不另算一步
+    const prev = steps[steps.length - 1];
+    if (prev && prev.e === el && !w.f) {
+      if (target && !prev.w.t) { prev.t = target; prev.w.t = w.t; }
+      continue;
+    }
     if (!target) target = carryTarget || (form === 'burst' ? 'densest' : 'front');
     carryTarget = target;
     let path = 'straight';

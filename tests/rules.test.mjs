@@ -61,6 +61,14 @@ test('关键词：组合按分句拆，目标沿用上一步', () => {
   assert.deepEqual(it.steps.map((s) => [s.el, s.target]), [['ice', 'front'], ['wind', 'front']]);
 });
 
+test('关键词：同一元素的后半句是在补充上一步，不另算一步', () => {
+  const it = kw('狂风爆裂，把最密集的那群吹下悬崖！');
+  assert.deepEqual(it.steps.map((s) => [s.el, s.form, s.target]), [['wind', 'burst', 'densest']]);
+  assert.equal(it.steps[0].words.t, '最密');
+  // 不同元素照样拆成两步
+  assert.equal(kw('冰爆，再来一发火球').steps.length, 2);
+});
+
 test('只差一个词，结果必须不同（关键词模式）', () => {
   const pairs = [
     ['火球打左边', '火球打右边', (it) => it.steps[0].target],
