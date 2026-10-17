@@ -1,0 +1,11 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #9fc3e8;
+}
+
+.game-root {
+  position: fixed;
+  inset: 0;
+}

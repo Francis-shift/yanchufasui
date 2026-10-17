@@ -1,0 +1,130 @@
+"""把 game/ 打成一个不依赖网络的单文件页面（preview/index.html），用于在只能看静态页面的地方验画面。
+
+- 库（three、cannon-es、后期处理）取 jsdelivr 的压缩版，缓存在 preview/vendor-min/；
+- game/ 下的本地模块逐个收进来，相对引用改写成内部名字；
+- 全部 gzip + base64 内联，页面启动时用浏览器自带的 DecompressionStream 解开，动态写 importmap 再启动。
+预览页没有服务器，解析只走关键词（等同断网模式）。
+用法：python tools/build_preview.py
+"""
+import base64
+import gzip
+import json
+import pathlib
+import posixpath
+import re
+import subprocess
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+OUT = ROOT / "preview"
+VENDOR = OUT / "vendor-min"
+CDN = "https://cdn.jsdelivr.net/npm/"
+THREE = "three@0.186.1"
+ENTRIES = {
+    "three": f"{THREE}/build/three.module.js",
+    "cannon-es": "cannon-es@0.20.0/dist/cannon-es.js",
+    "three/addons/postprocessing/EffectComposer.js": f"{THREE}/examples/jsm/postprocessing/EffectComposer.js",
+    "three/addons/postprocessing/RenderPass.js": f"{THREE}/examples/jsm/postprocessing/RenderPass.js",
+    "three/addons/postprocessing/UnrealBloomPass.js": f"{THREE}/examples/jsm/postprocessing/UnrealBloomPass.js",
+    "three/addons/postprocessing/OutputPass.js": f"{THREE}/examples/jsm/postprocessing/OutputPass.js",
+}
+REL_IMPORT = re.compile(r"""((?:import|export)\b[^'"]*?\bfrom\s*|import\s*\(?\s*)(['"])(\.{1,2}/[^'"]+)\2""")
+
+
+def fetch_pkg(path: str) -> str:
+    min_path = re.sub(r"\.js$", ".min.js", path)
+    local = VENDOR / min_path
+    if not local.exists():
+        local.parent.mkdir(parents=True, exist_ok=True)
+        for _ in range(3):  # 本机 Python 的 TLS 握手会被掐断，用 curl 并重试
+            if subprocess.run(["curl", "-sSfL", "-m", "60", "-o", str(local), CDN + min_path]).returncode == 0:
+                break
+        else:
+            raise SystemExit(f"下载失败：{CDN + min_path}")
+    return local.read_text(encoding="utf-8")
+
+
+def collect_pkg(path: str, out: dict):
+    if path in out:
+        return
+    out[path] = None
+    src, base = fetch_pkg(path), path.rsplit("/", 1)[0]
+
+    def rewrite(m):
+        dep = re.sub(r"\.min\.js$", ".js", posixpath.normpath(posixpath.join(base, m.group(3))))
+        collect_pkg(dep, out)
+        return f"{m.group(1)}{m.group(2)}@pkg/{dep}{m.group(2)}"
+
+    out[path] = REL_IMPORT.sub(rewrite, src)
+
+
+def collect_local(rel: str, out: dict):
+    """rel 是相对仓库根的路径，如 game/main.js"""
+    if rel in out:
+        return
+    out[rel] = None
+    src, base = (ROOT / rel).read_text(encoding="utf-8"), posixpath.dirname(rel)
+
+    def rewrite(m):
+        dep = posixpath.normpath(posixpath.join(base, m.group(3)))
+        collect_local(dep, out)
+        return f"{m.group(1)}{m.group(2)}@local/{dep}{m.group(2)}"
+
+    out[rel] = REL_IMPORT.sub(rewrite, src)
+
+
+def gz_b64(s: str) -> str:
+    return base64.b64encode(gzip.compress(s.encode("utf-8"), 9)).decode()
+
+
+BOOT = """<script>
+(async () => {
+  try {
+    const unzip = async (b64) => {
+      const bin = Uint8Array.from(atob(b64.trim()), c => c.charCodeAt(0));
+      return new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+    };
+    const urls = {};
+    for (const s of document.querySelectorAll('script[data-mod]')) {
+      urls[s.dataset.mod] = URL.createObjectURL(new Blob([await unzip(s.textContent)], { type: 'text/javascript' }));
+    }
+    for (const [name, key] of Object.entries(%s)) urls[name] = urls[key];
+    const map = document.createElement('script');
+    map.type = 'importmap';
+    map.textContent = JSON.stringify({ imports: urls });
+    document.head.appendChild(map);
+    const main = document.createElement('script');
+    main.type = 'module';
+    main.textContent = "import { start } from '@local/game/main.js'; start(document.getElementById('app'), {});";
+    document.body.appendChild(main);
+  } catch (e) { document.body.insertAdjacentHTML('beforeend', '<pre style="color:#b00">' + e + '</pre>'); }
+})();
+</script>"""
+
+SHELL = """<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>言出法随 · 预览</title>
+<style>html,body{margin:0;height:100%%;overflow:hidden;background:#9fc3e8}#app{position:fixed;inset:0}</style></head>
+<body><div id="app"></div>
+%s
+</body></html>"""
+
+
+def main():
+    pkgs: dict = {}
+    for p in ENTRIES.values():
+        collect_pkg(p, pkgs)
+    locs: dict = {}
+    collect_local("game/main.js", locs)
+    blocks = [f'<script type="application/octet-stream" data-mod="@pkg/{p}">{gz_b64(c)}</script>' for p, c in pkgs.items()]
+    blocks += [f'<script type="application/octet-stream" data-mod="@local/{p}">{gz_b64(c)}</script>' for p, c in locs.items()]
+    alias = {name: f"@pkg/{path}" for name, path in ENTRIES.items()}
+    page = SHELL % ("\n".join(blocks) + "\n" + BOOT % json.dumps(alias))
+    OUT.mkdir(exist_ok=True)
+    (OUT / "index.html").write_text(page, encoding="utf-8")
+    size = len(page.encode("utf-8"))
+    print(f"本地模块 {len(locs)} 个，库 {len(pkgs)} 个；preview/index.html {size / 1024:.0f} KB" +
+          ("  WARN=超过 512 KB" if size > 512 * 1024 else ""))
+
+
+if __name__ == "__main__":
+    main()
