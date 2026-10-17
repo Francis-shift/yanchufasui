@@ -21,7 +21,7 @@ export const FORMS = {
 export const ELEMENTS = {
   fire:  { name: '火', mult: 1.3, burnDps: 5, burnSec: 3 },
   ice:   { name: '冰', mult: 0.7, freezeSec: 2, frozenTakenMult: 1.5 },
-  wind:  { name: '风', mult: 0.3, push: 9 },                  // push：推力（米/秒），推下悬崖直接消灭
+  wind:  { name: '风', mult: 0.3, push: 12 },                 // push：推出去的初速度（米/秒，约滑 4 米），推下悬崖直接消灭
   earth: { name: '土', mult: 1.0, wallSec: 8 },
 };
 

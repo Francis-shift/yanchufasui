@@ -7,10 +7,9 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { ELEMENTS, ENEMIES } from '../rules/numbers.js';
-import { CORE_POS, groundHeightAt, PATHS } from '../world/layout.js';
+import { CASTER_POS, CORE_POS, groundHeightAt, PATHS } from '../world/layout.js';
 import { col, PALETTE, rand } from '../fx/common.js';
 
-const UP = new THREE.Vector3(0, 1, 0);
 const CORE_FRONT = new THREE.Vector3(CORE_POS.x, 0, CORE_POS.z - 2.2);
 
 /** 路径长度表，便于按走过的距离取位置 */
@@ -122,7 +121,11 @@ export class Enemies {
     if (r.freezeSec) e.frozen = Math.max(e.frozen, r.freezeSec);
     if (r.burnSec) e.burn = Math.max(e.burn, r.burnSec);
     if (r.push && e.mode !== 'fall') {
+      // 方向：离爆心向外（四成）+ 背离施法者（六成）——「吹下悬崖」是往外吹，不是原地打转
       const d = this._d.copy(e.pos).sub(from).setY(0);
+      if (d.lengthSq() > 1e-4) d.normalize();
+      const away = this._p.copy(e.pos).sub(CASTER_POS).setY(0).normalize();
+      d.multiplyScalar(0.4).addScaledVector(away, 0.6);
       if (d.lengthSq() < 1e-4) d.set(0, 0, -1);
       d.normalize();
       e.vel.set(d.x * r.push, 1.5, d.z * r.push);
