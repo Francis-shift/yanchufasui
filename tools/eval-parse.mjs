@@ -125,7 +125,9 @@ async function runOne(label, parse) {
   const pairs = {};
   SET.spells.forEach((s, i) => { if (s.配对 && s.考点.startsWith('H')) (pairs[s.配对] ??= []).push(rows[i]); });
   [['S21', 'S22'], ['S23', 'S24']].forEach(([a, b], i) => { pairs['顺序' + (i + 1)] = [rows.find((r) => r.id === a), rows.find((r) => r.id === b)]; });
-  const pairOk = Object.entries(pairs).map(([k, [a, b]]) => [k, sig(a.intent) !== sig(b.intent)]);
+  // 含雷的配对暂不计（雷未开放，两句清洗后都会少掉雷那一步）
+  const pairOk = Object.entries(pairs).filter(([, [a, b]]) => !a.thunder && !b.thunder)
+    .map(([k, [a, b]]) => [k, sig(a.intent) !== sig(b.intent)]);
   const times = rows.filter((r) => !r.err).map((r) => r.ms).sort((a, b) => a - b);
   const q = (p) => times[Math.min(times.length - 1, Math.floor(p * times.length))];
 
@@ -166,7 +168,8 @@ if (rescore > 0) {
   await runOne('keywords', async (text) => ({ ms: 0, raw: parseKeywords(text), content: '' }));
 } else {
   const env = loadEnv();
-  const models = modelsOf(env);
+  const pick = process.argv.indexOf('--model');   // --model 编号：只跑这一个
+  const models = pick > 0 ? [process.argv[pick + 1]] : modelsOf(env);
   if (!env.ARK_API_KEY || !models.length) { console.error('.env.local 里缺 ARK_API_KEY 或 ARK_MODELS / ARK_MODEL'); process.exit(1); }
   for (const m of models) {
     console.log(`\n== ${m}`);

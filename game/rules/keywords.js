@@ -38,7 +38,8 @@ const PATH_WORDS = [
   ['behind', ['背后', '身后', '绕后', '后面']],
 ];
 const COUNT_WORDS = [[3, ['三', '3']], [2, ['两', '二', '双', '2']]];
-const POWER_UP = ['全力', '狠狠', '最强一击', '倾尽', '极'];
+const POWER_MAX_WORDS = ['全力', '最强一击', '倾尽'];
+const POWER_UP = ['狠狠', '极'];
 const POWER_DOWN = ['轻轻', '小小', '一点点'];
 /** 意象词：关键词模式下粗略估气势（模型模式由模型打分） */
 const VIVID = ['之', '如', '似', '吧', '！', '!', '啊', '吾', '尔', '天地', '万', '九天', '苍', '怒'];
@@ -129,8 +130,8 @@ export function parseKeywords(text) {
       if (hit && form === 'bolt') { n = /** @type {number} */ (c); w.n = hit; break; }
     }
     let p = 2;
-    const up = find(part, POWER_UP), down = find(part, POWER_DOWN);
-    if (up) { p = 4; w.p = up; } else if (down) { p = 1; w.p = down; }
+    const max = find(part, POWER_MAX_WORDS), up = find(part, POWER_UP), down = find(part, POWER_DOWN);
+    if (max) { p = 5; w.p = max; } else if (up) { p = 4; w.p = up; } else if (down) { p = 1; w.p = down; }
     steps.push({ e: el, f: form, t: target, p, n, r: path, w });
     if (steps.length === 3) break;
   }

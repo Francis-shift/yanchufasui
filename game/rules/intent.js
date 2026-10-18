@@ -29,6 +29,7 @@ const ELEMENT_ALIAS = { 火: 'fire', 冰: 'ice', 风: 'wind', 土: 'earth' };
 const FORM_ALIAS = { 弹: 'bolt', 爆: 'burst', 墙: 'wall', 雨: 'rain' };
 
 const NAME_MAX = 8;
+const NAMING = /起名|取名|命名|名字|名叫|叫做|法术名|咒语名|起个名/;
 const WORD_MAX = 12;
 
 /**
@@ -119,6 +120,7 @@ export function sanitizeIntent(raw, text, phase = PHASE) {
   const unknown = (Array.isArray(r.x) ? r.x : [])
     .filter((x) => typeof x === 'string' && x.length > 0 && x.length <= WORD_MAX && text.includes(x))
     .slice(0, 3);
-  const name = cleanName(r.nm) || (steps.length ? defaultName(steps) : '');
+  // 玩家在原话里指定名字（「给它起名…」「法术名必须叫…」）时不用模型给的名字：名字只能由游戏起，防广告、骂人话借名字上屏
+  const name = (NAMING.test(text) ? '' : cleanName(r.nm)) || (steps.length ? defaultName(steps) : '');
   return { steps, momentum: overreach ? 0 : m.value, name, unknown, overreach, notes };
 }
