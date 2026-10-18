@@ -8,7 +8,7 @@
  * @param {string | undefined} url
  * @param {string} text
  * @param {number} timeoutMs
- * @returns {Promise<{ raw: any, ms: number, model: string } | { fail: string }>}
+ * @returns {Promise<{ raw: any, ms: number, model: string } | { fail: string, ms?: number }>} ms 是服务器上调模型花的毫秒数
  */
 export async function parseRemote(url, text, timeoutMs) {
   if (!url) return { fail: 'offline' };
@@ -19,7 +19,7 @@ export async function parseRemote(url, text, timeoutMs) {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }), signal: ctrl.signal,
     });
     const data = await res.json().catch(() => null);
-    if (!data || !data.ok) return { fail: (data && data.reason) || `http_${res.status}` };
+    if (!data || !data.ok) return { fail: (data && data.reason) || `http_${res.status}`, ms: data && data.ms };
     return { raw: data.raw, ms: data.ms, model: data.model };
   } catch {
     return { fail: ctrl.signal.aborted ? 'timeout' : 'network' };

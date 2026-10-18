@@ -14,8 +14,8 @@ const BASE = process.env.ARK_BASE_URL || 'https://ark.cn-beijing.volces.com/api/
 const TIMEOUT_MS = Number(process.env.PARSE_SERVER_TIMEOUT_MS || 3000);
 const RAW_MAX = 2000;
 
-function fail(reason: string, status = 200) {
-  return Response.json({ ok: false, reason, fallback: true }, { status });
+function fail(reason: string, status = 200, ms?: number) {
+  return Response.json({ ok: false, reason, fallback: true, ms }, { status });
 }
 
 async function callModel(text: string, signal: AbortSignal) {
@@ -101,7 +101,8 @@ export async function POST(req: Request) {
     }
     return Response.json({ ok: true, raw, ms: Date.now() - t0, model: process.env.ARK_MODEL });
   } catch (e) {
-    return fail(ctrl.signal.aborted ? 'timeout' : 'model_error');
+    // 带上服务器这一侧花的时间，前端咒语卡能分清是"手机到服务器"慢还是"服务器到模型"慢
+    return fail(ctrl.signal.aborted ? 'timeout' : 'model_error', 200, Date.now() - t0);
   } finally {
     clearTimeout(timer);
   }

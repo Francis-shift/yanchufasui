@@ -30,6 +30,11 @@ import { parseRemote, warmUp } from './net.js';
 /** 中期：一波 6 个小傀儡，石阶和索桥轮流出 */
 const WAVES = [{ list: ['grunt', 'grunt', 'grunt', 'grunt', 'grunt', 'grunt'], interval: 2.4 }];
 const DEFAULT_AIM = new THREE.Vector3(0, 0.6, -6);
+/** 解析失败的原因，显示在咒语卡上（方便现场判断是哪一段出了问题） */
+const FAIL_TEXT = {
+  timeout: '超时', model_error: '模型出错', network: '网络不通', no_key: '服务器未配置密钥', rate: '说得太快', daily: '今日额度已满',
+  too_long: '太长', empty: '空', bad_request: '请求有误', warm_failed: '预热失败',
+};
 
 /**
  * @param {HTMLElement} root
@@ -219,12 +224,15 @@ export function start(root, opts = {}) {
     const remoteP = parseRemote(opts.parseUrl, text, PARSE_TIMEOUT_MS);
     await new Promise((r) => setTimeout(r, CHANT_MIN_MS));
     const remote = await remoteP;
-    let raw, source, ms = Math.round(performance.now() - t0);
-    if ('raw' in remote) { raw = remote.raw; source = '模型解析'; ms = remote.ms; }
+    // ms 是玩家实际等的总时间；括号里是服务器调模型花的时间，两者之差就是网络路上的时间
+    let raw, source;
+    const ms = Math.round(performance.now() - t0);
+    const server = remote.ms ? `，模型 ${remote.ms} 毫秒` : '';
+    if ('raw' in remote) { raw = remote.raw; source = remote.ms ? `模型解析（模型 ${remote.ms} 毫秒）` : '模型解析'; }
     else {
       raw = kwRaw;
-      source = remote.fail === 'timeout' ? '简易解析（超时）' : remote.fail === 'offline' ? '关键词解析（离线）'
-        : remote.fail === 'rate' || remote.fail === 'daily' ? '关键词解析（额度已满）' : '关键词解析';
+      source = remote.fail === 'offline' ? '关键词解析（离线）'
+        : `${remote.fail === 'timeout' ? '简易解析' : '关键词解析'}（${FAIL_TEXT[remote.fail] || remote.fail}${server}）`;
     }
     let intent = sanitizeIntent(raw, text);
     if (!intent.steps.length && 'raw' in remote) {

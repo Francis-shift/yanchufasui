@@ -126,7 +126,7 @@ export class Hud {
     const meta = [
       plan.ok ? `消耗 ${plan.cost}` : '哑火',
       `气势 ${plan.momentum}${plan.momentumHalved ? '（同一句话再说，减半）' : ''}`,
-      `${c.source}${c.ms ? ` ${c.ms} 毫秒` : ''}`,
+      `${c.source}${c.ms ? ` · 共等 ${c.ms} 毫秒` : ''}`,
     ];
     const warns = [...intent.notes, ...plan.downgrades];
     this.card.innerHTML = `<div class="yc-name">${esc(c.name || '……')}</div>
