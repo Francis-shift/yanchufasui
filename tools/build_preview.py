@@ -4,8 +4,10 @@
 - game/ 下的本地模块逐个收进来，相对引用改写成内部名字；
 - 全部 gzip + base64 内联，页面启动时用浏览器自带的 DecompressionStream 解开，动态写 importmap 再启动。
 预览页没有服务器，解析只走关键词（等同断网模式）。
-用法：python tools/build_preview.py
+用法：python tools/build_preview.py          → preview/index.html（游戏）
+      python tools/build_preview.py check    → preview/check.html（手机检查页）
 """
+import sys
 import base64
 import gzip
 import json
@@ -94,7 +96,7 @@ BOOT = """<script>
     document.head.appendChild(map);
     const main = document.createElement('script');
     main.type = 'module';
-    main.textContent = "import { start } from '@local/game/main.js'; start(document.getElementById('app'), {});";
+    main.textContent = %s;
     document.body.appendChild(main);
   } catch (e) { document.body.insertAdjacentHTML('beforeend', '<pre style="color:#b00">' + e + '</pre>'); }
 })();
@@ -102,27 +104,37 @@ BOOT = """<script>
 
 SHELL = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>言出法随 · 预览</title>
+<title>%s</title>
 <style>html,body{margin:0;height:100%%;overflow:hidden;background:#9fc3e8}#app{position:fixed;inset:0}</style></head>
 <body><div id="app"></div>
 %s
 </body></html>"""
 
 
+TARGETS = {
+    # 名字: (入口模块, 启动语句, 页面标题, 输出文件)
+    "game": ("game/main.js", "import { start } from '@local/game/main.js'; start(document.getElementById('app'), {});",
+             "言出法随 · 预览", "index.html"),
+    "check": ("game/check.js", "import { startCheck } from '@local/game/check.js'; startCheck(document.getElementById('app'));",
+              "言出法随 · 手机检查", "check.html"),
+}
+
+
 def main():
+    entry, boot, title, out_name = TARGETS[sys.argv[1] if len(sys.argv) > 1 else "game"]
     pkgs: dict = {}
     for p in ENTRIES.values():
         collect_pkg(p, pkgs)
     locs: dict = {}
-    collect_local("game/main.js", locs)
+    collect_local(entry, locs)
     blocks = [f'<script type="application/octet-stream" data-mod="@pkg/{p}">{gz_b64(c)}</script>' for p, c in pkgs.items()]
     blocks += [f'<script type="application/octet-stream" data-mod="@local/{p}">{gz_b64(c)}</script>' for p, c in locs.items()]
     alias = {name: f"@pkg/{path}" for name, path in ENTRIES.items()}
-    page = SHELL % ("\n".join(blocks) + "\n" + BOOT % json.dumps(alias))
+    page = SHELL % (title, "\n".join(blocks) + "\n" + BOOT % (json.dumps(alias), json.dumps(boot)))
     OUT.mkdir(exist_ok=True)
-    (OUT / "index.html").write_text(page, encoding="utf-8")
+    (OUT / out_name).write_text(page, encoding="utf-8")
     size = len(page.encode("utf-8"))
-    print(f"本地模块 {len(locs)} 个，库 {len(pkgs)} 个；preview/index.html {size / 1024:.0f} KB" +
+    print(f"本地模块 {len(locs)} 个，库 {len(pkgs)} 个；preview/{out_name} {size / 1024:.0f} KB" +
           ("  WARN=超过 512 KB" if size > 512 * 1024 else ""))
 
 

@@ -109,6 +109,7 @@ export function start(root, opts = {}) {
     lastCombo: /** @type {{ key: string, streak: number } | null} */ (null), seen: /** @type {string[]} */ ([]),
     said: new Set(), wave: 0, queue: /** @type {string[]} */ ([]), spawnT: 0, spawned: 0, busy: false,
     last: /** @type {any} */ (null),
+    endless: false,   // 检查页用：打空了也不判胜
   };
   /** 按游戏时间延后执行（慢放、顿帧时一起变慢） */
   const timers = [];
@@ -152,7 +153,7 @@ export function start(root, opts = {}) {
     }
     const left = S.queue.length + enemies.alive;
     hud.setWave(`第 ${S.wave + 1} / ${WAVES.length} 波`, `剩 ${left}`);
-    if (!S.queue.length && !enemies.alive) {
+    if (!S.queue.length && !enemies.alive && !S.endless) {
       if (S.wave + 1 < WAVES.length) { S.phase = 'rest'; after(4, () => { S.phase = 'playing'; startWave(S.wave + 1); }); }
       else { S.phase = 'won'; hud.showOverlay('守住了', `阵眼还剩 ${Math.ceil(S.core)} 点。下一版会有更多波次和 Boss 巨像。`, '再守一次'); }
     }
@@ -276,6 +277,45 @@ export function start(root, opts = {}) {
     }
   }
 
+  // ---------------------------------------------------------------- 压力测试：从广场上空撒物理方块，到时收走
+  // 方块合成一个批次画（一次绘制），这样测到的是物理的负担，不是绘制次数
+  const STRESS_MAX = 400;
+  const stressGeo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+  const stressMat = new THREE.MeshStandardMaterial({ color: 0x9a8f80, roughness: 0.9 });
+  const stressMesh = new THREE.InstancedMesh(stressGeo, stressMat, STRESS_MAX);
+  stressMesh.castShadow = true;
+  stressMesh.frustumCulled = false;
+  stressMesh.count = 0;
+  scene.add(stressMesh);
+  const stressShape = new CANNON.Box(new CANNON.Vec3(0.15, 0.15, 0.15));
+  /** @type {{ body: CANNON.Body, t: number }[]} */
+  const stressList = [];
+  const _m4 = new THREE.Matrix4(), _q4 = new THREE.Quaternion(), _p4 = new THREE.Vector3(), _one = new THREE.Vector3(1, 1, 1);
+  function dropCubes(n, life) {
+    for (let i = 0; i < n && stressList.length < STRESS_MAX; i++) {
+      const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * 8;
+      const body = new CANNON.Body({ mass: 1, shape: stressShape, position: new CANNON.Vec3(Math.cos(a) * r, 3 + Math.random() * 6, Math.sin(a) * r - 2) });
+      body.angularVelocity.set(Math.random() * 4 - 2, Math.random() * 4 - 2, Math.random() * 4 - 2);
+      world.addBody(body);
+      stressList.push({ body, t: life });
+    }
+  }
+  function updateCubes(dt) {
+    if (!stressList.length && !stressMesh.count) return;
+    for (let i = stressList.length - 1; i >= 0; i--) {
+      const c = stressList[i];
+      c.t -= dt;
+      if (c.t <= 0 || c.body.position.y < -20) { world.removeBody(c.body); stressList.splice(i, 1); }
+    }
+    stressList.forEach((c, i) => {
+      const p = c.body.position, q = c.body.quaternion;
+      stressMesh.setMatrixAt(i, _m4.compose(_p4.set(p.x, p.y, p.z), _q4.set(q.x, q.y, q.z, q.w), _one));
+    });
+    stressMesh.count = stressList.length;
+    stressMesh.instanceMatrix.needsUpdate = true;
+  }
+  renderer.info.autoReset = false;   // 后期处理一帧要画好几遍，手动清零才能数出整帧的绘制次数
+
   // ---------------------------------------------------------------- 主循环
   let raf = 0, lastNow = performance.now(), timeScale = 1, fpsAcc = 0, fpsN = 0, fps = 0, dbgT = 0, idleT = 0;
   const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), shakeOff = new THREE.Vector3();
@@ -298,6 +338,7 @@ export function start(root, opts = {}) {
       updateWave(dt);
     }
     world.step(1 / 60, dt, 3);
+    updateCubes(dt);
     enemies.update(dt, camera);
     fx.update(dt);
     const live = particles.update(dt);
@@ -317,6 +358,7 @@ export function start(root, opts = {}) {
     shakeOff.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(fx.shake * 0.5);
     camera.position.copy(camPos).add(shakeOff);
     camera.lookAt(camLook);
+    renderer.info.reset();
     composer.render();
 
     fpsAcc += realDt; fpsN++;
@@ -340,6 +382,12 @@ export function start(root, opts = {}) {
     view: (px, py, pz, tx, ty, tz) => { cam.base.set(px, py, pz); cam.look.set(tx, ty, tz); },
     debug: (on = true) => { hud.debug.hidden = !on; },
     pause: (on = true) => { if (on) cancelAnimationFrame(raf); else { lastNow = performance.now(); frame(); } },
+    // 以下给检查页用
+    refill: () => { S.mana = MANA_MAX; S.core = CORE_HP; hud.setCore(S.core, CORE_HP); },
+    endless: (on = true) => { S.endless = on; },
+    cubes: (n = 300, life = 12) => dropCubes(n, life),
+    gl: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles, ratio: renderer.getPixelRatio(),
+      size: renderer.getDrawingBufferSize(new THREE.Vector2()).toArray(), cubes: stressList.length, mobile }),
   };
   /** @type {any} */ (window).demo = demo;
 
@@ -348,6 +396,8 @@ export function start(root, opts = {}) {
     window.removeEventListener('resize', onResize);
     window.removeEventListener('keydown', onGlobalKey);
     enemies.clear();
+    for (const c of stressList) world.removeBody(c.body);
+    scene.remove(stressMesh); stressMesh.dispose(); stressGeo.dispose(); stressMat.dispose();
     hud.dispose();
     composer.dispose();
     renderer.dispose();
