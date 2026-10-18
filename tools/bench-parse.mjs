@@ -43,17 +43,18 @@ async function once(model, text) {
   const content = data?.choices?.[0]?.message?.content || '';
   let it = null;
   try { it = sanitizeIntent(JSON.parse(content), text); } catch { return { ms, err: '不是 JSON：' + content.slice(0, 80) }; }
-  return { ms, out: data?.usage?.completion_tokens, it };
+  return { ms, out: data?.usage?.completion_tokens, it, real: data?.model };
 }
 
 for (const model of MODELS) {
   console.log(`\n== ${model}`);
   const times = [];
-  let bad = 0;
+  let bad = 0, named = false;
   for (const text of SENTENCES) {
     for (let r = 0; r < REPEAT; r++) {
       const x = await once(model, text).catch((e) => ({ ms: -1, err: String(e) }));
       if (x.err) { bad++; console.log(`  ✗ ${text} | ${x.ms} 毫秒 | ${x.err}`); continue; }
+      if (!named) { named = true; console.log(`  背后的模型：${x.real || '（接口没返回）'}`); }   // 接入点编号看不出是哪家，以返回为准
       times.push(x.ms);
       if (r === 0) {
         const s = x.it.steps.map((p) => `${p.el}/${p.form}/${p.target}${p.count > 1 ? '×' + p.count : ''}${p.path !== 'straight' ? '/' + p.path : ''}`).join(' → ');
