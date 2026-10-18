@@ -24,7 +24,7 @@ import { SpellFx } from './fx/spells.js';
 import { buildEnvironment } from './world/environment.js';
 import { buildLayout, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS } from './world/layout.js';
 import { Hud } from './ui/hud.js';
-import { parseRemote } from './net.js';
+import { parseRemote, warmUp } from './net.js';
 
 /** 中期：一波 6 个小傀儡，石阶和索桥轮流出 */
 const WAVES = [{ list: ['grunt', 'grunt', 'grunt', 'grunt', 'grunt', 'grunt'], interval: 2.4 }];
@@ -179,6 +179,7 @@ export function start(root, opts = {}) {
   window.addEventListener('keydown', onGlobalKey);
   const startBtn = /** @type {HTMLButtonElement} */ (hud.overlay.querySelector('button'));
   startBtn.addEventListener('click', startGame);
+  warmUp(opts.parseUrl);   // 玩家看标题的这几秒，把连接先建好
 
   // ---------------------------------------------------------------- 施法
   /** @param {string} text */

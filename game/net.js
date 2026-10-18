@@ -27,3 +27,14 @@ export async function parseRemote(url, text, timeoutMs) {
     clearTimeout(timer);
   }
 }
+
+/**
+ * 预热：标题画面一出来就发一个极小的请求，先把浏览器到服务器、服务器到模型的连接建好。
+ * 实测每个模型的第一次调用要 4.5～6 秒（建连），之后约 1 秒；不预热的话玩家第一句很可能超时。
+ * 结果不用，失败也不管。
+ * @param {string | undefined} url
+ */
+export function warmUp(url) {
+  if (!url) return;
+  fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ warm: true }) }).catch(() => {});
+}

@@ -43,11 +43,41 @@ async function callModel(text: string, signal: AbortSignal) {
   return raw;
 }
 
+/**
+ * 预热：发一个只要 1 个词元的请求，把到模型服务的连接建好（第一次调用要多花 4～5 秒建连）。
+ * 照样计入限流，免得被拿来白嫖调用。平台若每次请求换一台机器，预热的作用会打折扣，但不会出错。
+ */
+async function warm() {
+  const t0 = Date.now();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const body: Record<string, unknown> = { model: process.env.ARK_MODEL, messages: [{ role: 'user', content: '1' }], max_tokens: 1 };
+    if (process.env.ARK_DISABLE_THINKING !== '0') body.thinking = { type: 'disabled' };
+    const res = await fetch(`${BASE}/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.ARK_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    await res.text();
+    return Response.json({ ok: res.ok, warm: true, ms: Date.now() - t0 });
+  } catch {
+    return fail('warm_failed');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function POST(req: Request) {
   if (!process.env.ARK_API_KEY || !process.env.ARK_MODEL) return fail('no_key');
   let text = '';
   try {
     const body = await req.json();
+    if (body?.warm === true) {
+      const limit = checkLimits(clientIp(req.headers));
+      return limit.ok ? warm() : fail(limit.reason, 429);
+    }
     text = typeof body?.text === 'string' ? body.text.trim() : '';
   } catch {
     return fail('bad_request', 400);
