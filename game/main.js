@@ -27,8 +27,29 @@ import { buildLayout, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS } from './wo
 import { Hud } from './ui/hud.js';
 import { parseRemote, warmUp } from './net.js';
 
-/** 中期：一波 6 个小傀儡，石阶和索桥轮流出 */
-const WAVES = [{ list: ['grunt', 'grunt', 'grunt', 'grunt', 'grunt', 'grunt'], interval: 2.4 }];
+/**
+ * 5 波（设计文档第 4 节）。每波一道题：开场提示就是这一波的解法方向。
+ * 敌人按顺序出场，石阶和索桥轮流走；巨像太宽，只走石阶。
+ */
+const WAVES = [
+  { mix: { grunt: 6 }, interval: 2.2, tip: '小傀儡成群上山——风能把它们吹下悬崖' },
+  { mix: { grunt: 8, shield: 2 }, interval: 2.0, tip: '盾傀儡正面挡八成——试试「从天而降」或「绕到背后」' },
+  { mix: { grunt: 10, shield: 4 }, interval: 1.7, tip: '人多了——一句话说两三步，组合打八折' },
+  { mix: { grunt: 6, shield: 3, colossus: 1 }, interval: 2.0, tip: '巨像来了——先冻住，再用火，蒸汽爆' },
+  { mix: { grunt: 12, shield: 4, colossus: 2 }, interval: 1.5, tip: '最后一波，守住阵眼' },
+];
+const REST_SEC = 15;
+
+/** 把一波的配比排成出场顺序：盾傀儡均匀插在小傀儡中间，巨像压在后半段 */
+function waveQueue(mix) {
+  const q = Array(mix.grunt || 0).fill('grunt');
+  const insert = (type, n, from) => {
+    for (let k = 0; k < n; k++) q.splice(Math.round(from * q.length + ((k + 1) / (n + 1)) * (1 - from) * q.length), 0, type);
+  };
+  insert('shield', mix.shield || 0, 0.2);
+  insert('colossus', mix.colossus || 0, 0.5);
+  return q;
+}
 const DEFAULT_AIM = new THREE.Vector3(0, 0.6, -6);
 /** 解析失败的原因，显示在咒语卡上（方便现场判断是哪一段出了问题） */
 const FAIL_TEXT = {
@@ -117,6 +138,7 @@ export function start(root, opts = {}) {
     said: new Set(), wave: 0, queue: /** @type {string[]} */ ([]), spawnT: 0, spawned: 0, busy: false,
     last: /** @type {any} */ (null),
     endless: false,   // 检查页用：打空了也不判胜
+    restT: 0,         // 波与波之间的休息倒计时（游戏时间）
   };
   /** 按游戏时间延后执行（慢放、顿帧时一起变慢） */
   const timers = [];
@@ -136,8 +158,9 @@ export function start(root, opts = {}) {
 
   function startGame() {
     enemies.clear();
+    timers.length = 0;   // 上一局没跑完的延时（第二步法术、收锁定标记）不能带进新的一局
     Object.assign(S, { phase: 'playing', mana: MANA_MAX, core: CORE_HP, gauge: 0, lastCombo: null, seen: [], said: new Set(),
-      wave: 0, busy: false });
+      wave: 0, busy: false, restT: 0 });
     startWave(0);
     hud.setCore(S.core, CORE_HP);
     hud.hideOverlay();
@@ -146,23 +169,38 @@ export function start(root, opts = {}) {
 
   function startWave(i) {
     S.wave = i;
-    S.queue = [...WAVES[i].list];
+    S.queue = waveQueue(WAVES[i].mix);
     S.spawnT = 1.2; S.spawned = 0;
-    hud.bigText(`第 ${i + 1} 波`, '#16202b', 1200);
+    hud.bigText(`第 ${i + 1} 波`, '#16202b', 1400);
+    hud.setHint(WAVES[i].tip);
   }
 
   function updateWave(dt) {
+    if (S.phase === 'rest') {
+      S.restT -= dt;
+      hud.setWave(`第 ${S.wave + 1} 波已守住`, `下一波 ${Math.ceil(Math.max(0, S.restT))} 秒`);
+      if (S.restT <= 0) { S.phase = 'playing'; startWave(S.wave + 1); }
+      return;
+    }
     if (S.phase !== 'playing') return;
     S.spawnT -= dt;
     if (S.queue.length && S.spawnT <= 0) {
-      enemies.spawn(/** @type {any} */ (S.queue.shift()), S.spawned++ % 2);
-      S.spawnT = WAVES[S.wave].interval;
+      const type = /** @type {any} */ (S.queue.shift());
+      enemies.spawn(type, type === 'colossus' ? 0 : S.spawned % 2);
+      S.spawned++;
+      S.spawnT = WAVES[S.wave].interval * (type === 'colossus' ? 2 : 1);   // 巨像后面多留点空当
     }
     const left = S.queue.length + enemies.alive;
     hud.setWave(`第 ${S.wave + 1} / ${WAVES.length} 波`, `剩 ${left}`);
     if (!S.queue.length && !enemies.alive && !S.endless) {
-      if (S.wave + 1 < WAVES.length) { S.phase = 'rest'; after(4, () => { S.phase = 'playing'; startWave(S.wave + 1); }); }
-      else { S.phase = 'won'; hud.showOverlay('守住了', `阵眼还剩 ${Math.ceil(S.core)} 点。下一版会有更多波次和 Boss 巨像。`, '再守一次'); }
+      if (S.wave + 1 < WAVES.length) {
+        S.phase = 'rest'; S.restT = REST_SEC;
+        hud.bigText('守住了这一波', '#16202b', 1400);
+        hud.setHint(`喘口气，${REST_SEC} 秒后下一波：${WAVES[S.wave + 1].tip}`);
+      } else {
+        S.phase = 'won';
+        hud.showOverlay('护山大阵守住了', `五波傀儡尽数退去，阵眼还剩 ${Math.ceil(S.core)} 点。换个说法，再守一次？`, '再守一次');
+      }
     }
   }
 
@@ -422,6 +460,8 @@ export function start(root, opts = {}) {
     view: (px, py, pz, tx, ty, tz) => { cam.base.set(px, py, pz); cam.look.set(tx, ty, tz); },
     debug: (on = true) => { hud.debug.hidden = !on; },
     pause: (on = true) => { if (on) cancelAnimationFrame(raf); else { lastNow = performance.now(); frame(); } },
+    wave: (i = 0) => { enemies.clear(); S.phase = 'playing'; startWave(i); },
+    killAll: () => { S.queue.length = 0; for (const e of [...enemies.list]) enemies.kill(e, e.pos); },
     locks: () => ({ heads: locks.heads.filter((h) => h.mesh.visible).map((h) => h.id), rings: locks.rings.filter((r) => r.mesh.visible).length }),
     // 以下给检查页用
     refill: () => { S.mana = MANA_MAX; S.core = CORE_HP; hud.setCore(S.core, CORE_HP); },
