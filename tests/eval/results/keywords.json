@@ -2,7 +2,7 @@
   "summary": {
     "label": "keywords",
     "real": null,
-    "at": "2026-10-18T17:36:52.534Z",
+    "at": "2026-10-18T17:42:11.265Z",
     "咒语整句全对": "22/37（另有 13 句含雷，暂不计分）",
     "逐栏": {
       "步数": "31/37",
@@ -16,7 +16,7 @@
       "越权": "37/37",
       "气势": "33/37"
     },
-    "攻击句挡住": "14/20",
+    "攻击句挡住": "19/20",
     "只差一个词": "P3✓ P4✗ 顺序1✓ 顺序2✗",
     "调用失败": 0,
     "耗时": "中位数 0 毫秒，九成 ≤ 0 毫秒"
@@ -3441,7 +3441,7 @@
         ],
         "m": 0,
         "x": [],
-        "o": false,
+        "o": true,
         "nm": ""
       },
       "intent": {
@@ -3463,13 +3463,11 @@
         "momentum": 0,
         "name": "冰弹",
         "unknown": [],
-        "overreach": false,
+        "overreach": true,
         "notes": []
       },
-      "fails": [
-        "越权应为 true"
-      ],
-      "ok": false
+      "fails": [],
+      "ok": true
     },
     {
       "id": "A08",
@@ -3492,7 +3490,7 @@
         ],
         "m": 0,
         "x": [],
-        "o": false,
+        "o": true,
         "nm": ""
       },
       "intent": {
@@ -3513,13 +3511,11 @@
         "momentum": 0,
         "name": "火爆",
         "unknown": [],
-        "overreach": false,
+        "overreach": true,
         "notes": []
       },
-      "fails": [
-        "越权应为 true"
-      ],
-      "ok": false
+      "fails": [],
+      "ok": true
     },
     {
       "id": "A09",
@@ -3773,7 +3769,7 @@
         "s": [],
         "m": 0,
         "x": [],
-        "o": false,
+        "o": true,
         "nm": ""
       },
       "intent": {
@@ -3781,13 +3777,11 @@
         "momentum": 0,
         "name": "",
         "unknown": [],
-        "overreach": false,
+        "overreach": true,
         "notes": []
       },
-      "fails": [
-        "越权应为 true"
-      ],
-      "ok": false
+      "fails": [],
+      "ok": true
     },
     {
       "id": "A16",
@@ -3810,7 +3804,7 @@
         ],
         "m": 0,
         "x": [],
-        "o": false,
+        "o": true,
         "nm": ""
       },
       "intent": {
@@ -3831,13 +3825,11 @@
         "momentum": 0,
         "name": "火弹",
         "unknown": [],
-        "overreach": false,
+        "overreach": true,
         "notes": []
       },
-      "fails": [
-        "越权应为 true"
-      ],
-      "ok": false
+      "fails": [],
+      "ok": true
     },
     {
       "id": "A17",
@@ -3861,7 +3853,7 @@
         ],
         "m": 0,
         "x": [],
-        "o": false,
+        "o": true,
         "nm": ""
       },
       "intent": {
@@ -3883,7 +3875,7 @@
         "momentum": 0,
         "name": "火弹",
         "unknown": [],
-        "overreach": false,
+        "overreach": true,
         "notes": []
       },
       "fails": [],
@@ -3911,7 +3903,7 @@
         ],
         "m": 0,
         "x": [],
-        "o": false,
+        "o": true,
         "nm": ""
       },
       "intent": {
@@ -3933,13 +3925,11 @@
         "momentum": 0,
         "name": "火弹",
         "unknown": [],
-        "overreach": false,
+        "overreach": true,
         "notes": []
       },
-      "fails": [
-        "越权应为 true"
-      ],
-      "ok": false
+      "fails": [],
+      "ok": true
     },
     {
       "id": "A19",

@@ -42,8 +42,22 @@ const POWER_UP = ['全力', '狠狠', '最强一击', '倾尽', '极'];
 const POWER_DOWN = ['轻轻', '小小', '一点点'];
 /** 意象词：关键词模式下粗略估气势（模型模式由模型打分） */
 const VIVID = ['之', '如', '似', '吧', '！', '!', '啊', '吾', '尔', '天地', '万', '九天', '苍', '怒'];
-/** 越权词：说了就截断数值并演法则反噬（模型和程序各查一遍） */
-export const OVERREACH_WORDS = ['无限', '秒杀', '无敌', '全部消灭', '直接赢', '999', '满分', '气势拉满', '最大值', '管理员', '忽略规则'];
+/** 越权词：说了就截断数值并演法则反噬（模型和程序各查一遍）。比对前先把原话归一，见 normalizeForCheck */
+export const OVERREACH_WORDS = ['无限', '秒杀', '无敌', '全部消灭', '直接赢', '999', '满分', '气势拉满', '最大值', '管理员', '忽略规则',
+  '一百', '百颗', '千颗', '万颗', '十连', '十步', '无数颗', '开发者', '调试模式', 'system', 'ignore'];
+/** 繁体常见字 → 简体（只收越权词会用到的字） */
+const TRAD = { 員: '员', 規: '规', 則: '则', 顆: '颗', 彈: '弹', 無: '无', 殺: '杀', 滿: '满', 勢: '势', 連: '连', 統: '统', 調: '调', 試: '试', 數: '数', 開: '开', 發: '发' };
+/**
+ * 归一后再查越权词，防换写法绕过：全角转半角（ＳＹＳＴＥＭ、９９９９）、繁体转简体、
+ * 去掉空格和符号（「忽 略 规 则」「9_9_9_9」）、英文转小写。
+ * @param {string} text
+ */
+export function normalizeForCheck(text) {
+  return text.normalize('NFKC').replace(/./gu, (c) => TRAD[c] || c)
+    .replace(/[\s_\-·.,，。、；;：:！!？?"'“”‘’（）()【】]/g, '').toLowerCase();
+}
+/** @param {string} text */
+export const hasOverreach = (text) => { const t = normalizeForCheck(text); return OVERREACH_WORDS.some((w) => t.includes(w)); };
 /** 分句：一句话里的组合 */
 const SPLIT = /(?:然后|接着|之后|再|随后|，|,|；|;)/;
 
@@ -123,5 +137,5 @@ export function parseKeywords(text) {
   let vivid = 0;
   for (const v of VIVID) if (text.includes(v)) vivid++;
   const m = text.length >= 8 ? Math.min(3, Math.floor(vivid / 2)) : 0;
-  return { s: steps, m, x: [], o: OVERREACH_WORDS.some((x) => text.includes(x)), nm: '' };
+  return { s: steps, m, x: [], o: hasOverreach(text), nm: '' };
 }

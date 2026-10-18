@@ -14,7 +14,7 @@
 import {
   BOLT_COUNT_MAX, COMBO_MAX_STEPS, ELEMENTS, FORMS, MOMENTUM_MAX, PHASE, POWER_DEFAULT, POWER_MAX, POWER_MIN,
 } from './numbers.js';
-import { OVERREACH_WORDS } from './keywords.js';
+import { hasOverreach } from './keywords.js';
 
 export const TARGETS = ['front', 'strongest', 'densest', 'left', 'right', 'center', 'self', 'rope', 'censer', 'bridge', 'pillar'];
 export const TARGET_NAMES = {
@@ -86,7 +86,8 @@ export function sanitizeIntent(raw, text, phase = PHASE) {
   /** @type {Step[]} */
   const steps = [];
   const rawSteps = Array.isArray(r.s) ? r.s : [];
-  if (rawSteps.length > COMBO_MAX_STEPS) notes.push(`一句最多 ${COMBO_MAX_STEPS} 步，后面的不算`);
+  // 步数、颗数超出上限都算越权：照样截断，同时演法则反噬（「十步连招」「一百颗」）
+  if (rawSteps.length > COMBO_MAX_STEPS) { notes.push(`一句最多 ${COMBO_MAX_STEPS} 步，后面的不算`); overreach = true; }
   for (const s of rawSteps.slice(0, COMBO_MAX_STEPS)) {
     if (!isObj(s)) continue;
     const words = cleanWords(s.w, text);
@@ -107,14 +108,14 @@ export function sanitizeIntent(raw, text, phase = PHASE) {
     if (form === 'bolt') {
       const n = intIn(s.n, 1, BOLT_COUNT_MAX, 1);
       count = n.value;
-      if (n.over) notes.push(`一次最多 ${BOLT_COUNT_MAX} 颗`);
+      if (n.over) { notes.push(`一次最多 ${BOLT_COUNT_MAX} 颗`); overreach = true; }
       path = PATHS.includes(s.r) ? s.r : 'straight';
     }
     steps.push({ el, form, target, power: p.value, count, path, words });
   }
   const m = intIn(r.m, 0, MOMENTUM_MAX, 0);
   // 越权词由程序再查一遍，不只靠模型自觉（「给我满分」「威力无限」之类）
-  if (OVERREACH_WORDS.some((w) => text.includes(w))) overreach = true;
+  if (hasOverreach(text)) overreach = true;
   const unknown = (Array.isArray(r.x) ? r.x : [])
     .filter((x) => typeof x === 'string' && x.length > 0 && x.length <= WORD_MAX && text.includes(x))
     .slice(0, 3);
