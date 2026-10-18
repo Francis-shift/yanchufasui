@@ -19,6 +19,7 @@ import {
   CHANT_MIN_MS, CORE_HP, FORMS, INPUT_MAX_CHARS, MANA_MAX, PARSE_TIMEOUT_MS, SLOWMO_MAX_SEC, SLOWMO_SCALE,
 } from './rules/numbers.js';
 import { Enemies } from './actors/enemies.js';
+import { Locks } from './fx/locks.js';
 import { Particles } from './fx/particles.js';
 import { SpellFx } from './fx/spells.js';
 import { buildEnvironment } from './world/environment.js';
@@ -64,6 +65,7 @@ export function start(root, opts = {}) {
   particles.floorAt = (x, z) => (groundHeightAt(x, z) ?? -60) + 0.03;
   const origin = CASTER_POS.clone().setY(1.5);
   const fx = new SpellFx(scene, particles, origin);
+  const locks = new Locks(scene);
 
   const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -18, 0) });
   const plaza = new CANNON.Body({ type: CANNON.Body.STATIC, shape: new CANNON.Cylinder(11, 11, 1, 24), position: new CANNON.Vec3(0, -0.5, 0) });
@@ -182,6 +184,27 @@ export function start(root, opts = {}) {
   warmUp(opts.parseUrl);   // 玩家看标题的这几秒，把连接先建好
 
   // ---------------------------------------------------------------- 施法
+  const groundPt = (pt) => new THREE.Vector3(pt.x, (groundHeightAt(pt.x, pt.z) ?? 0) + 0.4, pt.z);
+  let castSeq = 0;
+
+  /**
+   * 每一步打谁，在放出之前就定下来：锁定标记亮的就是之后真正打的。
+   * @param {{ el: string, form: string, target: string, count: number }[]} steps
+   */
+  function lockSteps(steps) {
+    const views = enemies.views();
+    const resolved = steps.map((s) => resolveTarget(s.target, views, { count: s.count, caster: CASTER_POS, objects: OBJECTS }));
+    const marks = steps.map((s, i) => {
+      const res = resolved[i];
+      const heads = s.form === 'bolt' ? res.ids.slice(0, s.count) : [];
+      const ring = !heads.length && res.point
+        ? { x: res.point.x, y: groundHeightAt(res.point.x, res.point.z) ?? 0, z: res.point.z, r: s.form === 'bolt' ? 0.8 : FORMS.burst.radius }
+        : null;
+      return { el: s.el, ids: heads, ring };
+    });
+    return { resolved, marks };
+  }
+
   /** @param {string} text */
   async function submit(text) {
     text = [...text.trim()].slice(0, INPUT_MAX_CHARS).join('');
@@ -189,8 +212,10 @@ export function start(root, opts = {}) {
     S.busy = true;
     slowSince = 0; slowSpent = false;
     const t0 = performance.now();
+    const castId = ++castSeq;
     fx.beginChant(guessElement(text) || 'arcane');          // 回车 0.1 秒内先给反应
     const kwRaw = parseKeywords(text);
+    locks.show(castId, lockSteps(sanitizeIntent(kwRaw, text).steps).marks);   // 先按关键词亮锁定，模型回来再更正
     const remoteP = parseRemote(opts.parseUrl, text, PARSE_TIMEOUT_MS);
     await new Promise((r) => setTimeout(r, CHANT_MIN_MS));
     const remote = await remoteP;
@@ -206,7 +231,7 @@ export function start(root, opts = {}) {
       const k = sanitizeIntent(kwRaw, text);
       if (k.steps.length) { intent = { ...k, unknown: intent.unknown, overreach: intent.overreach || k.overreach }; source += '＋关键词'; }
     }
-    if (S.phase !== 'playing') { fx.endChant(); S.busy = false; return; }
+    if (S.phase !== 'playing') { fx.endChant(); locks.clear(castId); S.busy = false; return; }
     if (intent.steps[0]) fx.retint(intent.steps[0].el);
     const plan = planCast(intent, { mana: S.mana, lastCombo: S.lastCombo, seen: S.seen, said: S.said, text });
     S.mana -= plan.cost;
@@ -220,21 +245,26 @@ export function start(root, opts = {}) {
     if (plan.backlash) { fx.backlash(); hud.bigText('天道不允', '#b3261e', 1300); }
     fx.endChant();
     if (!plan.ok) {
+      locks.clear(castId);
       if (!plan.backlash) hud.bigText(intent.steps.length ? '法力不足' : '未能成咒', '#5d6b7a', 1000);
       S.busy = false;
       return;
     }
+    const { resolved, marks } = lockSteps(plan.steps);
+    locks.show(castId, marks);
     fx.launchBurst(plan.steps[0].el);
-    plan.steps.forEach((step, i) => after(i * 0.45, () => runStep(step)));
+    plan.steps.forEach((step, i) => after(i * 0.45, () => runStep(step, resolved[i])));
+    after((plan.steps.length - 1) * 0.45 + 1.2, () => locks.clear(castId));
     if (plan.momentum >= 3) hud.bigText('气势如虹', '#16202b', 900);
     S.busy = false;
   }
 
-  /** @param {import('./rules/arbiter.js').PlannedStep} step */
-  function runStep(step) {
+  /**
+   * @param {import('./rules/arbiter.js').PlannedStep} step
+   * @param {{ ids: string[], point: { x: number, z: number } | null }} res 施法时就定好的目标（与锁定标记一致）
+   */
+  function runStep(step, res) {
     if (S.phase !== 'playing') return;
-    const res = resolveTarget(step.target, enemies.views(), { count: step.count, caster: CASTER_POS, objects: OBJECTS });
-    const groundPt = (pt) => new THREE.Vector3(pt.x, (groundHeightAt(pt.x, pt.z) ?? 0) + 0.4, pt.z);
     const dir = { fromAbove: step.path === 'sky', fromBehind: step.path === 'behind' };
     if (step.form === 'bolt') {
       for (let i = 0; i < step.count; i++) {
@@ -342,6 +372,7 @@ export function start(root, opts = {}) {
     updateCubes(dt);
     enemies.update(dt, camera);
     fx.update(dt);
+    locks.update(dt, enemies);
     const live = particles.update(dt);
     env.clouds.uniforms.uTime.value += dt;
     layout.coreSigil.rotation.z += dt * 0.2;
@@ -383,6 +414,7 @@ export function start(root, opts = {}) {
     view: (px, py, pz, tx, ty, tz) => { cam.base.set(px, py, pz); cam.look.set(tx, ty, tz); },
     debug: (on = true) => { hud.debug.hidden = !on; },
     pause: (on = true) => { if (on) cancelAnimationFrame(raf); else { lastNow = performance.now(); frame(); } },
+    locks: () => ({ heads: locks.heads.filter((h) => h.mesh.visible).map((h) => h.id), rings: locks.rings.filter((r) => r.mesh.visible).length }),
     // 以下给检查页用
     refill: () => { S.mana = MANA_MAX; S.core = CORE_HP; hud.setCore(S.core, CORE_HP); },
     endless: (on = true) => { S.endless = on; },
@@ -399,6 +431,7 @@ export function start(root, opts = {}) {
     enemies.clear();
     for (const c of stressList) world.removeBody(c.body);
     scene.remove(stressMesh); stressMesh.dispose(); stressGeo.dispose(); stressMat.dispose();
+    locks.dispose();
     hud.dispose();
     composer.dispose();
     renderer.dispose();
