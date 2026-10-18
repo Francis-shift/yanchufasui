@@ -70,6 +70,7 @@ export class Enemies {
     if (type === 'shield') part(this.geo.shield, 0, 0.8, 0.42);
     const scale = type === 'colossus' ? 2.2 : type === 'shield' ? 1.15 : 0.9;
     g.scale.setScalar(scale);
+    g.rotation.order = 'YXZ';   // 先转向、再前倾、再左右晃
     const bar = new THREE.Group();
     const bg = new THREE.Mesh(this.geo.bar, this.barBg);
     const fillMat = new THREE.MeshBasicMaterial({ color: 0xe0453a, depthTest: false });
@@ -83,7 +84,7 @@ export class Enemies {
     const e = {
       id: `e${++seq}`, type, spec, hp: spec.hp, maxHp: spec.hp, group: g, mat, bar, fill, fillMat, scale,
       path: info, s: 0, lateral: rand(-0.7, 0.7), mode: 'walk', pos: new THREE.Vector3(), vel: new THREE.Vector3(),
-      dir: new THREE.Vector3(0, 0, 1), frozen: 0, burn: 0, hop: rand(0, Math.PI * 2), lastHitEl: '',
+      dir: new THREE.Vector3(0, 0, 1), frozen: 0, burn: 0, hop: rand(0, Math.PI * 2), lastHitEl: '', squash: 0,
     };
     pointAt(info, 0, e.pos, e.dir);
     this.list.push(e);
@@ -134,6 +135,17 @@ export class Enemies {
     this.hooks.floatText(this.aimPoint(e).setY(e.pos.y + 1.7 * e.scale),
       (r.reaction ? r.reaction + ' ' : '') + Math.round(r.dmg), r.reaction ? '#ffe27a' : '#ffffff');
     if (e.hp <= 0) this.kill(e, from);
+  }
+
+  /** 一跳落地：压扁一下，脚边扬一点尘 */
+  land(e) {
+    e.squash = 1;
+    const k = e.scale;
+    for (let i = 0; i < 3; i++) {
+      this.particles.emit(e.pos.x + rand(-0.25, 0.25) * k, e.pos.y + 0.05, e.pos.z + rand(-0.25, 0.25) * k,
+        rand(-0.6, 0.6), rand(0.2, 0.6), rand(-0.6, 0.6), rand(0.4, 0.7), rand(0.12, 0.2) * k,
+        [0.85, 0.8, 0.72], [0.6, 0.56, 0.5], { alpha: 0.3, drag: 2 });
+    }
   }
 
   kill(e, from) {
@@ -198,7 +210,11 @@ export class Enemies {
         const fadeLat = Math.min(1, (e.path.total - e.s) / 3);         // 快到阵眼时收拢到中线
         e.pos.addScaledVector(side, e.lateral * fadeLat);
         e.pos.y = groundHeightAt(e.pos.x, e.pos.z) ?? e.pos.y;
-        if (!e.frozen) e.hop += dt * e.spec.speed * 4.2;
+        if (!e.frozen) {
+          const before = Math.floor(e.hop / Math.PI);
+          e.hop += dt * e.spec.speed * 4.2;
+          if (Math.floor(e.hop / Math.PI) !== before) this.land(e);   // 正弦过零 = 一跳落地
+        }
       } else if (e.mode === 'slide') {
         e.pos.addScaledVector(e.vel, dt);
         e.vel.x *= Math.exp(-3.2 * dt); e.vel.z *= Math.exp(-3.2 * dt);
@@ -227,9 +243,19 @@ export class Enemies {
           continue;
         }
       }
-      const hopY = e.mode === 'walk' && !e.frozen ? Math.abs(Math.sin(e.hop)) * 0.22 : 0;
+      // 程序动画（不用骨骼，傀儡本来就僵）：一跳一跳，空中拉长、落地压扁，前倾，每步左右晃
+      const walking = e.mode === 'walk' && !e.frozen;
+      const air = walking ? Math.abs(Math.sin(e.hop)) : 0;
+      const hopY = air * 0.22;
+      e.squash = Math.max(0, e.squash - dt / 0.14);
+      const sq = e.squash * e.squash;
+      const sy = 1 + 0.07 * air - 0.2 * sq, sxz = 1 + 0.12 * sq - 0.03 * air;
+      e.group.scale.set(e.scale * sxz, e.scale * sy, e.scale * sxz);
       e.group.position.set(e.pos.x, e.pos.y + hopY, e.pos.z);
-      if (e.mode === 'walk') e.group.rotation.set(0, Math.atan2(e.dir.x, e.dir.z), 0);
+      if (e.mode === 'walk') {
+        const sway = walking ? Math.sin(e.hop * 0.5) * 0.09 : 0;          // 左一步右一步
+        e.group.rotation.set(walking ? 0.1 + 0.06 * air : 0, Math.atan2(e.dir.x, e.dir.z), sway);
+      }
       // 血条：受过伤才显示，始终朝向镜头
       e.bar.visible = e.hp < e.maxHp;
       if (e.bar.visible) {
