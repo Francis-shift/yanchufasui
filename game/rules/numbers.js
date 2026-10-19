@@ -60,7 +60,7 @@ export const ULT_GAUGE = 8;
 export const INPUT_MAX_CHARS = 60;    // 一句最多 60 字（防刷）
 export const SLOWMO_SCALE = 0.3;      // 开口就慢放到 0.3 倍
 export const SLOWMO_MAX_SEC = 8;      // 单次最多 8 秒（现实时间）
-export const PARSE_TIMEOUT_MS = 3500; // 超时就按关键词结果放
+export const PARSE_TIMEOUT_MS = 4500; // 超时就按关键词结果放（10-19 由 3.5 秒放宽：线上服务器到模型要 1～2.6 秒，常超时）
 export const CHANT_MIN_MS = 800;      // 咏唱最短 0.8 秒
 
 /** 敌人 */

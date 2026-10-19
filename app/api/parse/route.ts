@@ -11,7 +11,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const BASE = process.env.ARK_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3';
-const TIMEOUT_MS = Number(process.env.PARSE_SERVER_TIMEOUT_MS || 3000);
+// 比前端的 4.5 秒短一截，留出手机到服务器路上的时间；部署节点在境外，调北京的模型要 1～2.6 秒（10-19 实测）
+const TIMEOUT_MS = Number(process.env.PARSE_SERVER_TIMEOUT_MS || 4000);
 const RAW_MAX = 2000;
 
 function fail(reason: string, status = 200, ms?: number) {
@@ -67,6 +68,42 @@ async function warm() {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * GET /api/parse?diag=1：诊断线上慢在哪。同一次请求里连着调两次只要 1 个词元的模型请求：
+ * 第一次要新建连接，第二次能复用连接；两次差得多，说明慢在建连（平台每次换机器就每次都要建）。
+ * 另外查一下函数实际跑在哪个地区（出口 IP 的归属地）。照样计入限流。
+ */
+export async function GET(req: Request) {
+  if (new URL(req.url).searchParams.get('diag') !== '1') return fail('bad_request', 400);
+  if (!process.env.ARK_API_KEY || !process.env.ARK_MODEL) return fail('no_key');
+  const limit = checkLimits(clientIp(req.headers));
+  if (!limit.ok) return fail(limit.reason, 429);
+  const tiny = async () => {
+    const t0 = Date.now();
+    const body: Record<string, unknown> = { model: process.env.ARK_MODEL, messages: [{ role: 'user', content: '1' }], max_tokens: 1 };
+    if (process.env.ARK_DISABLE_THINKING !== '0') body.thinking = { type: 'disabled' };
+    try {
+      const res = await fetch(`${BASE}/chat/completions`, {
+        method: 'POST', headers: { Authorization: `Bearer ${process.env.ARK_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body), signal: AbortSignal.timeout(8000),
+      });
+      await res.text();
+      return { status: res.status, ms: Date.now() - t0 };
+    } catch (e) {
+      return { status: 0, ms: Date.now() - t0, err: String(e).slice(0, 80) };
+    }
+  };
+  const first = await tiny();
+  const second = await tiny();
+  let where: unknown = null;
+  try {
+    const r = await fetch('https://ipinfo.io/json', { signal: AbortSignal.timeout(3000) });
+    const j = await r.json();
+    where = { city: j.city, region: j.region, country: j.country, org: j.org };
+  } catch { /* 查不到就算了 */ }
+  return Response.json({ ok: true, first, second, where });
 }
 
 export async function POST(req: Request) {
