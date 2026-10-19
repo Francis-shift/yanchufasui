@@ -460,6 +460,7 @@ export function start(root, opts = {}) {
     view: (px, py, pz, tx, ty, tz) => { cam.base.set(px, py, pz); cam.look.set(tx, ty, tz); },
     debug: (on = true) => { hud.debug.hidden = !on; },
     pause: (on = true) => { if (on) cancelAnimationFrame(raf); else { lastNow = performance.now(); frame(); } },
+    block: (list = []) => enemies.setObstacles(list),
     wave: (i = 0) => { enemies.clear(); S.phase = 'playing'; startWave(i); },
     killAll: () => { S.queue.length = 0; for (const e of [...enemies.list]) enemies.kill(e, e.pos); },
     locks: () => ({ heads: locks.heads.filter((h) => h.mesh.visible).map((h) => h.id), rings: locks.rings.filter((r) => r.mesh.visible).length }),

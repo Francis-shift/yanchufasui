@@ -7,16 +7,32 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { ELEMENTS, ENEMIES } from '../rules/numbers.js';
-import { CASTER_POS, CORE_POS, groundHeightAt, PATHS } from '../world/layout.js';
+import { CASTER_POS, CORE_POS, groundHeightAt, PATHS, PLAZA_R } from '../world/layout.js';
+import { FlowField } from '../world/flowfield.js';
 import { col, PALETTE, rand } from '../fx/common.js';
 
 const CORE_FRONT = new THREE.Vector3(CORE_POS.x, 0, CORE_POS.z - 2.2);
+/** 走进阵眼这么近就算撞上阵眼 */
+const CORE_REACH = 2.6;
+/** 广场上的固定障碍：华表、香炉、牌坊两根柱子、施法者本人 */
+const STATIC_OBSTACLES = [
+  { x: -4.4, z: -9.4, r: 0.45 }, { x: 4.4, z: -9.4, r: 0.45 },
+  { x: -7.2, z: 1.5, r: 0.7 }, { x: 7.2, z: 1.5, r: 0.7 },
+  { x: -3, z: -10.8, r: 0.5 }, { x: 3, z: -10.8, r: 0.5 },
+  { x: CASTER_POS.x, z: CASTER_POS.z, r: 0.5 },
+];
 
-/** 路径长度表，便于按走过的距离取位置 */
+/** 路径长度表，便于按走过的距离取位置；entry 是走到哪里算上了广场（之后改跟流场走） */
 function pathInfo(pts) {
   const lens = [0];
   for (let i = 1; i < pts.length; i++) lens.push(lens[i - 1] + pts[i].distanceTo(pts[i - 1]));
-  return { pts, lens, total: lens[lens.length - 1] };
+  const info = { pts, lens, total: lens[lens.length - 1], entry: Infinity };
+  const p = new THREE.Vector3(), d = new THREE.Vector3();
+  for (let s = 0; s <= info.total; s += 0.25) {
+    pointAt(info, s, p, d);
+    if (p.x * p.x + p.z * p.z < (PLAZA_R - 1.2) ** 2) { info.entry = s; break; }
+  }
+  return info;
 }
 function pointAt(info, s, out, dirOut) {
   const { pts, lens } = info;
@@ -46,6 +62,9 @@ export class Enemies {
     /** @type {{ mesh: THREE.Mesh, mat: THREE.Material, body: CANNON.Body, t: number }[]} */
     this.debris = [];
     this.paths = PATHS.map(pathInfo);
+    /** 广场上的寻路：石阶、索桥仍是仅有的两个入口，上了广场就跟着流场走 */
+    this.field = new FlowField({ radius: PLAZA_R - 0.4, goal: { x: CORE_POS.x, z: CORE_POS.z, r: CORE_REACH - 0.2 } });
+    this.field.setObstacles(STATIC_OBSTACLES);
     this.geo = {
       torso: new THREE.BoxGeometry(0.62, 0.7, 0.4), head: new THREE.BoxGeometry(0.42, 0.42, 0.42),
       arm: new THREE.BoxGeometry(0.16, 0.6, 0.16), leg: new THREE.BoxGeometry(0.18, 0.42, 0.18),
@@ -93,11 +112,18 @@ export class Enemies {
 
   get alive() { return this.list.length; }
 
+  /**
+   * 场景里多出（或撤掉）挡路的东西时调用：土墙立起、华表倒地……流场重算，敌人马上改道。
+   * @param {{ x: number, z: number, r: number }[]} list 固定障碍之外的临时障碍
+   */
+  setObstacles(list) { this.field.setObstacles([...STATIC_OBSTACLES, ...list]); }
+
   /** 给裁决器看的样子：位置、血量、离阵眼多远 */
   views() {
     return this.list.map((e) => ({
       id: e.id, x: e.pos.x, z: e.pos.z, hp: e.hp,
-      distToCore: e.mode === 'walk' ? e.path.total - e.s : e.pos.distanceTo(CORE_FRONT),
+      distToCore: e.mode === 'walk' ? e.path.total - e.s
+        : e.mode === 'field' ? (this.field.distAt(e.pos.x, e.pos.z) ?? e.pos.distanceTo(CORE_POS)) : e.pos.distanceTo(CORE_FRONT),
     }));
   }
 
@@ -135,6 +161,27 @@ export class Enemies {
     this.hooks.floatText(this.aimPoint(e).setY(e.pos.y + 1.7 * e.scale),
       (r.reaction ? r.reaction + ' ' : '') + Math.round(r.dmg), r.reaction ? '#ffe27a' : '#ffffff');
     if (e.hp <= 0) this.kill(e, from);
+  }
+
+  /**
+   * 广场上的一步：朝流场指的方向走，同时和身边的同伴互相挤开一点（不然同一条路上的会叠成一个）。
+   * 方向做平滑，免得格子边上来回抖。
+   */
+  steer(e, dt) {
+    const f = this.field.dirAt(e.pos.x, e.pos.z);
+    const want = this._p.set(f ? f.x : CORE_POS.x - e.pos.x, 0, f ? f.z : CORE_POS.z - e.pos.z).normalize();
+    const k = 1 - Math.exp(-8 * dt);
+    e.dir.lerp(want, k).setY(0).normalize();
+    let sx = 0, sz = 0;
+    for (const o of this.list) {
+      if (o === e || o.mode !== 'field') continue;
+      const dx = e.pos.x - o.pos.x, dz = e.pos.z - o.pos.z, d2 = dx * dx + dz * dz;
+      const minD = 0.45 * (e.scale + o.scale);
+      if (d2 > 1e-6 && d2 < minD * minD) { const d = Math.sqrt(d2); sx += (dx / d) * (minD - d); sz += (dz / d) * (minD - d); }
+    }
+    const v = e.spec.speed;
+    e.pos.x += (e.dir.x * v + sx * 3) * dt;
+    e.pos.z += (e.dir.z * v + sz * 3) * dt;
   }
 
   /** 一跳落地：压扁一下，脚边扬一点尘 */
@@ -210,10 +257,12 @@ export class Enemies {
         const fadeLat = Math.min(1, (e.path.total - e.s) / 3);         // 快到阵眼时收拢到中线
         e.pos.addScaledVector(side, e.lateral * fadeLat);
         e.pos.y = groundHeightAt(e.pos.x, e.pos.z) ?? e.pos.y;
-        if (!e.frozen) {
-          const before = Math.floor(e.hop / Math.PI);
-          e.hop += dt * e.spec.speed * 4.2;
-          if (Math.floor(e.hop / Math.PI) !== before) this.land(e);   // 正弦过零 = 一跳落地
+        if (e.s >= e.path.entry) e.mode = 'field';   // 上了广场：改跟流场走，会绕障碍
+      } else if (e.mode === 'field') {
+        if (!e.frozen) this.steer(e, dt);
+        e.pos.y = groundHeightAt(e.pos.x, e.pos.z) ?? 0;
+        if (Math.hypot(e.pos.x - CORE_POS.x, e.pos.z - CORE_POS.z) <= CORE_REACH) {
+          this.hooks.onCoreHit(e.spec.coreDmg); this.remove(e, 'core'); continue;
         }
       } else if (e.mode === 'slide') {
         e.pos.addScaledVector(e.vel, dt);
@@ -224,9 +273,9 @@ export class Enemies {
           e.vel.y -= 22 * dt;
           if (e.pos.y <= h) { e.pos.y = h; e.vel.y = 0; }
           if (Math.hypot(e.vel.x, e.vel.z) < 0.4 && e.pos.y <= h + 0.01) {
-            // 站稳后直接朝阵眼走
-            e.path = pathInfo([e.pos.clone(), CORE_FRONT.clone()]);
-            e.s = 0; e.mode = 'walk'; e.lateral = 0;
+            // 站稳后接着走：在广场上就跟流场；被吹回石阶或索桥上，就沿直线回到广场再说
+            if (this.field.distAt(e.pos.x, e.pos.z) !== null) e.mode = 'field';
+            else { e.path = pathInfo([e.pos.clone(), CORE_FRONT.clone()]); e.s = 0; e.mode = 'walk'; e.lateral = 0; }
           }
         }
       } else if (e.mode === 'fall') {
@@ -244,7 +293,12 @@ export class Enemies {
         }
       }
       // 程序动画（不用骨骼，傀儡本来就僵）：一跳一跳，空中拉长、落地压扁，前倾，每步左右晃
-      const walking = e.mode === 'walk' && !e.frozen;
+      const walking = (e.mode === 'walk' || e.mode === 'field') && !e.frozen;
+      if (walking) {
+        const before = Math.floor(e.hop / Math.PI);
+        e.hop += dt * e.spec.speed * 4.2;
+        if (Math.floor(e.hop / Math.PI) !== before) this.land(e);   // 正弦过零 = 一跳落地
+      }
       const air = walking ? Math.abs(Math.sin(e.hop)) : 0;
       const hopY = air * 0.22;
       e.squash = Math.max(0, e.squash - dt / 0.14);
@@ -252,7 +306,7 @@ export class Enemies {
       const sy = 1 + 0.07 * air - 0.2 * sq, sxz = 1 + 0.12 * sq - 0.03 * air;
       e.group.scale.set(e.scale * sxz, e.scale * sy, e.scale * sxz);
       e.group.position.set(e.pos.x, e.pos.y + hopY, e.pos.z);
-      if (e.mode === 'walk') {
+      if (e.mode === 'walk' || e.mode === 'field') {
         const sway = walking ? Math.sin(e.hop * 0.5) * 0.09 : 0;          // 左一步右一步
         e.group.rotation.set(walking ? 0.1 + 0.06 * air : 0, Math.atan2(e.dir.x, e.dir.z), sway);
       }
