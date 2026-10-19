@@ -15,6 +15,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { damageTo, planCast, regenMana, resolveTarget } from './rules/arbiter.js';
 import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
+import { maskText } from './rules/safety.js';
 import {
   BEAM, CHANT_MIN_MS, CORE_HP, FORMS, INPUT_MAX_CHARS, MANA_MAX, PARSE_TIMEOUT_MS, RAIN, SLOWMO_MAX_SEC, SLOWMO_SCALE, TORNADO, WALL,
 } from './rules/numbers.js';
@@ -26,7 +27,7 @@ import { Particles } from './fx/particles.js';
 import { SpellFx } from './fx/spells.js';
 import { buildEnvironment } from './world/environment.js';
 import { buildLayout, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS } from './world/layout.js';
-import { Hud } from './ui/hud.js';
+import { Hud, preloadFonts } from './ui/hud.js';
 import { parseRemote, warmUp } from './net.js';
 
 /**
@@ -102,6 +103,7 @@ export function start(root, opts = {}) {
   const walls = new Walls(scene, world, particles);
   const fusions = new FusionFx(fx, particles);
   const hud = new Hud(root);
+  preloadFonts();   // 标题画面期间先下书法字的常用那份
   const _v = new THREE.Vector3();
   const enemies = new Enemies(scene, world, particles, {
     onCoreHit: (dmg) => hitCore(dmg),
@@ -161,6 +163,7 @@ export function start(root, opts = {}) {
   }
 
   function startGame() {
+    preloadFonts(true);   // 开局后把其余一级字也下好，免得冷门字第一次出现时先闪成别的字体
     enemies.clear();
     if (walls.clear()) enemies.setObstacles([]);
     fusions.clear();
@@ -259,6 +262,7 @@ export function start(root, opts = {}) {
   async function submit(text) {
     text = [...text.trim()].slice(0, INPUT_MAX_CHARS).join('');
     if (!text || S.busy || S.phase !== 'playing') return;
+    text = maskText(text).text;   // 敏感词换成＊：咒语卡上看不到，模型也收不到，其余照常施法
     S.busy = true;
     slowSince = 0; slowSpent = false;
     const t0 = performance.now();

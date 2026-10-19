@@ -6,6 +6,7 @@
 import { checkLimits, clientIp } from '../../../server/limits';
 import { SYSTEM_PROMPT, userMessage } from '../../../server/prompt';
 import { INPUT_MAX_CHARS } from '../../../game/rules/numbers.js';
+import { maskText } from '../../../game/rules/safety.js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -121,6 +122,7 @@ export async function POST(req: Request) {
   }
   if (!text) return fail('empty', 400);
   if ([...text].length > INPUT_MAX_CHARS) return fail('too_long', 413);
+  text = maskText(text).text;   // 游戏页已经盖过一次敏感词；直接调接口的也要盖，模型收不到就编不进名字
   const limit = checkLimits(clientIp(req.headers));
   if (!limit.ok) return fail(limit.reason, 429);
 

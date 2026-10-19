@@ -6,7 +6,26 @@
 import { ELEMENTS, FORMS, INPUT_MAX_CHARS } from '../rules/numbers.js';
 import { PATH_NAMES, TARGET_NAMES } from '../rules/intent.js';
 
-const CSS = `
+/**
+ * 书法字体：按字表裁成两份（tools/subset_font.py）。core 开局就下载；rest 是其余一级字，
+ * 浏览器遇到 core 里没有的字才去下，开局后空闲时也会预先下好（见 preloadFonts）。
+ * 两份都没下好或下载失败时，退回系统自带的行楷、楷体。
+ */
+const BRUSH = '"YC Brush", "YC Brush Rest", "STXingkai", "STKaiti", "KaiTi", "Kaiti SC", serif';
+const FONT_CSS = `
+@font-face { font-family: "YC Brush"; src: url("/fonts/brush-core.woff") format("woff"); font-display: swap; }
+@font-face { font-family: "YC Brush Rest"; src: url("/fonts/brush-rest.woff") format("woff"); font-display: swap; }
+`;
+
+/** 先把 core 下好（标题画面期间），开局后再空闲下载 rest；预览页里没有字体文件，失败就算了 */
+export function preloadFonts(rest = false) {
+  const fonts = /** @type {any} */ (document).fonts;
+  if (!fonts?.load) return;
+  fonts.load('40px "YC Brush"', '言').catch(() => {});
+  if (rest) fonts.load('40px "YC Brush Rest"', '啊').catch(() => {});
+}
+
+const CSS = FONT_CSS + `
 .yc-ui { position: absolute; inset: 0; pointer-events: none; font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   color: #1d2733; --ink: #1d2733; --muted: #5d6b7a; --panel: rgba(250, 252, 255, 0.78); --line: rgba(30, 50, 80, 0.16); }
 .yc-ui * { box-sizing: border-box; }
@@ -28,7 +47,7 @@ const CSS = `
   width: min(560px, calc(100vw - 32px)); padding: 12px 18px 14px; background: var(--panel); border: 1px solid var(--line);
   border-radius: 16px; backdrop-filter: blur(8px); opacity: 0; transition: opacity .25s, transform .25s; }
 .yc-card.show { opacity: 1; transform: translate(-50%, 0); }
-.yc-name { font-family: "STXingkai", "STKaiti", "KaiTi", "Kaiti SC", serif; font-size: 40px; line-height: 1.15; text-align: center;
+.yc-name { font-family: ${BRUSH}; font-size: 40px; line-height: 1.15; text-align: center;
   letter-spacing: 4px; color: #16202b; }
 .yc-said { margin-top: 8px; font-size: 15px; line-height: 1.9; }
 .yc-said u { text-decoration-thickness: 2px; text-underline-offset: 4px; }
@@ -40,7 +59,7 @@ const CSS = `
 .yc-meta .warn { color: #b4541a; }
 .yc-float { position: absolute; transform: translate(-50%, -50%); font-weight: 700; font-size: 18px; white-space: nowrap;
   text-shadow: 0 1px 2px rgba(0,0,0,0.65), 0 0 6px rgba(0,0,0,0.35); transition: transform .9s ease-out, opacity .9s ease-in; }
-.yc-big { position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%) scale(0.9); font-family: "STXingkai", "STKaiti", "KaiTi", serif;
+.yc-big { position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%) scale(0.9); font-family: ${BRUSH};
   font-size: 64px; letter-spacing: 8px; opacity: 0; transition: opacity .2s, transform .3s; text-shadow: 0 2px 12px rgba(255,255,255,0.7); }
 .yc-big.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 .yc-overlay { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(220, 232, 245, 0.55);
@@ -48,7 +67,7 @@ const CSS = `
 .yc-overlay[hidden] { display: none; }
 .yc-box { text-align: center; padding: 28px 32px; background: rgba(255,255,255,0.86); border-radius: 18px; border: 1px solid var(--line);
   max-width: min(460px, calc(100vw - 32px)); }
-.yc-box h1 { margin: 0 0 6px; font-family: "STXingkai", "STKaiti", "KaiTi", serif; font-size: 48px; letter-spacing: 8px; }
+.yc-box h1 { margin: 0 0 6px; font-family: ${BRUSH}; font-size: 48px; letter-spacing: 8px; }
 .yc-box p { margin: 6px 0; color: var(--muted); font-size: 14px; line-height: 1.7; }
 .yc-btn { margin-top: 12px; font: inherit; font-size: 16px; padding: 10px 26px; border-radius: 12px; border: 1px solid #4a74d9;
   background: #4a74d9; color: #fff; cursor: pointer; }

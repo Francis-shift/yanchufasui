@@ -15,6 +15,8 @@ import {
   BOLT_COUNT_MAX, COMBO_MAX_STEPS, ELEMENTS, FORMS, MOMENTUM_MAX, PHASE, POWER_DEFAULT, POWER_MAX, POWER_MIN,
 } from './numbers.js';
 import { hasOverreach } from './keywords.js';
+import { inCharset } from './charset.js';
+import { nameIsClean } from './safety.js';
 
 export const TARGETS = ['front', 'strongest', 'densest', 'left', 'right', 'center', 'self', 'rope', 'censer', 'bridge', 'pillar'];
 export const TARGET_NAMES = {
@@ -61,10 +63,20 @@ function cleanWords(w, text) {
   return out;
 }
 
-/** 咒语名：只留汉字和间隔号，最多 8 个字；内容安全过滤在第一批接入 */
+/** 咒语名：只留汉字和间隔号，最多 8 个字 */
 export function cleanName(name) {
   if (typeof name !== 'string') return '';
   return name.replace(/[^一-鿿·]/g, '').replace(/^·+|·+$/g, '').slice(0, NAME_MAX);
+}
+
+/**
+ * 模型起的名字能不能用：清洗后不空、每个字都在书法字表里（否则大字会混进别的字体）、不含敏感词。
+ * 不能用就返回空串，由调用方换默认名。
+ * @param {unknown} name
+ */
+export function usableName(name) {
+  const n = cleanName(name);
+  return n && inCharset(n) && nameIsClean(n) ? n : '';
 }
 
 /** 没有名字时按步骤拼一个，如「冰弹·风爆」 */
@@ -121,6 +133,6 @@ export function sanitizeIntent(raw, text, phase = PHASE) {
     .filter((x) => typeof x === 'string' && x.length > 0 && x.length <= WORD_MAX && text.includes(x))
     .slice(0, 3);
   // 玩家在原话里指定名字（「给它起名…」「法术名必须叫…」）时不用模型给的名字：名字只能由游戏起，防广告、骂人话借名字上屏
-  const name = (NAMING.test(text) ? '' : cleanName(r.nm)) || (steps.length ? defaultName(steps) : '');
+  const name = (NAMING.test(text) ? '' : usableName(r.nm)) || (steps.length ? defaultName(steps) : '');
   return { steps, momentum: overreach ? 0 : m.value, name, unknown, overreach, notes };
 }
