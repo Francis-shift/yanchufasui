@@ -16,8 +16,14 @@ const BASE = process.env.ARK_BASE_URL || 'https://ark.cn-beijing.volces.com/api/
 const TIMEOUT_MS = Number(process.env.PARSE_SERVER_TIMEOUT_MS || 4000);
 const RAW_MAX = 2000;
 
-function fail(reason: string, status = 200, ms?: number) {
-  return Response.json({ ok: false, reason, fallback: true, ms }, { status });
+function fail(reason: string, status = 200, ms?: number, extra?: Record<string, unknown>) {
+  return Response.json({ ok: false, reason, fallback: true, ms, ...extra }, { status });
+}
+
+/** "fetch failed" 背后的具体原因（DNS 失败、建连超时、连接被掐断……），写进日志与诊断结果 */
+function errCode(e: unknown): string {
+  const err = e as { name?: string; message?: string; cause?: { code?: string } };
+  return err?.cause?.code || (err?.name === 'TimeoutError' || err?.name === 'AbortError' ? err.name : String(err?.message || e).slice(0, 40));
 }
 
 async function callModel(text: string, signal: AbortSignal) {
@@ -72,12 +78,14 @@ async function warm() {
 }
 
 /**
- * GET /api/parse?diag=1：诊断线上慢在哪。同一次请求里连着调两次只要 1 个词元的模型请求：
- * 第一次要新建连接，第二次能复用连接；两次差得多，说明慢在建连（平台每次换机器就每次都要建）。
+ * GET /api/parse?diag=1：诊断线上慢在哪。同一次请求里连着调几次只要 1 个词元的模型请求（diag=1 调两次，diag=2～6 调这么多次）：
+ * 第一次要新建连接，之后能复用连接；差得多，说明慢在建连（平台每次换机器就每次都要建）。
+ * 失败的带上具体原因（errCode），分清是 DNS、建连还是连接被掐断。
  * 另外查一下函数实际跑在哪个地区（出口 IP 的归属地）。照样计入限流。
  */
 export async function GET(req: Request) {
-  if (new URL(req.url).searchParams.get('diag') !== '1') return fail('bad_request', 400);
+  const n = Number(new URL(req.url).searchParams.get('diag'));
+  if (!Number.isInteger(n) || n < 1 || n > 6) return fail('bad_request', 400);
   if (!process.env.ARK_API_KEY || !process.env.ARK_MODEL) return fail('no_key');
   const limit = checkLimits(clientIp(req.headers));
   if (!limit.ok) return fail(limit.reason, 429);
@@ -93,18 +101,18 @@ export async function GET(req: Request) {
       await res.text();
       return { status: res.status, ms: Date.now() - t0 };
     } catch (e) {
-      return { status: 0, ms: Date.now() - t0, err: String(e).slice(0, 80) };
+      return { status: 0, ms: Date.now() - t0, err: errCode(e) };
     }
   };
-  const first = await tiny();
-  const second = await tiny();
+  const calls: { status: number; ms: number; err?: string }[] = [];
+  for (let i = 0; i < Math.max(2, n); i++) calls.push(await tiny());
   let where: unknown = null;
   try {
     const r = await fetch('https://ipinfo.io/json', { signal: AbortSignal.timeout(3000) });
     const j = await r.json();
     where = { city: j.city, region: j.region, country: j.country, org: j.org };
   } catch { /* 查不到就算了 */ }
-  return Response.json({ ok: true, first, second, where });
+  return Response.json({ ok: true, calls, where });
 }
 
 export async function POST(req: Request) {
@@ -129,19 +137,21 @@ export async function POST(req: Request) {
   const t0 = Date.now();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  // 格式不对、连接被掐断（境外节点调北京的模型，10-19 夜里实测常在 0.3 秒内就断）都再试，最多 3 次；超时或剩下的时间不够就不试了
+  const errs: string[] = [];
   try {
-    let raw;
-    try {
-      raw = await callModel(text, ctrl.signal);
-    } catch (e) {
-      // 格式不对重试一次；超时或时间不够就不重试
-      if (ctrl.signal.aborted || Date.now() - t0 > TIMEOUT_MS - 1200) throw e;
-      raw = await callModel(text, ctrl.signal);
+    for (let i = 0; i < 3; i++) {
+      try {
+        const raw = await callModel(text, ctrl.signal);
+        return Response.json({ ok: true, raw, ms: Date.now() - t0, model: process.env.ARK_MODEL, tries: i + 1 });
+      } catch (e) {
+        errs.push(errCode(e));
+        if (ctrl.signal.aborted || Date.now() - t0 > TIMEOUT_MS - 1200) break;
+      }
     }
-    return Response.json({ ok: true, raw, ms: Date.now() - t0, model: process.env.ARK_MODEL });
-  } catch (e) {
+    console.error('parse failed', errs.join(' | '));
     // 带上服务器这一侧花的时间，前端咒语卡能分清是"手机到服务器"慢还是"服务器到模型"慢
-    return fail(ctrl.signal.aborted ? 'timeout' : 'model_error', 200, Date.now() - t0);
+    return fail(ctrl.signal.aborted ? 'timeout' : 'model_error', 200, Date.now() - t0, { tries: errs.length, errs });
   } finally {
     clearTimeout(timer);
   }
