@@ -7,6 +7,14 @@ import { checkLimits, clientIp } from '../../../server/limits';
 import { SYSTEM_PROMPT, userMessage } from '../../../server/prompt';
 import { INPUT_MAX_CHARS } from '../../../game/rules/numbers.js';
 import { maskText } from '../../../game/rules/safety.js';
+import dns from 'node:dns';
+import net from 'node:net';
+
+// 模型服务同时有 IPv4 与 IPv6 地址。Node 默认两种轮流试、每个地址只等 250 毫秒，
+// 境外节点到北京建连常超过 250 毫秒，于是每个新起的函数第一次调用都在 0.25 秒报 ETIMEDOUT（10-19 实测 3 次诊断次次如此）。
+// 改成先用 IPv4、不轮流试，建连按系统默认的超时等。
+if (typeof dns.setDefaultResultOrder === 'function') dns.setDefaultResultOrder('ipv4first');
+if (typeof net.setDefaultAutoSelectFamily === 'function') net.setDefaultAutoSelectFamily(false);
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -112,7 +120,7 @@ export async function GET(req: Request) {
     const j = await r.json();
     where = { city: j.city, region: j.region, country: j.country, org: j.org };
   } catch { /* 查不到就算了 */ }
-  return Response.json({ ok: true, calls, where });
+  return Response.json({ ok: true, calls, where, node: process.version });
 }
 
 export async function POST(req: Request) {
