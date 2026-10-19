@@ -61,6 +61,8 @@ python tools/build_preview.py  # 生成 preview/index.html（离线单文件，�
 
 ## 部署
 
+线上地址：https://www.yanchufasui.top （国内手机流量、微信内都能打开）。
+
 部署在 EdgeOne Makers（原名 Pages；加速区域选"全球可用区（不含中国大陆）"，免备案）+ 自己的域名，推送到 main 即自动构建；同一仓库接 Vercel 作后备（未接）。平台给的预览地址在国内网络打不开，要用自己的域名访问。环境变量与 `.env.example` 同名；密钥只配在平台上，不进仓库。
 
 ## 进度
