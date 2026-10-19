@@ -38,7 +38,9 @@ const CSS = FONT_CSS + `
 .yc-ui * { box-sizing: border-box; }
 .yc-top { position: absolute; left: 16px; top: calc(14px + env(safe-area-inset-top, 0px)); display: flex; flex-direction: column; gap: 6px;
   padding: 10px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(6px); min-width: 180px; }
-.yc-label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 12px; }
+.yc-g { display: flex; flex-direction: column; gap: 6px; }
+.yc-g + .yc-g { margin-top: 4px; }
+.yc-label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 12px; white-space: nowrap; }
 .yc-bar { height: 8px; border-radius: 4px; background: rgba(0,0,0,0.12); overflow: hidden; }
 .yc-bar > i { display: block; height: 100%; width: 100%; border-radius: 4px; transition: width .15s; }
 .yc-core > i { background: linear-gradient(90deg, #6b7cff, #39c6ff); }
@@ -48,14 +50,14 @@ const CSS = FONT_CSS + `
 .yc-top.gauge-full [data-gauge] { color: #b06d00; }
 @keyframes yc-pulse { 50% { box-shadow: 0 0 16px 4px rgba(255, 196, 80, 0.95); } }
 .yc-bottom { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-  width: min(640px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 6px; pointer-events: auto; }
+  width: min(640px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 6px; pointer-events: auto; }
 .yc-input { width: 100%; font: inherit; font-size: 17px; padding: 12px 16px; border-radius: 14px; border: 1px solid var(--line);
   background: rgba(255,255,255,0.9); color: var(--ink); outline: none; box-shadow: 0 6px 24px -10px rgba(20,40,80,0.4); }
 .yc-input:focus { border-color: #5b8cff; box-shadow: 0 0 0 3px rgba(91,140,255,0.25), 0 6px 24px -10px rgba(20,40,80,0.4); }
 .yc-input:disabled { opacity: 0.6; }
 .yc-hint { font-size: 12px; color: var(--muted); text-align: center; text-shadow: 0 1px 0 rgba(255,255,255,0.6); }
 .yc-card { position: absolute; left: 50%; top: calc(14px + env(safe-area-inset-top, 0px)); transform: translate(-50%, -8px);
-  width: min(560px, calc(100vw - 32px)); padding: 12px 18px 14px; background: var(--panel); border: 1px solid var(--line);
+  width: min(560px, calc(100% - 32px)); padding: 12px 18px 14px; background: var(--panel); border: 1px solid var(--line);
   border-radius: 16px; backdrop-filter: blur(8px); opacity: 0; transition: opacity .25s, transform .25s; }
 .yc-card.show { opacity: 1; transform: translate(-50%, 0); }
 .yc-name { font-family: ${BRUSH}; font-size: 40px; line-height: 1.15; text-align: center;
@@ -87,8 +89,23 @@ const CSS = FONT_CSS + `
   max-width: min(420px, calc(100vw - 24px)); overflow: hidden;
   background: rgba(20,24,32,0.72); color: #dfe7f1; padding: 8px 10px; border-radius: 10px; white-space: pre; }
 .yc-debug[hidden] { display: none; }
-@media (max-width: 1000px) { .yc-card { top: calc(98px + env(safe-area-inset-top, 0px)); } }
-@media (max-width: 600px) { .yc-name { font-size: 32px; } .yc-big { font-size: 46px; } .yc-top { min-width: 150px; } }
+/* 按游戏区域本身的尺寸切换（setLayout 加类名），不看整个浏览器窗口 */
+/* 窄（手机竖屏）：阵眼、波次、气势排成顶上一行，省出画面给敌人的来路；咒语卡由 placeCard 放在这一行下面 */
+.yc-narrow .yc-name { font-size: 32px; } .yc-narrow .yc-big { font-size: 46px; }
+.yc-narrow .yc-top { left: 10px; right: 10px; top: calc(8px + env(safe-area-inset-top, 0px)); flex-direction: row; gap: 10px;
+  padding: 7px 10px; min-width: 0; border-radius: 10px; }
+.yc-narrow .yc-g { flex: 1; min-width: 0; gap: 4px; }
+.yc-narrow .yc-g + .yc-g { margin-top: 0; }
+.yc-narrow .yc-g-gauge { flex: 1.35; }
+.yc-narrow .yc-label { gap: 6px; }
+.yc-narrow .yc-card { width: calc(100% - 20px); }
+/* 矮（手机键盘弹起来了）：咒语卡只留名字、原话、一行结果，提示语不显示 */
+.yc-short .yc-hint, .yc-short .yc-tags { display: none; }
+.yc-short .yc-card { padding: 6px 12px 8px; }
+.yc-short .yc-name { font-size: 24px; letter-spacing: 2px; }
+.yc-short .yc-said { margin-top: 2px; font-size: 14px; line-height: 1.6; }
+.yc-short .yc-meta { margin-top: 2px; gap: 2px 10px; }
+.yc-short .yc-big { font-size: 40px; }
 `;
 
 /** @param {string} html */
@@ -104,9 +121,9 @@ export class Hud {
     this.root = el(`<div class="yc-ui"></div>`);
     this.root.append(style);
     this.top = el(`<div class="yc-top">
-      <div class="yc-label"><span>阵眼</span><b data-core>100</b></div><div class="yc-bar yc-core"><i data-corebar></i></div>
-      <div class="yc-label" style="margin-top:4px"><span data-wave>准备守关</span><span data-left></span></div>
-      <div class="yc-label" style="margin-top:4px"><span>气势槽</span><b data-gauge>0 / 8</b></div><div class="yc-bar yc-gauge"><i data-gaugebar style="width:0"></i></div></div>`);
+      <div class="yc-g"><div class="yc-label"><span>阵眼</span><b data-core>100</b></div><div class="yc-bar yc-core"><i data-corebar></i></div></div>
+      <div class="yc-g"><div class="yc-label"><span data-wave>准备守关</span><span data-left></span></div></div>
+      <div class="yc-g yc-g-gauge"><div class="yc-label"><span>气势</span><b data-gauge>0 / 8</b></div><div class="yc-bar yc-gauge"><i data-gaugebar style="width:0"></i></div></div></div>`);
     this.bottom = el(`<div class="yc-bottom">
       <div class="yc-label"><span>法力</span><b data-mana>100</b></div><div class="yc-bar yc-mana"><i data-manabar></i></div>
       <input class="yc-input" maxlength="${INPUT_MAX_CHARS}" enterkeyhint="send" autocomplete="off" aria-label="咒语" placeholder="说出你的咒语……（回车施法）">
@@ -132,9 +149,32 @@ export class Hud {
   setHint(text) { this.q('[data-hint]').textContent = text; }
   /** 气势槽：满了发光，提示可以召唤 @param {number} g @param {number} max */
   setGauge(g, max) {
-    this.q('[data-gauge]').textContent = g >= max ? '已满 · 可召唤冰龙' : `${g} / ${max}`;
+    this.q('[data-gauge]').textContent = g >= max ? '已满·可召唤冰龙' : `${g} / ${max}`;
     this.q('[data-gaugebar]').style.width = `${Math.min(1, g / max) * 100}%`;
     this.top.classList.toggle('gauge-full', g >= max);
+  }
+
+  /** 游戏区域变了尺寸：窄（竖屏）、矮（键盘弹起）切换布局，再把咒语卡放到不挡面板的地方 @param {number} w @param {number} h */
+  setLayout(w, h) {
+    this.root.classList.toggle('yc-narrow', w <= 600);
+    this.root.classList.toggle('yc-short', h <= 520);
+    this.placeCard();
+  }
+
+  /** 咒语卡居中靠上；若和左上角的面板左右重叠，就放到面板下面 */
+  placeCard() {
+    const ui = this.root.getBoundingClientRect(), top = this.top.getBoundingClientRect();
+    const cardW = this.card.offsetWidth || Math.min(560, ui.width - 32);
+    const overlaps = (ui.width - cardW) / 2 < top.right - ui.left + 8;
+    this.card.style.top = overlaps ? `${Math.round(top.bottom - ui.top + 8)}px` : '';
+  }
+
+  /** 画面上、下被界面挡住的比例（给镜头取景用） @returns {{ top: number, bottom: number }} */
+  insets() {
+    const ui = this.root.getBoundingClientRect();
+    if (!ui.height) return { top: 0, bottom: 0 };
+    const t = this.top.getBoundingClientRect(), b = this.bottom.getBoundingClientRect();
+    return { top: Math.max(0, (t.bottom - ui.top) / ui.height), bottom: Math.max(0, (ui.bottom - b.top) / ui.height) };
   }
 
   /**
@@ -175,6 +215,7 @@ export class Hud {
       ${tags.length ? `<div class="yc-tags">${tags.join('')}</div>` : ''}
       <div class="yc-meta"><span>${esc(steps || '没有可放的法术')}</span>${meta.map((m) => `<span>${esc(m)}</span>`).join('')}
       ${warns.map((w) => `<span class="warn">${esc(w)}</span>`).join('')}</div>`;
+    this.placeCard();
     this.card.classList.add('show');
     clearTimeout(this.cardTimer);
     this.cardTimer = window.setTimeout(() => this.card.classList.remove('show'), 4200);

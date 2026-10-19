@@ -28,6 +28,7 @@ import { FusionFx } from './fx/fusions.js';
 import { Particles } from './fx/particles.js';
 import { SpellFx } from './fx/spells.js';
 import { buildEnvironment } from './world/environment.js';
+import { fitFrame } from './world/framing.js';
 import { buildLayout, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS } from './world/layout.js';
 import { Hud, preloadFonts } from './ui/hud.js';
 import { parseRemote, warmUp } from './net.js';
@@ -56,6 +57,17 @@ function waveQueue(mix) {
   return q;
 }
 const DEFAULT_AIM = new THREE.Vector3(0, 0.6, -6);
+
+/**
+ * 竖屏取景（framing.js）：镜头在右前方高处（俯角约 43°）往左后方看，石阶（正后方）和索桥（左后方）都落在画面上半；
+ * 平时要框进施法者、石阶上段、索桥中段和广场两侧；开口推近时只保证施法者和两个入口。
+ * 俯角试过约 30°：画面上三分之一全是天空，广场太小。
+ */
+const NARROW_DIR = new THREE.Vector3(0.36, 1.0, 1);
+const NARROW_LOOK = new THREE.Vector3(-2, 0, -2);
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+const FRAME_WIDE = [V(0, 2.2, 5.2), V(0, 0, 6.8), V(0, 0, -10.4), V(0, -3.5, -15), V(-9.2, 0, -5.4), V(-14, 0, -8.3), V(7, 0, -3), V(-8, 0, 2)];
+const FRAME_NEAR = [V(0, 2.2, 5.2), V(0, 0, 6.4), V(0, 0, -10.4), V(-9.2, 0, -5.4)];
 /** 解析失败的原因，显示在咒语卡上（方便现场判断是哪一段出了问题） */
 const FAIL_TEXT = {
   timeout: '超时', model_error: '模型出错', network: '网络不通', no_key: '服务器未配置密钥', rate: '说得太快', daily: '今日额度已满',
@@ -119,26 +131,51 @@ export function start(root, opts = {}) {
     },
   });
 
-  // ---------------------------------------------------------------- 镜头：第三人称，平时固定；开口时轻推近到施法者肩后
+  // ---------------------------------------------------------------- 镜头：第三人称，平时固定；开口时轻推近
   const cam = { base: new THREE.Vector3(), look: new THREE.Vector3(), near: new THREE.Vector3(), nearLook: new THREE.Vector3(), focus: 0 };
   function layoutCamera() {
     const w = root.clientWidth || window.innerWidth, h = root.clientHeight || window.innerHeight;
-    const portrait = w / h < 0.8;
     camera.aspect = w / h;
-    camera.fov = portrait ? 62 : 50;
+    camera.fov = w / h < 0.8 ? 62 : 50;
     camera.updateProjectionMatrix();
-    if (portrait) { cam.base.set(3.2, 12.5, 23); cam.look.set(0, 0, -5); }   // 竖屏：抬高拉远，敌人从屏幕上方往下走
-    else { cam.base.set(5.6, 7.4, 16.8); cam.look.set(0, 1.0, -3.5); }
-    cam.near.copy(CASTER_POS).add(new THREE.Vector3(1.6, 2.9, 4.6));
-    cam.nearLook.set(0, 1.2, -6);
+    hud.setLayout(w, h);
+    if (w / h < 1.2) {
+      // 竖屏、键盘弹起：界面占掉上下一大截，按没被挡住的那一条自动取景；开口时推近也要看得见两个入口
+      const ins = hud.insets();
+      const f = fitFrame(camera, { dir: NARROW_DIR, look: NARROW_LOOK, points: FRAME_WIDE, ...ins });
+      cam.base.copy(f.pos); cam.look.copy(f.look);
+      const n = fitFrame(camera, { dir: NARROW_DIR, look: NARROW_LOOK, points: FRAME_NEAR, ...ins });
+      cam.near.copy(n.pos); cam.nearLook.copy(n.look);
+    } else {
+      cam.base.set(5.6, 7.4, 16.8); cam.look.set(0, 1.0, -3.5);
+      cam.near.copy(CASTER_POS).add(new THREE.Vector3(1.6, 2.9, 4.6));   // 横屏开口时推到施法者肩后
+      cam.nearLook.set(0, 1.2, -6);
+    }
     renderer.setSize(w, h);
     composer.setSize(w, h);
     bloom.setSize(w, h);
     particles.resize(renderer.getDrawingBufferSize(new THREE.Vector2()).y, camera.fov);
   }
   layoutCamera();
-  const onResize = () => layoutCamera();
+  // iOS 的 Safari 弹出键盘时页面本身不变矮，只是下半截被盖住：把游戏区域缩到看得见的那块（微信、安卓会自己变矮，不受影响）
+  const vv = window.visualViewport;
+  let vvCovered = false;
+  const onResize = () => {
+    if (vv) {
+      const covered = vv.height < window.innerHeight - 60 && Math.abs(vv.scale - 1) < 0.01;   // 双指放大时也会变小，那不算
+      if (covered) {
+        root.style.height = `${Math.round(vv.height)}px`;
+        root.style.transform = `translateY(${Math.round(vv.offsetTop)}px)`;
+      } else if (vvCovered) {
+        root.style.height = ''; root.style.transform = '';
+      }
+      vvCovered = covered;
+    }
+    layoutCamera();
+  };
   window.addEventListener('resize', onResize);
+  vv?.addEventListener('resize', onResize);
+  vv?.addEventListener('scroll', onResize);
 
   // ---------------------------------------------------------------- 状态
   const S = {
@@ -635,12 +672,12 @@ export function start(root, opts = {}) {
     killAll: () => { S.queue.length = 0; for (const e of [...enemies.list]) enemies.kill(e, e.pos); },
     gauge: (n = ULT_GAUGE) => { S.gauge = n; hud.setGauge(S.gauge, ULT_GAUGE); },
     // 面板太小时看不清：按 w×h 横屏重画当前这一帧（先 pause 定格），返回 JPEG 的 data URL
-    snap: (w = 960, h = 540) => {
+    snap: (w = 960, h = 540, focus = 0) => {
       const css = root.style.cssText, ratio = renderer.getPixelRatio();
       root.style.cssText += `;width:${w}px;height:${h}px;right:auto;bottom:auto`;
       renderer.setPixelRatio(1);
       layoutCamera();
-      camera.position.copy(cam.base); camera.lookAt(cam.look);
+      camera.position.copy(cam.base).lerp(cam.near, focus); camera.lookAt(_v.copy(cam.look).lerp(cam.nearLook, focus));
       composer.render();
       const url = renderer.domElement.toDataURL('image/jpeg', 0.72);
       root.style.cssText = css;
@@ -648,6 +685,8 @@ export function start(root, opts = {}) {
       layoutCamera();
       return url;
     },
+    /** 竖屏取景的参数（调镜头用：改完这些向量再触发一次 resize） */
+    framing: { dir: NARROW_DIR, look: NARROW_LOOK, wide: FRAME_WIDE, near: FRAME_NEAR },
     dragon: () => dragon.preload(),
     flight: () => { const f = dragon.active; return f && { kind: f.kind, s: +f.s.toFixed(1), sHit: +f.sHit.toFixed(1), impacted: f.impacted, target: f.target.toArray().map((v) => +v.toFixed(1)) }; },
     locks: () => ({ heads: locks.heads.filter((h) => h.mesh.visible).map((h) => h.id), rings: locks.rings.filter((r) => r.mesh.visible).length }),
@@ -663,6 +702,8 @@ export function start(root, opts = {}) {
   return () => {
     cancelAnimationFrame(raf);
     window.removeEventListener('resize', onResize);
+    vv?.removeEventListener('resize', onResize);
+    vv?.removeEventListener('scroll', onResize);
     window.removeEventListener('keydown', onGlobalKey);
     enemies.clear();
     for (const c of stressList) world.removeBody(c.body);

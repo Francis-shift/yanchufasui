@@ -10,6 +10,8 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
+  // 安卓 Chrome 弹出键盘时让页面跟着变矮（与微信一致），游戏按剩下的高度重新取景
+  interactiveWidget: 'resizes-content',
   themeColor: '#9fc3e8',
 };
 
