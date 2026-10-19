@@ -116,7 +116,10 @@ export class Enemies {
    * 场景里多出（或撤掉）挡路的东西时调用：土墙立起、华表倒地……流场重算，敌人马上改道。
    * @param {{ x: number, z: number, r: number }[]} list 固定障碍之外的临时障碍
    */
-  setObstacles(list) { this.field.setObstacles([...STATIC_OBSTACLES, ...list]); }
+  setObstacles(list) { this.temp = list; this.field.setObstacles([...STATIC_OBSTACLES, ...list]); }
+
+  /** 石阶、索桥上沿固定路线走的敌人不看流场：前面有土墙就原地等（等墙沉下去再走） */
+  blockedAt(x, z) { return (this.temp || []).some((o) => (x - o.x) ** 2 + (z - o.z) ** 2 < (o.r + 0.4) ** 2); }
 
   /** 给裁决器看的样子：位置、血量、离阵眼多远 */
   views() {
@@ -250,7 +253,11 @@ export class Enemies {
       e.mat.emissiveIntensity = frozenK ? 0.55 : burnK ? 0.6 : 0;
 
       if (e.mode === 'walk') {
-        if (!e.frozen) e.s += e.spec.speed * dt;
+        if (!e.frozen) {
+          const ahead = e.s + e.spec.speed * dt;
+          pointAt(e.path, ahead + 0.3, this._p, this._d);
+          if (!this.blockedAt(this._p.x, this._p.z)) e.s = ahead;
+        }
         if (e.s >= e.path.total) { this.hooks.onCoreHit(e.spec.coreDmg); this.remove(e, 'core'); continue; }
         pointAt(e.path, e.s, e.pos, e.dir);
         const side = this._d.set(e.dir.z, 0, -e.dir.x);

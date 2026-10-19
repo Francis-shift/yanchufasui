@@ -22,7 +22,9 @@ test('清洗：枚举不在表里就丢、数值夹到上限、越权打标', ()
 });
 
 test('清洗：未开放的形态降级并注明，未开放的元素未生效', () => {
-  const it = sanitizeIntent({ s: [{ e: 'fire', f: 'rain' }, { e: 'earth', f: 'wall' }] }, '火雨然后土墙');
+  // 用中期的开放范围测降级机制本身（第一批起四元素四形态全开，以后雷等新原件仍走这条路）
+  const MID = { elements: ['fire', 'ice', 'wind'], forms: ['bolt', 'burst'], formFallback: { wall: 'burst', rain: 'burst' } };
+  const it = sanitizeIntent({ s: [{ e: 'fire', f: 'rain' }, { e: 'earth', f: 'wall' }] }, '火雨然后土墙', MID);
   assert.equal(it.steps.length, 1);
   assert.equal(it.steps[0].form, 'burst');
   assert.ok(it.notes.some((n) => n.includes('火雨尚未开放')));

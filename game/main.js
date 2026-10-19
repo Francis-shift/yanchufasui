@@ -16,10 +16,11 @@ import { damageTo, planCast, regenMana, resolveTarget } from './rules/arbiter.js
 import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
 import {
-  CHANT_MIN_MS, CORE_HP, FORMS, INPUT_MAX_CHARS, MANA_MAX, PARSE_TIMEOUT_MS, SLOWMO_MAX_SEC, SLOWMO_SCALE,
+  CHANT_MIN_MS, CORE_HP, FORMS, INPUT_MAX_CHARS, MANA_MAX, PARSE_TIMEOUT_MS, RAIN, SLOWMO_MAX_SEC, SLOWMO_SCALE, WALL,
 } from './rules/numbers.js';
 import { Enemies } from './actors/enemies.js';
 import { Locks } from './fx/locks.js';
+import { distToSegment, Walls } from './fx/walls.js';
 import { Particles } from './fx/particles.js';
 import { SpellFx } from './fx/spells.js';
 import { buildEnvironment } from './world/environment.js';
@@ -97,6 +98,7 @@ export function start(root, opts = {}) {
   const plaza = new CANNON.Body({ type: CANNON.Body.STATIC, shape: new CANNON.Cylinder(11, 11, 1, 24), position: new CANNON.Vec3(0, -0.5, 0) });
   world.addBody(plaza);
 
+  const walls = new Walls(scene, world, particles);
   const hud = new Hud(root);
   const _v = new THREE.Vector3();
   const enemies = new Enemies(scene, world, particles, {
@@ -158,6 +160,7 @@ export function start(root, opts = {}) {
 
   function startGame() {
     enemies.clear();
+    if (walls.clear()) enemies.setObstacles([]);
     timers.length = 0;   // 上一局没跑完的延时（第二步法术、收锁定标记）不能带进新的一局
     Object.assign(S, { phase: 'playing', mana: MANA_MAX, core: CORE_HP, gauge: 0, lastCombo: null, seen: [], said: new Set(),
       wave: 0, busy: false, restT: 0 });
@@ -241,7 +244,8 @@ export function start(root, opts = {}) {
       const res = resolved[i];
       const heads = s.form === 'bolt' ? res.ids.slice(0, s.count) : [];
       const ring = !heads.length && res.point
-        ? { x: res.point.x, y: groundHeightAt(res.point.x, res.point.z) ?? 0, z: res.point.z, r: s.form === 'bolt' ? 0.8 : FORMS.burst.radius }
+        ? { x: res.point.x, y: groundHeightAt(res.point.x, res.point.z) ?? 0, z: res.point.z,
+            r: { bolt: 0.8, burst: FORMS.burst.radius, rain: RAIN.spread, wall: ((FORMS.wall.segments - 1) / 2) * WALL.gap + 0.5 }[s.form] ?? 1 }
         : null;
       return { el: s.el, ids: heads, ring };
     });
@@ -326,6 +330,24 @@ export function start(root, opts = {}) {
           },
         });
       }
+    } else if (step.form === 'rain') {
+      // 雨：2 秒里从天上落 6 次，落点撒在目标周围；从天而降，盾傀儡挡不住
+      const c = res.point ? groundPt(res.point) : DEFAULT_AIM.clone();
+      for (let i = 0; i < FORMS.rain.hits; i++) {
+        const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * RAIN.spread;
+        const tp = groundPt({ x: c.x + Math.cos(a) * r, z: c.z + Math.sin(a) * r });
+        fx.bolt({
+          el: step.el, path: 'sky', delay: (i * FORMS.rain.sec) / FORMS.rain.hits, target: () => tp,
+          onHit: (p) => {
+            fx.burst(p, step.el, RAIN.hitR, 0.4);
+            for (const e of [...enemies.list]) {
+              if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) <= RAIN.hitR) hitEnemy(e, step, step.dmgEach, p, { fromAbove: true });
+            }
+          },
+        });
+      }
+    } else if (step.form === 'wall') {
+      raiseWall(step, res);
     } else {
       const pt = res.point ? groundPt(res.point) : DEFAULT_AIM.clone();
       const R = FORMS.burst.radius;
@@ -338,6 +360,45 @@ export function start(root, opts = {}) {
           }
         },
       });
+    }
+  }
+
+  /**
+   * 墙：在目标处横着立一道（垂直于施法者看过去的方向），5 段。
+   * 土墙压到的敌人挨一下，然后挡路；火冰风墙是帘子，谁穿过去谁挨一下（每堵墙每个敌人只算一次）。
+   */
+  function raiseWall(step, res) {
+    let c = res.point ? { x: res.point.x, z: res.point.z } : { x: DEFAULT_AIM.x, z: DEFAULT_AIM.z };
+    if (res.ids.length) {
+      // 打的是敌人：墙立在它前面 2 米（挡在它和阵眼之间），而不是砸在它身上
+      const tx = CORE_POS.x - c.x, tz = CORE_POS.z - c.z, tl = Math.hypot(tx, tz) || 1;
+      c = { x: c.x + (tx / tl) * Math.min(2, tl - 3), z: c.z + (tz / tl) * Math.min(2, tl - 3) };
+    }
+    let dx = c.x - CASTER_POS.x, dz = c.z - CASTER_POS.z, len = Math.hypot(dx, dz);
+    if (len < 2.2) { c = { x: CASTER_POS.x, z: CASTER_POS.z - 2.6 }; dx = 0; dz = -1; len = 1; }   // 「自己脚下」：立在身前，别把自己围住
+    const ux = -dz / len, uz = dx / len;   // 墙沿这个方向排开
+    const n = FORMS.wall.segments, half = (n - 1) / 2;
+    const pts = Array.from({ length: n }, (_, k) => ({ x: c.x + ux * (k - half) * WALL.gap, z: c.z + uz * (k - half) * WALL.gap }));
+    const earth = step.el === 'earth';
+    const w = walls.add(step.el, pts, Math.atan2(ux, uz) + Math.PI / 2, earth ? WALL.earthSec : WALL.curtainSec, step);
+    fx.burst(groundPt(c), step.el, 1.6, 0.5);
+    if (earth) {
+      enemies.setObstacles(walls.obstacles());
+      for (const e of [...enemies.list]) {
+        if (distToSegment(e.pos, pts[0], pts[n - 1]) < 0.8) { w.hit.add(e.id); hitEnemy(e, step, step.dmgEach, e.pos.clone().add(new THREE.Vector3(0, 0, 1)), {}); }
+      }
+    }
+  }
+
+  /** 每帧：谁穿过了火冰风墙，挨一下 */
+  function curtainContacts() {
+    for (const w of walls.curtains()) {
+      const a = w.pts[0], b = w.pts[w.pts.length - 1];
+      for (const e of [...enemies.list]) {
+        if (w.hit.has(e.id) || distToSegment(e.pos, a, b) > 0.7) continue;
+        w.hit.add(e.id);
+        hitEnemy(e, w.payload, w.payload.dmgEach, groundPt({ x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 }).setY(0), {});
+      }
     }
   }
 
@@ -416,6 +477,8 @@ export function start(root, opts = {}) {
     }
     world.step(1 / 60, dt, 3);
     updateCubes(dt);
+    if (walls.update(dt)) enemies.setObstacles(walls.obstacles());   // 土墙沉下去了，流场重算
+    curtainContacts();
     enemies.update(dt, camera);
     fx.update(dt);
     locks.update(dt, enemies);
@@ -481,6 +544,7 @@ export function start(root, opts = {}) {
     for (const c of stressList) world.removeBody(c.body);
     scene.remove(stressMesh); stressMesh.dispose(); stressGeo.dispose(); stressMat.dispose();
     locks.dispose();
+    walls.dispose();
     hud.dispose();
     composer.dispose();
     renderer.dispose();

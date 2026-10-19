@@ -79,12 +79,17 @@ export const REACTIONS = {
 };
 
 /**
- * 当前批次开放的原件。中期：火 / 冰 / 风 × 弹 / 爆；其余在设计里有、还没做，
- * 说到时降级成最接近的开放原件并在咒语卡上注明。
+ * 当前批次开放的原件。中期只开火 / 冰 / 风 × 弹 / 爆，第一批起火冰风土 × 弹爆墙雨全开；
+ * 设计里有、还没做的（如雷），说到时未生效或降级成最接近的开放原件，并在咒语卡上注明。
  */
 export const PHASE = {
-  elements: ['fire', 'ice', 'wind'],
-  forms: ['bolt', 'burst'],
-  /** 未开放形态 → 降级成哪个 */
-  formFallback: { wall: 'burst', rain: 'burst' },
+  elements: ['fire', 'ice', 'wind', 'earth'],   // 第一批起土开放；雷在第二批
+  forms: ['bolt', 'burst', 'wall', 'rain'],
+  /** 未开放形态 → 降级成哪个（现在全开，留着给以后的新形态用） */
+  formFallback: {},
 };
+
+/** 墙：段与段的间距（米）、持续时间（秒）。土墙是实心的，会挡路；火冰风墙是一道帘子，穿过就挨一下 */
+export const WALL = { gap: 1.1, earthSec: 8, curtainSec: 4 };
+/** 雨：落点在目标周围多大范围（米）、每一滴砸中多大范围 */
+export const RAIN = { spread: 2.6, hitR: 1.6 };
