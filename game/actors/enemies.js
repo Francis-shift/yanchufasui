@@ -198,6 +198,13 @@ export class Enemies {
     }
   }
 
+  /** 被卷起、冲飞：给一个速度，按滑行处理（脚下没地面就坠入云海） */
+  fling(e, vx, vy, vz) {
+    if (!this.list.includes(e) || e.mode === 'fall') return;
+    e.vel.set(vx, vy, vz);
+    e.mode = 'slide';
+  }
+
   kill(e, from) {
     this.shatter(e, from);
     this.remove(e, 'kill');

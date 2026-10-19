@@ -89,6 +89,25 @@ export const PHASE = {
   formFallback: {},
 };
 
+/**
+ * 法术融合（设计文档第 4 节）：同一句里相邻两步、元素不同、目标相同、且在这张表里，就合成一个法术。
+ * 键是「先>后」，顺序决定结果。先控后打的（冰→火、冰→风）不在表里，仍走打在敌人身上的反应。
+ */
+export const FUSIONS = {
+  'wind>fire':    { name: '火卷风',   el: 'fire',    idiom: '风助火势' },   // 龙卷风被点燃，往前卷，把敌人卷起来烧
+  'fire>wind':    { name: '烈焰冲击', el: 'fire',    idiom: '火借风威' },   // 从身前喷出又宽又长的火柱，一路烧穿
+  'wind>ice':     { name: '暴风雪',   el: 'ice',     idiom: '风雪交加' },   // 第二批
+  'wind>thunder': { name: '雷暴',     el: 'thunder', idiom: '风雷激荡' },   // 第二批（雷开放后）
+  'earth>fire':   { name: '陨火',     el: 'fire',    idiom: '天火坠石' },   // 第二批
+};
+/** 当前开放的融合（第一批只开风火两种） */
+export const FUSION_OPEN = ['wind>fire', 'fire>wind'];
+/** 融合伤害 = 两步之和 × 1.2（消耗沿用组合八折，不另算） */
+export const FUSION_DMG_MULT = 1.2;
+/** 火卷风：半径、往前卷的速度和时长；烈焰冲击：火柱长度和宽度（米） */
+export const TORNADO = { r: 2.2, speed: 3.2, sec: 3 };
+export const BEAM = { len: 15, halfW: 1.8 };
+
 /** 墙：段与段的间距（米）、持续时间（秒）。土墙是实心的，会挡路；火冰风墙是一道帘子，穿过就挨一下 */
 export const WALL = { gap: 1.1, earthSec: 8, curtainSec: 4 };
 /** 雨：落点在目标周围多大范围（米）、每一滴砸中多大范围 */

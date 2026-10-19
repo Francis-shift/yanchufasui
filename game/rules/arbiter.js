@@ -5,8 +5,8 @@
  * 会影响胜负的数字只在这里算，模型说"威力 999"也只按上限算。
  */
 import {
-  BOLT_COUNT_MAX, COMBO_DISCOUNT, ELEMENTS, ENEMIES, FIRST_DISCOVERY_MULT, FORMS, MANA_MAX, MANA_REGEN,
-  MOMENTUM_MULT, REACTIONS, REPEAT_DECAY, boltCostFactor, boltTotalDmgFactor, powerFactor,
+  BOLT_COUNT_MAX, COMBO_DISCOUNT, ELEMENTS, ENEMIES, FIRST_DISCOVERY_MULT, FORMS, FUSION_DMG_MULT, FUSION_OPEN, FUSIONS,
+  MANA_MAX, MANA_REGEN, MOMENTUM_MULT, REACTIONS, REPEAT_DECAY, boltCostFactor, boltTotalDmgFactor, powerFactor,
 } from './numbers.js';
 
 /** 「同一句话」的判定：去掉标点和空格后完全相同 */
@@ -30,7 +30,8 @@ export function totalCost(steps) {
  * @typedef {import('./intent.js').Step} Step
  * @typedef {{ mana: number, lastCombo?: { key: string, streak: number } | null,
  *             seen?: Iterable<string>, said?: Iterable<string>, text?: string }} CastContext
- * @typedef {Step & { cost: number, dmgTotal: number, dmgEach: number, first: boolean, repeat: number }} PlannedStep
+ * @typedef {Step & { cost: number, dmgTotal: number, dmgEach: number, first: boolean, repeat: number,
+ *             fusion?: string, fusionName?: string, idiom?: string }} PlannedStep fusion 是融合的键（如 wind>fire）
  * @typedef {{ ok: boolean, steps: PlannedStep[], cost: number, momentum: number, momentumHalved: boolean,
  *             downgrades: string[], backlash: boolean, gaugeGain: number,
  *             lastCombo: { key: string, streak: number } | null, newlySeen: string[], saidKey: string }} CastPlan
@@ -92,6 +93,7 @@ export function planCast(intent, ctx) {
     planned.push({ ...s, cost: Math.round(stepCost(s)), dmgTotal, dmgEach: s.form === 'bolt' ? dmgTotal / s.count : dmgTotal,
       first, repeat });
   }
+  fuse(planned, seen, newlySeen);
   return {
     ok, steps: planned, cost: ok ? totalCost(steps) : 0, momentum, momentumHalved, downgrades,
     backlash: intent.overreach, gaugeGain: ok ? momentum : 0,
@@ -101,6 +103,32 @@ export function planCast(intent, ctx) {
 
 /** @param {{ el: string, form: string }} s */
 const label = (s) => ELEMENTS[s.el].name + FORMS[s.form].name;
+
+/**
+ * 融合：找第一对相邻、元素不同、目标相同、且在开放融合表里的两步，合成一步（一句最多融合一次）。
+ * 合成后的一步按"爆"的样子结算范围（具体怎么演由 fusion 键决定），伤害 = 两步之和 × 1.2，
+ * 第一次用出这种融合再 × 1.2（图鉴单独一格）。消耗不变：总价本来就是两步之和打八折。
+ * @param {PlannedStep[]} planned 会被就地修改
+ * @param {Set<string>} seen @param {string[]} newlySeen
+ */
+export function fuse(planned, seen, newlySeen) {
+  for (let i = 0; i + 1 < planned.length; i++) {
+    const a = planned[i], b = planned[i + 1];
+    const key = `${a.el}>${b.el}`;
+    if (a.el === b.el || a.target !== b.target || !FUSION_OPEN.includes(key)) continue;
+    const f = FUSIONS[/** @type {keyof typeof FUSIONS} */ (key)];
+    const seenKey = `融合:${key}`;
+    const first = !seen.has(seenKey);
+    if (first) { seen.add(seenKey); newlySeen.push(seenKey); }
+    const dmgTotal = (a.dmgTotal + b.dmgTotal) * FUSION_DMG_MULT * (first ? FIRST_DISCOVERY_MULT : 1);
+    planned.splice(i, 2, {
+      ...a, el: f.el, form: 'burst', count: 1, path: 'straight', power: Math.max(a.power, b.power),
+      words: { ...a.words, ...b.words }, cost: a.cost + b.cost, dmgTotal, dmgEach: dmgTotal, first, repeat: 1,
+      fusion: key, fusionName: f.name, idiom: f.idiom,
+    });
+    return;
+  }
+}
 
 /** 法力恢复 */
 export function regenMana(mana, dt) {

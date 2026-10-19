@@ -121,7 +121,8 @@ export class Hud {
       html = html.replace(e, m.gray ? `<span class="gray">${e}</span>` : `<u style="text-decoration-color:${m.color}">${e}</u>`);
       tags.push(`<span class="yc-tag${m.gray ? ' gray' : ''}">${e} → ${esc(m.tag)}</span>`);
     }
-    const steps = plan.steps.map((s) => `${ELEMENTS[s.el].name}${FORMS[s.form].name}${s.form === 'bolt' && s.count > 1 ? '×' + s.count : ''}` +
+    const steps = plan.steps.map((s) => (s.fusionName ? `融合·${s.fusionName}`
+      : `${ELEMENTS[s.el].name}${FORMS[s.form].name}${s.form === 'bolt' && s.count > 1 ? '×' + s.count : ''}`) +
       `（威力 ${s.power}${s.first ? '，新发现 +20%' : ''}）`).join(' → ');
     const meta = [
       plan.ok ? `消耗 ${plan.cost}` : '哑火',

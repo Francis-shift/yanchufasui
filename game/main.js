@@ -16,11 +16,12 @@ import { damageTo, planCast, regenMana, resolveTarget } from './rules/arbiter.js
 import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
 import {
-  CHANT_MIN_MS, CORE_HP, FORMS, INPUT_MAX_CHARS, MANA_MAX, PARSE_TIMEOUT_MS, RAIN, SLOWMO_MAX_SEC, SLOWMO_SCALE, WALL,
+  BEAM, CHANT_MIN_MS, CORE_HP, FORMS, INPUT_MAX_CHARS, MANA_MAX, PARSE_TIMEOUT_MS, RAIN, SLOWMO_MAX_SEC, SLOWMO_SCALE, TORNADO, WALL,
 } from './rules/numbers.js';
 import { Enemies } from './actors/enemies.js';
 import { Locks } from './fx/locks.js';
 import { distToSegment, Walls } from './fx/walls.js';
+import { FusionFx } from './fx/fusions.js';
 import { Particles } from './fx/particles.js';
 import { SpellFx } from './fx/spells.js';
 import { buildEnvironment } from './world/environment.js';
@@ -99,6 +100,7 @@ export function start(root, opts = {}) {
   world.addBody(plaza);
 
   const walls = new Walls(scene, world, particles);
+  const fusions = new FusionFx(fx, particles);
   const hud = new Hud(root);
   const _v = new THREE.Vector3();
   const enemies = new Enemies(scene, world, particles, {
@@ -161,6 +163,7 @@ export function start(root, opts = {}) {
   function startGame() {
     enemies.clear();
     if (walls.clear()) enemies.setObstacles([]);
+    fusions.clear();
     timers.length = 0;   // 上一局没跑完的延时（第二步法术、收锁定标记）不能带进新的一局
     Object.assign(S, { phase: 'playing', mana: MANA_MAX, core: CORE_HP, gauge: 0, lastCombo: null, seen: [], said: new Set(),
       wave: 0, busy: false, restT: 0 });
@@ -290,7 +293,10 @@ export function start(root, opts = {}) {
     S.seen.push(...plan.newlySeen);
     if (plan.saidKey) S.said.add(plan.saidKey);
     S.last = { text, source, ms, raw, plan };
-    const name = intent.name || (plan.ok ? defaultName(plan.steps) : '');
+    // 融合了、而名字只是按步骤自动拼的（模型没起名），就用融合的名字（"火卷风"而不是"风弹·火弹"）
+    const fused = plan.steps.find((s) => s.fusion);
+    const autoNamed = !intent.name || intent.name === defaultName(intent.steps);
+    const name = fused && autoNamed ? /** @type {string} */ (fused.fusionName) : intent.name || (plan.ok ? defaultName(plan.steps) : '');
     hud.showCard({ name, text, plan, intent, source, ms });
     if (plan.backlash) { fx.backlash(); hud.bigText('天道不允', '#b3261e', 1300); }
     fx.endChant();
@@ -315,6 +321,7 @@ export function start(root, opts = {}) {
    */
   function runStep(step, res) {
     if (S.phase !== 'playing') return;
+    if (step.fusion) { runFusion(step, res); return; }
     const dir = { fromAbove: step.path === 'sky', fromBehind: step.path === 'behind' };
     if (step.form === 'bolt') {
       for (let i = 0; i < step.count; i++) {
@@ -386,6 +393,45 @@ export function start(root, opts = {}) {
       enemies.setObstacles(walls.obstacles());
       for (const e of [...enemies.list]) {
         if (distToSegment(e.pos, pts[0], pts[n - 1]) < 0.8) { w.hit.add(e.id); hitEnemy(e, step, step.dmgEach, e.pos.clone().add(new THREE.Vector3(0, 0, 1)), {}); }
+      }
+    }
+  }
+
+  /**
+   * 融合法术。方向一律是"从施法者看向目标"：火卷风从目标身前起、往外卷；烈焰冲击从施法者身前喷出去。
+   * 两种都把敌人往外甩（远离阵眼），靠近悬崖的会被甩下云海。
+   */
+  function runFusion(step, res) {
+    const c = res.point ? groundPt(res.point) : DEFAULT_AIM.clone();
+    const dir = new THREE.Vector3(c.x - CASTER_POS.x, 0, c.z - CASTER_POS.z);
+    if (dir.lengthSq() < 0.01) dir.set(0, 0, -1);
+    dir.normalize();
+    hud.bigText(step.idiom || step.fusionName, '#b5481c', 1100);
+    if (step.fusion === 'wind>fire') {
+      const start = c.clone().addScaledVector(dir, -2.5);
+      start.y = groundHeightAt(start.x, start.z) ?? 0;
+      fusions.tornado(start, dir, step);
+    } else if (step.fusion === 'fire>wind') {
+      const from = CASTER_POS.clone().setY(1.3).addScaledVector(dir, 0.8);
+      fusions.beam(from, dir);
+      for (const e of [...enemies.list]) {
+        const rx = e.pos.x - from.x, rz = e.pos.z - from.z;
+        const along = rx * dir.x + rz * dir.z, lat = Math.abs(rx * dir.z - rz * dir.x);
+        if (along < 0 || along > BEAM.len || lat > BEAM.halfW) continue;
+        hitEnemy(e, step, step.dmgEach, from, {});
+        enemies.fling(e, dir.x * 11, 2.5, dir.z * 11);
+      }
+    }
+  }
+
+  /** 每帧：火卷风碰到谁，烧一下并把它卷起来甩出去（每根卷风每个敌人一次） */
+  function tornadoContacts() {
+    for (const tw of fusions.tornadoes) {
+      for (const e of [...enemies.list]) {
+        if (tw.hit.has(e.id) || Math.hypot(e.pos.x - tw.pos.x, e.pos.z - tw.pos.z) > TORNADO.r) continue;
+        tw.hit.add(e.id);
+        hitEnemy(e, tw.step, tw.step.dmgEach, tw.pos, {});
+        enemies.fling(e, tw.dir.x * 8 + (Math.random() - 0.5) * 3, 6, tw.dir.z * 8 + (Math.random() - 0.5) * 3);
       }
     }
   }
@@ -479,6 +525,8 @@ export function start(root, opts = {}) {
     updateCubes(dt);
     if (walls.update(dt)) enemies.setObstacles(walls.obstacles());   // 土墙沉下去了，流场重算
     curtainContacts();
+    fusions.update(dt);
+    tornadoContacts();
     enemies.update(dt, camera);
     fx.update(dt);
     locks.update(dt, enemies);
@@ -545,6 +593,7 @@ export function start(root, opts = {}) {
     scene.remove(stressMesh); stressMesh.dispose(); stressGeo.dispose(); stressMat.dispose();
     locks.dispose();
     walls.dispose();
+    fusions.clear();
     hud.dispose();
     composer.dispose();
     renderer.dispose();
