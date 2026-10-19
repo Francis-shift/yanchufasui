@@ -2,7 +2,7 @@
 /**
  * 关键词解析：不联网、立刻出结果。三个用处——
  *   1. 回车瞬间先猜元素，法阵马上变成对应颜色（玩家第一眼就看到"它听懂了"）；
- *   2. 模型超时（3.5 秒）或断网时直接用它的结果施法；
+ *   2. 模型超时（4.5 秒）或断网时直接用它的结果施法；
  *   3. 每日额度用完后的保底。
  * 只认得关键词，听不懂复杂句子；输出格式与模型一致，同样要经过 sanitizeIntent。
  */
@@ -112,6 +112,8 @@ export function parseKeywords(text) {
       const hit = find(part, /** @type {string[]} */ (words));
       if (hit) { target = /** @type {string} */ (t); w.t = hit; break; }
     }
+    // 只是在召唤（「召唤冰龙」）、没说要放什么：不算一步，龙怎么打看后半句。只认龙名，别把「龙卷风」也吞了
+    if (!w.f && (/召唤|神龙/.test(part) || Object.values(DRAGON_WORDS).flat().some((d) => part.includes(d)))) continue;
     // 同一个元素、这半句又没说新形态：是在补充上一步（如「狂风爆裂，把那群吹下悬崖」），并进上一步，不另算一步
     const prev = steps[steps.length - 1];
     if (prev && prev.e === el && !w.f) {
@@ -139,5 +141,18 @@ export function parseKeywords(text) {
   let vivid = 0;
   for (const v of VIVID) if (text.includes(v)) vivid++;
   const m = text.length >= 8 ? Math.min(3, Math.floor(vivid / 2)) : 0;
-  return { s: steps, m, x: [], o: hasOverreach(text), nm: '' };
+  return { s: steps, m, x: [], o: hasOverreach(text), c: summonOf(text, steps), nm: '' };
+}
+
+/** 召唤：「冰龙」「火龙」直接认；只说「召唤神龙」之类没说哪条，就按这句的第一个元素，再没有就是冰龙 */
+const DRAGON_WORDS = { ice: ['冰龙', '寒龙', '霜龙', '雪龙'], fire: ['火龙', '炎龙', '焰龙'], wind: ['风龙'], earth: ['土龙', '石龙', '岩龙'], thunder: ['雷龙'] };
+/** @param {string} text @param {{ e: string }[]} steps */
+function summonOf(text, steps) {
+  let best = null, at = Infinity;
+  for (const [el, words] of Object.entries(DRAGON_WORDS)) {
+    for (const w of words) { const i = text.indexOf(w); if (i >= 0 && i < at) { best = el; at = i; } }
+  }
+  if (best) return best;
+  if (/召唤.{0,6}龙|神龙/.test(text)) return steps[0]?.e || 'ice';
+  return null;
 }

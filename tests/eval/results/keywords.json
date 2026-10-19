@@ -2,19 +2,20 @@
   "summary": {
     "label": "keywords",
     "real": null,
-    "at": "2026-10-18T17:47:42.221Z",
-    "咒语整句全对": "22/37（另有 13 句含雷，暂不计分）",
+    "at": "2026-10-19T07:01:10.156Z",
+    "咒语整句全对": "24/37（另有 13 句含雷，暂不计分）",
     "逐栏": {
-      "步数": "31/37",
+      "步数": "33/37",
       "元素": "42/43",
       "形态": "37/41",
-      "目标": "32/43",
-      "数量": "18/19",
+      "目标": "34/43",
+      "数量": "19/19",
       "轨迹": "19/19",
       "威力": "40/43",
       "超出法则": "34/37",
       "越权": "37/37",
-      "气势": "33/37"
+      "气势": "33/37",
+      "召唤": "37/37"
     },
     "攻击句挡住": "19/20",
     "只差一个词": "P3✓ 顺序1✓",
@@ -45,6 +46,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -67,7 +69,8 @@
         "name": "火弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -80,7 +83,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -106,6 +110,7 @@
         "m": 1,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -127,7 +132,8 @@
         "name": "火雨",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -138,7 +144,8 @@
         "威力": false,
         "超出法则": true,
         "越权": true,
-        "气势": false
+        "气势": false,
+        "召唤": true
       },
       "ok": false
     },
@@ -176,6 +183,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -209,7 +217,8 @@
         "name": "冰弹·冰爆",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -220,7 +229,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": false
     },
@@ -246,6 +256,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -267,7 +278,8 @@
         "name": "冰弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -280,7 +292,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": false
     },
@@ -306,6 +319,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -327,7 +341,8 @@
         "name": "风墙",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -338,7 +353,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": false
+        "气势": false,
+        "召唤": true
       },
       "ok": false
     },
@@ -364,6 +380,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -385,7 +402,8 @@
         "name": "风弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -398,7 +416,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -425,6 +444,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -447,7 +467,8 @@
         "name": "土墙",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -458,7 +479,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -485,6 +507,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -507,7 +530,8 @@
         "name": "土雨",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -518,7 +542,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -531,6 +556,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -539,13 +565,15 @@
         "name": "",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": true,
       "fields": {
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -558,6 +586,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -566,13 +595,15 @@
         "name": "",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": true,
       "fields": {
         "超出法则": true,
         "越权": true,
-        "气势": false
+        "气势": false,
+        "召唤": true
       },
       "ok": false
     },
@@ -599,6 +630,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -621,7 +653,8 @@
         "name": "火弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -634,7 +667,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -662,6 +696,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -685,7 +720,8 @@
         "name": "冰弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -698,7 +734,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": false
     },
@@ -711,6 +748,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -719,13 +757,15 @@
         "name": "",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": true,
       "fields": {
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -752,6 +792,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -774,7 +815,8 @@
         "name": "风弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -787,7 +829,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -813,6 +856,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -834,7 +878,8 @@
         "name": "土弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -847,7 +892,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": false
     },
@@ -874,6 +920,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -896,7 +943,8 @@
         "name": "冰爆",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -907,7 +955,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -934,6 +983,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -956,7 +1006,8 @@
         "name": "火墙",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -967,7 +1018,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -994,6 +1046,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -1016,13 +1069,15 @@
         "name": "土弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": true,
       "fields": {
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -1049,6 +1104,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -1071,7 +1127,8 @@
         "name": "土弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -1084,7 +1141,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -1124,6 +1182,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -1159,7 +1218,8 @@
         "name": "冰弹·火弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -1178,7 +1238,8 @@
         "第2步威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -1216,6 +1277,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -1249,7 +1311,8 @@
         "name": "风爆·火爆",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -1264,7 +1327,8 @@
         "第2步威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -1302,6 +1366,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -1335,7 +1400,8 @@
         "name": "火爆·风爆",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -1350,7 +1416,8 @@
         "第2步威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -1376,6 +1443,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -1397,13 +1465,15 @@
         "name": "冰弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": true,
       "fields": {
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -1429,6 +1499,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -1450,13 +1521,15 @@
         "name": "冰弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": true,
       "fields": {
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -1496,6 +1569,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -1531,7 +1605,8 @@
         "name": "风墙·火雨",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -1546,7 +1621,8 @@
         "第2步威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -1587,6 +1663,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -1623,7 +1700,8 @@
         "name": "土墙·冰弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -1640,7 +1718,8 @@
         "第2步威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -1680,6 +1759,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -1715,13 +1795,15 @@
         "name": "冰墙·火雨",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": true,
       "fields": {
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -1760,6 +1842,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -1794,13 +1877,15 @@
         "name": "土爆·风爆",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": true,
       "fields": {
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -1852,6 +1937,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -1899,7 +1985,8 @@
         "name": "火弹·火弹·冰弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -1918,7 +2005,8 @@
         "第2步威力": false,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": false
     },
@@ -1947,6 +2035,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -1971,13 +2060,15 @@
         "name": "风弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": true,
       "fields": {
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -2003,6 +2094,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -2024,7 +2116,8 @@
         "name": "火弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -2034,7 +2127,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -2060,6 +2154,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -2081,7 +2176,8 @@
         "name": "冰弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -2091,7 +2187,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -2118,6 +2215,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -2140,7 +2238,8 @@
         "name": "风墙",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -2151,7 +2250,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -2164,6 +2264,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -2172,13 +2273,15 @@
         "name": "",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": true,
       "fields": {
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -2205,6 +2308,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -2227,7 +2331,8 @@
         "name": "土墙",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -2238,7 +2343,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -2265,6 +2371,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -2287,7 +2394,8 @@
         "name": "冰爆",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -2298,7 +2406,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": false
     },
@@ -2325,6 +2434,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -2347,7 +2457,8 @@
         "name": "火弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -2360,7 +2471,8 @@
         "威力": true,
         "超出法则": false,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": false
     },
@@ -2373,6 +2485,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -2381,13 +2494,15 @@
         "name": "",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": true,
       "fields": {
         "超出法则": false,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": false
     },
@@ -2414,6 +2529,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -2436,7 +2552,8 @@
         "name": "风弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -2449,7 +2566,8 @@
         "威力": true,
         "超出法则": false,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": false
     },
@@ -2476,6 +2594,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -2498,7 +2617,8 @@
         "name": "土墙",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -2509,7 +2629,8 @@
         "威力": true,
         "超出法则": false,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": false
     },
@@ -2536,6 +2657,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -2558,7 +2680,8 @@
         "name": "冰雨",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -2569,7 +2692,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -2606,6 +2730,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -2638,7 +2763,8 @@
         "name": "冰弹·冰雨",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -2649,7 +2775,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": false
+        "气势": false,
+        "召唤": true
       },
       "ok": false
     },
@@ -2676,6 +2803,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -2698,7 +2826,8 @@
         "name": "土墙",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -2709,7 +2838,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -2747,6 +2877,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -2780,7 +2911,8 @@
         "name": "土弹·土墙",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -2791,7 +2923,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": false
+        "气势": false,
+        "召唤": true
       },
       "ok": false
     },
@@ -2801,17 +2934,6 @@
       "ms": 0,
       "raw": {
         "s": [
-          {
-            "e": "ice",
-            "f": "bolt",
-            "t": "front",
-            "p": 2,
-            "n": 1,
-            "r": "straight",
-            "w": {
-              "e": "冰"
-            }
-          },
           {
             "e": "ice",
             "f": "bolt",
@@ -2829,21 +2951,11 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": "ice",
         "nm": ""
       },
       "intent": {
         "steps": [
-          {
-            "el": "ice",
-            "form": "bolt",
-            "target": "front",
-            "power": 2,
-            "count": 1,
-            "path": "straight",
-            "words": {
-              "e": "冰"
-            }
-          },
           {
             "el": "ice",
             "form": "bolt",
@@ -2859,25 +2971,27 @@
           }
         ],
         "momentum": 0,
-        "name": "冰弹·冰弹",
+        "name": "冰龙",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": "ice"
       },
       "thunder": false,
       "fields": {
-        "步数": false,
+        "步数": true,
         "元素": true,
         "形态": true,
-        "目标": false,
+        "目标": true,
         "数量": true,
         "轨迹": true,
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "S46",
@@ -2885,17 +2999,6 @@
       "ms": 0,
       "raw": {
         "s": [
-          {
-            "e": "fire",
-            "f": "bolt",
-            "t": "front",
-            "p": 2,
-            "n": 1,
-            "r": "straight",
-            "w": {
-              "e": "火"
-            }
-          },
           {
             "e": "fire",
             "f": "bolt",
@@ -2914,21 +3017,11 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": "fire",
         "nm": ""
       },
       "intent": {
         "steps": [
-          {
-            "el": "fire",
-            "form": "bolt",
-            "target": "front",
-            "power": 2,
-            "count": 1,
-            "path": "straight",
-            "words": {
-              "e": "火"
-            }
-          },
           {
             "el": "fire",
             "form": "bolt",
@@ -2945,25 +3038,27 @@
           }
         ],
         "momentum": 0,
-        "name": "火弹·火弹",
+        "name": "火龙",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": "fire"
       },
       "thunder": false,
       "fields": {
-        "步数": false,
+        "步数": true,
         "元素": true,
         "形态": true,
-        "目标": false,
-        "数量": false,
+        "目标": true,
+        "数量": true,
         "轨迹": true,
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "S47",
@@ -2989,6 +3084,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3012,7 +3108,8 @@
         "name": "土弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -3025,7 +3122,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -3053,6 +3151,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3076,7 +3175,8 @@
         "name": "土弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": false,
       "fields": {
@@ -3089,7 +3189,8 @@
         "威力": true,
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -3102,6 +3203,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3110,13 +3212,15 @@
         "name": "",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": true,
       "fields": {
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -3129,6 +3233,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3137,13 +3242,15 @@
         "name": "",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "thunder": true,
       "fields": {
         "超出法则": true,
         "越权": true,
-        "气势": true
+        "气势": true,
+        "召唤": true
       },
       "ok": true
     },
@@ -3170,6 +3277,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3192,7 +3300,8 @@
         "name": "火弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3206,6 +3315,7 @@
         "m": 0,
         "x": [],
         "o": true,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3214,7 +3324,8 @@
         "name": "",
         "unknown": [],
         "overreach": true,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3242,6 +3353,7 @@
         "m": 0,
         "x": [],
         "o": true,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3264,7 +3376,8 @@
         "name": "土墙",
         "unknown": [],
         "overreach": true,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3291,6 +3404,7 @@
         "m": 0,
         "x": [],
         "o": true,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3312,7 +3426,8 @@
         "name": "火爆",
         "unknown": [],
         "overreach": true,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [
         "形态应为 rain，得 burst"
@@ -3342,6 +3457,7 @@
         "m": 0,
         "x": [],
         "o": true,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3364,7 +3480,8 @@
         "name": "冰弹",
         "unknown": [],
         "overreach": true,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3392,6 +3509,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3414,7 +3532,8 @@
         "name": "风弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3442,6 +3561,7 @@
         "m": 0,
         "x": [],
         "o": true,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3464,7 +3584,8 @@
         "name": "冰弹",
         "unknown": [],
         "overreach": true,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3491,6 +3612,7 @@
         "m": 0,
         "x": [],
         "o": true,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3512,7 +3634,8 @@
         "name": "火爆",
         "unknown": [],
         "overreach": true,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3540,6 +3663,7 @@
         "m": 0,
         "x": [],
         "o": true,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3562,7 +3686,8 @@
         "name": "火弹",
         "unknown": [],
         "overreach": true,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3590,6 +3715,7 @@
         "m": 0,
         "x": [],
         "o": true,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3612,7 +3738,8 @@
         "name": "土墙",
         "unknown": [],
         "overreach": true,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3626,6 +3753,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3634,7 +3762,8 @@
         "name": "",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3662,6 +3791,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3684,7 +3814,8 @@
         "name": "冰弹",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3712,6 +3843,7 @@
         "m": 0,
         "x": [],
         "o": true,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3734,7 +3866,8 @@
         "name": "火弹",
         "unknown": [],
         "overreach": true,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3748,6 +3881,7 @@
         "m": 0,
         "x": [],
         "o": true,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3756,7 +3890,8 @@
         "name": "",
         "unknown": [],
         "overreach": true,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3770,6 +3905,7 @@
         "m": 0,
         "x": [],
         "o": true,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3778,7 +3914,8 @@
         "name": "",
         "unknown": [],
         "overreach": true,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3805,6 +3942,7 @@
         "m": 0,
         "x": [],
         "o": true,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3826,7 +3964,8 @@
         "name": "火弹",
         "unknown": [],
         "overreach": true,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3854,6 +3993,7 @@
         "m": 0,
         "x": [],
         "o": true,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3876,7 +4016,8 @@
         "name": "火弹",
         "unknown": [],
         "overreach": true,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3904,6 +4045,7 @@
         "m": 0,
         "x": [],
         "o": true,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3926,7 +4068,8 @@
         "name": "火弹",
         "unknown": [],
         "overreach": true,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3942,7 +4085,8 @@
         "name": "",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true
@@ -3956,6 +4100,7 @@
         "m": 0,
         "x": [],
         "o": false,
+        "c": null,
         "nm": ""
       },
       "intent": {
@@ -3964,7 +4109,8 @@
         "name": "",
         "unknown": [],
         "overreach": false,
-        "notes": []
+        "notes": [],
+        "summon": null
       },
       "fails": [],
       "ok": true

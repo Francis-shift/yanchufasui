@@ -13,7 +13,11 @@ export default function Game() {
     let cancelled = false;
     import('../game/main.js').then(({ start }) => {
       if (cancelled || !root.current) return;
-      dispose = start(root.current, { parseUrl: '/api/parse' });
+      dispose = start(root.current, {
+        parseUrl: '/api/parse',
+        // 冰龙：气势槽过半或第一次召唤时才下载（模型 gzip 后约 310 KB，贴图约 220 KB）
+        dragon: { mesh: '/models/ice-dragon.drg2.gz', tex: '/models/ice-dragon-1024.webp' },
+      });
     });
     return () => { cancelled = true; dispose?.(); };
   }, []);

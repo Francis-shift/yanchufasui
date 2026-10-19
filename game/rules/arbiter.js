@@ -6,7 +6,8 @@
  */
 import {
   BOLT_COUNT_MAX, COMBO_DISCOUNT, ELEMENTS, ENEMIES, FIRST_DISCOVERY_MULT, FORMS, FUSION_DMG_MULT, FUSION_OPEN, FUSIONS,
-  MANA_MAX, MANA_REGEN, MOMENTUM_MULT, REACTIONS, REPEAT_DECAY, boltCostFactor, boltTotalDmgFactor, powerFactor,
+  MANA_MAX, MANA_REGEN, MOMENTUM_MULT, MOMENTUM_RANGE, POWER_DEFAULT, REACTIONS, REPEAT_DECAY, SUMMON_OPEN, SUMMONS,
+  ULT_GAUGE, boltCostFactor, boltTotalDmgFactor, powerFactor,
 } from './numbers.js';
 
 /** 「同一句话」的判定：去掉标点和空格后完全相同 */
@@ -29,11 +30,13 @@ export function totalCost(steps) {
  * @typedef {import('./intent.js').Intent} Intent
  * @typedef {import('./intent.js').Step} Step
  * @typedef {{ mana: number, lastCombo?: { key: string, streak: number } | null,
- *             seen?: Iterable<string>, said?: Iterable<string>, text?: string }} CastContext
+ *             seen?: Iterable<string>, said?: Iterable<string>, text?: string, gauge?: number }} CastContext
  * @typedef {Step & { cost: number, dmgTotal: number, dmgEach: number, first: boolean, repeat: number,
  *             fusion?: string, fusionName?: string, idiom?: string }} PlannedStep fusion 是融合的键（如 wind>fire）
+ * @typedef {{ el: string, name: string, target: string, dmg: number, radius: number, cast: boolean, ghost: boolean,
+ *             first?: boolean }} SummonPlan cast = 真召出来了；ghost = 差一口气，只演龙影（法术已换成 steps 里的雨）
  * @typedef {{ ok: boolean, steps: PlannedStep[], cost: number, momentum: number, momentumHalved: boolean,
- *             downgrades: string[], backlash: boolean, gaugeGain: number,
+ *             downgrades: string[], backlash: boolean, gaugeGain: number, gaugeSpent?: boolean, summon?: SummonPlan,
  *             lastCombo: { key: string, streak: number } | null, newlySeen: string[], saidKey: string }} CastPlan
  */
 
@@ -45,6 +48,7 @@ export function totalCost(steps) {
  * @returns {CastPlan}
  */
 export function planCast(intent, ctx) {
+  if (intent.summon) return planSummon(intent, ctx);
   const said = new Set(ctx.said || []);
   const seen = new Set(ctx.seen || []);
   const saidKey = sentenceKey(ctx.text || '');
@@ -103,6 +107,46 @@ export function planCast(intent, ctx) {
 
 /** @param {{ el: string, form: string }} s */
 const label = (s) => ELEMENTS[s.el].name + FORMS[s.form].name;
+
+/**
+ * 召唤：气势槽满、法力够、这条龙已开放，三样都满足才召得出；召出后气势槽清零。
+ * 差一样就"差一口气"：龙影现身又散去，化作同元素的雨（照雨的规矩扣法力、可降级），咒语卡写明差在哪。
+ * 龙俯冲砸向这句话第一步说的目标（没说就砸最密集的一群）；伤害吃气势倍数和首次发现加成，范围随气势变大。
+ * @param {Intent} intent
+ * @param {CastContext} ctx
+ * @returns {CastPlan}
+ */
+function planSummon(intent, ctx) {
+  const el = /** @type {keyof typeof SUMMONS} */ (intent.summon);
+  const spec = SUMMONS[el];
+  const target = intent.steps[0]?.target || 'densest';
+  const gauge = ctx.gauge ?? 0;
+  const why = !SUMMON_OPEN.includes(el) ? `${spec.name}尚未现世`
+    : gauge < ULT_GAUGE ? `气势 ${gauge}/${ULT_GAUGE}，${spec.name}未至`
+    : ctx.mana < spec.cost ? `法力不足，${spec.name}未至` : '';
+  if (why) {
+    const rest = { ...intent, summon: null };
+    if (el in ELEMENTS) {
+      // 化作同元素的雨，落在同一个目标上
+      rest.steps = [{ el, form: 'rain', target, power: POWER_DEFAULT, count: 1, path: 'sky', words: {} }];
+    }
+    const plan = planCast(rest, ctx);
+    const into = el in ELEMENTS && plan.ok ? `，化作${ELEMENTS[el].name}雨` : '';
+    return { ...plan, downgrades: [why + into, ...plan.downgrades], summon: { el, name: spec.name, target, dmg: 0, radius: 0, cast: false, ghost: SUMMON_OPEN.includes(el) && plan.ok } };
+  }
+  const said = new Set(ctx.said || []);
+  const saidKey = sentenceKey(ctx.text || '');
+  let momentum = intent.momentum, momentumHalved = false;
+  if (saidKey && said.has(saidKey) && momentum > 0) { momentum = Math.floor(momentum / 2); momentumHalved = true; }
+  const seenKey = `召唤:${el}`;
+  const first = !new Set(ctx.seen || []).has(seenKey);
+  const dmg = spec.dmg * MOMENTUM_MULT[Math.min(MOMENTUM_MULT.length - 1, momentum)] * (first ? FIRST_DISCOVERY_MULT : 1);
+  return {
+    ok: true, steps: [], cost: spec.cost, momentum, momentumHalved, downgrades: [], backlash: intent.overreach,
+    gaugeGain: 0, gaugeSpent: true, lastCombo: null, newlySeen: first ? [seenKey] : [], saidKey,
+    summon: { el, name: spec.name, target, dmg, radius: spec.radius * MOMENTUM_RANGE[Math.min(MOMENTUM_RANGE.length - 1, momentum)], cast: true, ghost: false, first },
+  };
+}
 
 /**
  * 融合：找第一对相邻、元素不同、目标相同、且在开放融合表里的两步，合成一步（一句最多融合一次）。

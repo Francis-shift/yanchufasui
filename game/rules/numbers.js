@@ -56,6 +56,28 @@ export const FIRST_DISCOVERY_MULT = 1.2;
 /** 大招：气势槽满 8 点才能召唤 */
 export const ULT_GAUGE = 8;
 
+/**
+ * 召唤（设计文档第 4 节"气势""大招"）：说的内容决定召唤谁，程序决定召不召得出。
+ * 气势槽满、法力够、这条龙已开放 → 龙从施法者身旁破土而出，绕场一周俯冲砸向目标，范围伤害并带元素效果；
+ * 否则"差一口气"：龙影现身又散去，化作同元素的雨（按雨正常扣法力），咒语卡写明差在哪。
+ * 第一批只开冰龙；火龙等第三批（换材质复用冰龙的模型与飞行路线）。
+ */
+export const SUMMONS = {
+  ice:     { name: '冰龙', cost: 40, dmg: 120, radius: 5 },
+  fire:    { name: '火龙', cost: 40, dmg: 120, radius: 5 },
+  wind:    { name: '风龙', cost: 40, dmg: 120, radius: 5 },
+  earth:   { name: '土龙', cost: 40, dmg: 120, radius: 5 },
+  thunder: { name: '雷龙', cost: 40, dmg: 120, radius: 5 },
+};
+export const SUMMON_OPEN = ['ice'];
+
+/**
+ * 气势每一档都要看得出来（设计文档第 4 节）：伤害见 MOMENTUM_MULT；
+ * 范围（爆的半径、雨的铺开、龙的砸地范围）× 下面第一行，特效大小与粒子量 × 第二行。
+ */
+export const MOMENTUM_RANGE = [1.0, 1.1, 1.2, 1.3];
+export const MOMENTUM_FX = [1.0, 1.25, 1.5, 1.8];
+
 /** 输入与响应 */
 export const INPUT_MAX_CHARS = 60;    // 一句最多 60 字（防刷）
 export const SLOWMO_SCALE = 0.3;      // 开口就慢放到 0.3 倍

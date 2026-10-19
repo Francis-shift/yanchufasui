@@ -1,7 +1,7 @@
 // @ts-check
 /**
  * 游戏入口：搭场景、接输入、跑主循环。施法一条龙：
- *   开口就慢放 → 回车：关键词先猜元素给法阵上色 → 咏唱（同时请模型解析，最短 0.8 秒、超时 3.5 秒改用关键词）
+ *   开口就慢放 → 回车：关键词先猜元素给法阵上色 → 咏唱（同时请模型解析，最短 0.8 秒、超时 4.5 秒改用关键词）
  *   → 清洗意图 → 裁决（消耗、降级、伤害）→ 咒语卡 → 执行（飞弹 / 爆炸 / 命中结算）。
  * 规则全在 game/rules/（纯函数、有单测）；这里只负责把结果演出来。
  */
@@ -17,9 +17,11 @@ import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
 import { maskText } from './rules/safety.js';
 import {
-  BEAM, CHANT_MIN_MS, CORE_HP, FORMS, INPUT_MAX_CHARS, MANA_MAX, PARSE_TIMEOUT_MS, RAIN, SLOWMO_MAX_SEC, SLOWMO_SCALE, TORNADO, WALL,
+  BEAM, CHANT_MIN_MS, CORE_HP, FORMS, INPUT_MAX_CHARS, MANA_MAX, MOMENTUM_FX, MOMENTUM_RANGE, PARSE_TIMEOUT_MS, RAIN,
+  SLOWMO_MAX_SEC, SLOWMO_SCALE, TORNADO, ULT_GAUGE, WALL,
 } from './rules/numbers.js';
 import { Enemies } from './actors/enemies.js';
+import { DragonFx } from './fx/dragon.js';
 import { Locks } from './fx/locks.js';
 import { distToSegment, Walls } from './fx/walls.js';
 import { FusionFx } from './fx/fusions.js';
@@ -62,7 +64,7 @@ const FAIL_TEXT = {
 
 /**
  * @param {HTMLElement} root
- * @param {{ parseUrl?: string }} [opts]
+ * @param {{ parseUrl?: string, dragon?: { mesh?: string, tex?: string | null } }} [opts] dragon：冰龙模型与贴图的地址
  * @returns {() => void} 卸载
  */
 export function start(root, opts = {}) {
@@ -102,6 +104,7 @@ export function start(root, opts = {}) {
 
   const walls = new Walls(scene, world, particles);
   const fusions = new FusionFx(fx, particles);
+  const dragon = new DragonFx(fx, particles, opts.dragon);
   const hud = new Hud(root);
   preloadFonts();   // 标题画面期间先下书法字的常用那份
   const _v = new THREE.Vector3();
@@ -167,11 +170,13 @@ export function start(root, opts = {}) {
     enemies.clear();
     if (walls.clear()) enemies.setObstacles([]);
     fusions.clear();
+    dragon.clear();
     timers.length = 0;   // 上一局没跑完的延时（第二步法术、收锁定标记）不能带进新的一局
     Object.assign(S, { phase: 'playing', mana: MANA_MAX, core: CORE_HP, gauge: 0, lastCombo: null, seen: [], said: new Set(),
       wave: 0, busy: false, restT: 0 });
     startWave(0);
     hud.setCore(S.core, CORE_HP);
+    hud.setGauge(S.gauge, ULT_GAUGE);
     hud.hideOverlay();
     hud.input.focus();
   }
@@ -242,16 +247,18 @@ export function start(root, opts = {}) {
   /**
    * 每一步打谁，在放出之前就定下来：锁定标记亮的就是之后真正打的。
    * @param {{ el: string, form: string, target: string, count: number }[]} steps
+   * @param {number} [m] 气势档（范围随气势变大，圈也跟着大）
    */
-  function lockSteps(steps) {
+  function lockSteps(steps, m = 0) {
     const views = enemies.views();
     const resolved = steps.map((s) => resolveTarget(s.target, views, { count: s.count, caster: CASTER_POS, objects: OBJECTS }));
+    const k = MOMENTUM_RANGE[m] ?? 1;
     const marks = steps.map((s, i) => {
       const res = resolved[i];
       const heads = s.form === 'bolt' ? res.ids.slice(0, s.count) : [];
       const ring = !heads.length && res.point
         ? { x: res.point.x, y: groundHeightAt(res.point.x, res.point.z) ?? 0, z: res.point.z,
-            r: { bolt: 0.8, burst: FORMS.burst.radius, rain: RAIN.spread, wall: ((FORMS.wall.segments - 1) / 2) * WALL.gap + 0.5 }[s.form] ?? 1 }
+            r: { bolt: 0.8, burst: FORMS.burst.radius * k, rain: RAIN.spread * k, wall: ((FORMS.wall.segments - 1) / 2) * WALL.gap + 0.5 }[s.form] ?? 1 }
         : null;
       return { el: s.el, ids: heads, ring };
     });
@@ -289,10 +296,13 @@ export function start(root, opts = {}) {
       if (k.steps.length) { intent = { ...k, unknown: intent.unknown, overreach: intent.overreach || k.overreach }; source += '＋关键词'; }
     }
     if (S.phase !== 'playing') { fx.endChant(); locks.clear(castId); S.busy = false; return; }
-    if (intent.steps[0]) fx.retint(intent.steps[0].el);
-    const plan = planCast(intent, { mana: S.mana, lastCombo: S.lastCombo, seen: S.seen, said: S.said, text });
+    const firstEl = intent.summon && intent.summon !== 'thunder' ? intent.summon : intent.steps[0]?.el;
+    if (firstEl) fx.retint(firstEl);
+    const plan = planCast(intent, { mana: S.mana, lastCombo: S.lastCombo, seen: S.seen, said: S.said, text, gauge: S.gauge });
     S.mana -= plan.cost;
-    S.gauge += plan.gaugeGain;
+    S.gauge = plan.gaugeSpent ? 0 : Math.min(ULT_GAUGE, S.gauge + plan.gaugeGain);
+    hud.setGauge(S.gauge, ULT_GAUGE);
+    if (S.gauge >= ULT_GAUGE / 2 || intent.summon) dragon.preload();   // 气势槽过半就先把龙的模型下好
     S.lastCombo = plan.lastCombo;
     S.seen.push(...plan.newlySeen);
     if (plan.saidKey) S.said.add(plan.saidKey);
@@ -310,32 +320,76 @@ export function start(root, opts = {}) {
       S.busy = false;
       return;
     }
-    const { resolved, marks } = lockSteps(plan.steps);
+    const m = plan.momentum;
+    if (plan.summon?.cast) {
+      runSummon(plan.summon, castId);
+      S.busy = false;
+      return;
+    }
+    const { resolved, marks } = lockSteps(plan.steps, m);
     locks.show(castId, marks);
     fx.launchBurst(plan.steps[0].el);
-    plan.steps.forEach((step, i) => after(i * 0.45, () => runStep(step, resolved[i])));
-    after((plan.steps.length - 1) * 0.45 + 1.2, () => locks.clear(castId));
-    if (plan.momentum >= 3) hud.bigText('气势如虹', '#16202b', 900);
+    const go = () => {
+      plan.steps.forEach((step, i) => after(i * 0.45, () => runStep(step, resolved[i], m)));
+      after((plan.steps.length - 1) * 0.45 + 1.2, () => locks.clear(castId));
+    };
+    if (plan.summon?.ghost) {
+      // 差一口气：龙影升起、散开，再落雨
+      hud.bigText('差一口气', '#2f5d8a', 1200);
+      dragon.ghost(plan.summon.el, go);
+    } else go();
+    if (m >= 3) hud.bigText('气势如虹', '#16202b', 900);
     S.busy = false;
+  }
+
+  /**
+   * 真召唤：龙从施法者左前方破土，绕场一周，俯冲砸向目标；砸中时范围内每个敌人按"从天而降"吃一下（盾挡不住）。
+   * @param {import('./rules/arbiter.js').SummonPlan} sm
+   * @param {number} castId
+   */
+  function runSummon(sm, castId) {
+    const res = resolveTarget(sm.target, enemies.views(), { count: 3, caster: CASTER_POS, objects: OBJECTS });
+    const pt = res.point ?? { x: DEFAULT_AIM.x, z: DEFAULT_AIM.z };
+    const at = (x, z) => new THREE.Vector3(x, groundHeightAt(x, z) ?? 0, z);
+    // 龙要飞五六秒，锁定的几只一直在走：落点跟着它们（还活着的几只的中心）走；全死了就砸最后看到的位置
+    const ids = res.ids;
+    const follow = () => {
+      const live = ids.map((id) => enemies.get(id)).filter(Boolean);
+      if (!live.length) return null;
+      return at(live.reduce((a, e) => a + e.pos.x, 0) / live.length, live.reduce((a, e) => a + e.pos.z, 0) / live.length);
+    };
+    locks.show(castId, [{ el: sm.el, ids, ring: ids.length ? null : { x: pt.x, y: groundHeightAt(pt.x, pt.z) ?? 0, z: pt.z, r: sm.radius } }]);
+    hud.bigText(`${sm.name}现世`, '#1f5f9a', 1400);
+    fx.launchBurst(sm.el);
+    dragon.summon(at(pt.x, pt.z), sm.el, (p) => {
+      locks.clear(castId);
+      if (S.phase !== 'playing') return;
+      for (const e of [...enemies.list]) {
+        if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) <= sm.radius) hitEnemy(e, { el: sm.el }, sm.dmg, p, { fromAbove: true });
+      }
+    }, ids.length ? follow : undefined);
   }
 
   /**
    * @param {import('./rules/arbiter.js').PlannedStep} step
    * @param {{ ids: string[], point: { x: number, z: number } | null }} res 施法时就定好的目标（与锁定标记一致）
+   * @param {number} [m] 气势档：范围 × MOMENTUM_RANGE，特效 × MOMENTUM_FX，第 3 档每次命中加顿帧
    */
-  function runStep(step, res) {
+  function runStep(step, res, m = 0) {
     if (S.phase !== 'playing') return;
     if (step.fusion) { runFusion(step, res); return; }
+    const range = MOMENTUM_RANGE[m] ?? 1, big = MOMENTUM_FX[m] ?? 1;
+    const boom = (p, R, scale) => { fx.burst(p, step.el, R, scale * big); if (m >= 3) fx.hitStop = Math.max(fx.hitStop, 0.12); };
     const dir = { fromAbove: step.path === 'sky', fromBehind: step.path === 'behind' };
     if (step.form === 'bolt') {
       for (let i = 0; i < step.count; i++) {
         const id = res.ids.length ? res.ids[i % res.ids.length] : null;
         let last = res.point ? groundPt(res.point) : DEFAULT_AIM.clone();
         fx.bolt({
-          el: step.el, path: step.path, delay: i * 0.14,
+          el: step.el, path: step.path, delay: i * 0.14, big: m >= 2,
           target: () => { const e = id && enemies.get(id); if (e) enemies.aimPoint(e, last); return last; },
           onHit: (p) => {
-            fx.burst(p, step.el, 1.3, 0.45);
+            boom(p, 1.3, 0.45);
             const e = id && enemies.get(id);
             if (e) hitEnemy(e, step, step.dmgEach, CASTER_POS, dir);
           },
@@ -345,14 +399,14 @@ export function start(root, opts = {}) {
       // 雨：2 秒里从天上落 6 次，落点撒在目标周围；从天而降，盾傀儡挡不住
       const c = res.point ? groundPt(res.point) : DEFAULT_AIM.clone();
       for (let i = 0; i < FORMS.rain.hits; i++) {
-        const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * RAIN.spread;
+        const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * RAIN.spread * range;
         const tp = groundPt({ x: c.x + Math.cos(a) * r, z: c.z + Math.sin(a) * r });
         fx.bolt({
           el: step.el, path: 'sky', delay: (i * FORMS.rain.sec) / FORMS.rain.hits, target: () => tp,
           onHit: (p) => {
-            fx.burst(p, step.el, RAIN.hitR, 0.4);
+            boom(p, RAIN.hitR * range, 0.4);
             for (const e of [...enemies.list]) {
-              if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) <= RAIN.hitR) hitEnemy(e, step, step.dmgEach, p, { fromAbove: true });
+              if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) <= RAIN.hitR * range) hitEnemy(e, step, step.dmgEach, p, { fromAbove: true });
             }
           },
         });
@@ -361,11 +415,11 @@ export function start(root, opts = {}) {
       raiseWall(step, res);
     } else {
       const pt = res.point ? groundPt(res.point) : DEFAULT_AIM.clone();
-      const R = FORMS.burst.radius;
+      const R = FORMS.burst.radius * range;
       fx.bolt({
         el: step.el, path: 'straight', big: true, target: () => pt,
         onHit: (p) => {
-          fx.burst(p, step.el, R, 1);
+          boom(p, R, 1);
           for (const e of [...enemies.list]) {
             if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) <= R) hitEnemy(e, step, step.dmgEach, p, {});
           }
@@ -531,6 +585,7 @@ export function start(root, opts = {}) {
     curtainContacts();
     fusions.update(dt);
     tornadoContacts();
+    dragon.update(dt);
     enemies.update(dt, camera);
     fx.update(dt);
     locks.update(dt, enemies);
@@ -578,6 +633,23 @@ export function start(root, opts = {}) {
     block: (list = []) => enemies.setObstacles(list),
     wave: (i = 0) => { enemies.clear(); S.phase = 'playing'; startWave(i); },
     killAll: () => { S.queue.length = 0; for (const e of [...enemies.list]) enemies.kill(e, e.pos); },
+    gauge: (n = ULT_GAUGE) => { S.gauge = n; hud.setGauge(S.gauge, ULT_GAUGE); },
+    // 面板太小时看不清：按 w×h 横屏重画当前这一帧（先 pause 定格），返回 JPEG 的 data URL
+    snap: (w = 960, h = 540) => {
+      const css = root.style.cssText, ratio = renderer.getPixelRatio();
+      root.style.cssText += `;width:${w}px;height:${h}px;right:auto;bottom:auto`;
+      renderer.setPixelRatio(1);
+      layoutCamera();
+      camera.position.copy(cam.base); camera.lookAt(cam.look);
+      composer.render();
+      const url = renderer.domElement.toDataURL('image/jpeg', 0.72);
+      root.style.cssText = css;
+      renderer.setPixelRatio(ratio);
+      layoutCamera();
+      return url;
+    },
+    dragon: () => dragon.preload(),
+    flight: () => { const f = dragon.active; return f && { kind: f.kind, s: +f.s.toFixed(1), sHit: +f.sHit.toFixed(1), impacted: f.impacted, target: f.target.toArray().map((v) => +v.toFixed(1)) }; },
     locks: () => ({ heads: locks.heads.filter((h) => h.mesh.visible).map((h) => h.id), rings: locks.rings.filter((r) => r.mesh.visible).length }),
     // 以下给检查页用
     refill: () => { S.mana = MANA_MAX; S.core = CORE_HP; hud.setCore(S.core, CORE_HP); },
@@ -598,6 +670,7 @@ export function start(root, opts = {}) {
     locks.dispose();
     walls.dispose();
     fusions.clear();
+    dragon.clear();
     hud.dispose();
     composer.dispose();
     renderer.dispose();

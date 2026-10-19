@@ -6,6 +6,8 @@
 预览页没有服务器，解析只走关键词（等同断网模式）。
 用法：python tools/build_preview.py          → preview/index.html（游戏）
       python tools/build_preview.py check    → preview/check.html（手机检查页）
+      python tools/build_preview.py --dragon preview/assets/dragon-6k.bin  → 游戏页另外内嵌一条龙（减面版，无贴图）
+        正式的上色龙 gzip 后 310 KB、贴图 220 KB，塞进来就超过面板 512 KB 的上限，所以预览只验召唤的代码路径和飞行路线。
 """
 import sys
 import base64
@@ -113,7 +115,10 @@ SHELL = """<!doctype html>
 
 TARGETS = {
     # 名字: (入口模块, 启动语句, 页面标题, 输出文件)
-    "game": ("game/main.js", "import { start } from '@local/game/main.js'; start(document.getElementById('app'), {});",
+    "game": ("game/main.js", "import { start } from '@local/game/main.js';"
+             " const d = document.getElementById('asset-dragon');"
+             " const mesh = d ? URL.createObjectURL(new Blob([Uint8Array.from(atob(d.textContent.trim()), (c) => c.charCodeAt(0))])) : undefined;"
+             " start(document.getElementById('app'), mesh ? { dragon: { mesh } } : {});",
              "言出法随 · 预览", "index.html"),
     "check": ("game/check.js", "import { startCheck } from '@local/game/check.js'; startCheck(document.getElementById('app'));",
               "言出法随 · 手机检查", "check.html"),
@@ -121,7 +126,13 @@ TARGETS = {
 
 
 def main():
-    entry, boot, title, out_name = TARGETS[sys.argv[1] if len(sys.argv) > 1 else "game"]
+    args = sys.argv[1:]
+    dragon = None
+    if "--dragon" in args:
+        i = args.index("--dragon")
+        dragon = pathlib.Path(args[i + 1]).read_bytes()
+        del args[i:i + 2]
+    entry, boot, title, out_name = TARGETS[args[0] if args else "game"]
     pkgs: dict = {}
     for p in ENTRIES.values():
         collect_pkg(p, pkgs)
@@ -129,6 +140,8 @@ def main():
     collect_local(entry, locs)
     blocks = [f'<script type="application/octet-stream" data-mod="@pkg/{p}">{gz_b64(c)}</script>' for p, c in pkgs.items()]
     blocks += [f'<script type="application/octet-stream" data-mod="@local/{p}">{gz_b64(c)}</script>' for p, c in locs.items()]
+    if dragon:   # 模型数据 gzip 后内联，游戏里按开头两个字节自己判断要不要解压
+        blocks.append(f'<script type="application/octet-stream" id="asset-dragon">{base64.b64encode(gzip.compress(dragon, 9)).decode()}</script>')
     alias = {name: f"@pkg/{path}" for name, path in ENTRIES.items()}
     page = SHELL % (title, "\n".join(blocks) + "\n" + BOOT % (json.dumps(alias), json.dumps(boot)))
     OUT.mkdir(exist_ok=True)

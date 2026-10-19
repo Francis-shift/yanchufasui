@@ -3,7 +3,7 @@
  * 界面（纯 DOM，不依赖框架）：输入框、法力条、阵眼血条、波次、咒语卡、浮字、大字、开始与结算、调试面板。
  * 咒语卡：书法大字写名字；下面把原话里被听懂的词加下划线并注明变成了什么，没听懂的标灰。
  */
-import { ELEMENTS, FORMS, INPUT_MAX_CHARS } from '../rules/numbers.js';
+import { ELEMENTS, FORMS, INPUT_MAX_CHARS, SUMMONS } from '../rules/numbers.js';
 import { PATH_NAMES, TARGET_NAMES } from '../rules/intent.js';
 
 /**
@@ -43,6 +43,10 @@ const CSS = FONT_CSS + `
 .yc-bar > i { display: block; height: 100%; width: 100%; border-radius: 4px; transition: width .15s; }
 .yc-core > i { background: linear-gradient(90deg, #6b7cff, #39c6ff); }
 .yc-mana > i { background: linear-gradient(90deg, #4f8dff, #7fe0ff); }
+.yc-gauge > i { background: linear-gradient(90deg, #f0b24a, #ffd98a); }
+.yc-top.gauge-full .yc-gauge { box-shadow: 0 0 10px 2px rgba(255, 196, 80, 0.75); animation: yc-pulse 1.1s ease-in-out infinite; }
+.yc-top.gauge-full [data-gauge] { color: #b06d00; }
+@keyframes yc-pulse { 50% { box-shadow: 0 0 16px 4px rgba(255, 196, 80, 0.95); } }
 .yc-bottom { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   width: min(640px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 6px; pointer-events: auto; }
 .yc-input { width: 100%; font: inherit; font-size: 17px; padding: 12px 16px; border-radius: 14px; border: 1px solid var(--line);
@@ -101,7 +105,8 @@ export class Hud {
     this.root.append(style);
     this.top = el(`<div class="yc-top">
       <div class="yc-label"><span>阵眼</span><b data-core>100</b></div><div class="yc-bar yc-core"><i data-corebar></i></div>
-      <div class="yc-label" style="margin-top:4px"><span data-wave>准备守关</span><span data-left></span></div></div>`);
+      <div class="yc-label" style="margin-top:4px"><span data-wave>准备守关</span><span data-left></span></div>
+      <div class="yc-label" style="margin-top:4px"><span>气势槽</span><b data-gauge>0 / 8</b></div><div class="yc-bar yc-gauge"><i data-gaugebar style="width:0"></i></div></div>`);
     this.bottom = el(`<div class="yc-bottom">
       <div class="yc-label"><span>法力</span><b data-mana>100</b></div><div class="yc-bar yc-mana"><i data-manabar></i></div>
       <input class="yc-input" maxlength="${INPUT_MAX_CHARS}" enterkeyhint="send" autocomplete="off" aria-label="咒语" placeholder="说出你的咒语……（回车施法）">
@@ -125,6 +130,12 @@ export class Hud {
   setMana(m, max) { this.q('[data-mana]').textContent = String(Math.floor(m)); this.q('[data-manabar]').style.width = `${(m / max) * 100}%`; }
   setWave(text, left) { this.q('[data-wave]').textContent = text; this.q('[data-left]').textContent = left; }
   setHint(text) { this.q('[data-hint]').textContent = text; }
+  /** 气势槽：满了发光，提示可以召唤 @param {number} g @param {number} max */
+  setGauge(g, max) {
+    this.q('[data-gauge]').textContent = g >= max ? '已满 · 可召唤冰龙' : `${g} / ${max}`;
+    this.q('[data-gaugebar]').style.width = `${Math.min(1, g / max) * 100}%`;
+    this.top.classList.toggle('gauge-full', g >= max);
+  }
 
   /**
    * 咒语卡。
@@ -139,6 +150,8 @@ export class Hud {
       for (const [k, w] of Object.entries(s.words)) marks.push({ w, color: elColor(s.el), tag: wordTag(k, s) });
     }
     for (const w of intent.unknown) marks.push({ w, gray: true, tag: '超出法则，未生效' });
+    const sm = intent.summon ? SUMMONS[intent.summon] : null;
+    if (sm && c.text.includes(sm.name)) marks.unshift({ w: sm.name, color: elColor(intent.summon || ''), tag: plan.summon?.cast ? '召唤' : '未至' });
     let html = esc(c.text);
     const tags = [];
     for (const m of marks) {
@@ -147,7 +160,8 @@ export class Hud {
       html = html.replace(e, m.gray ? `<span class="gray">${e}</span>` : `<u style="text-decoration-color:${m.color}">${e}</u>`);
       tags.push(`<span class="yc-tag${m.gray ? ' gray' : ''}">${e} → ${esc(m.tag)}</span>`);
     }
-    const steps = plan.steps.map((s) => (s.fusionName ? `融合·${s.fusionName}`
+    const summoned = plan.summon?.cast ? `召唤·${plan.summon.name}${plan.summon.first ? '（新发现 +20%）' : ''}` : '';
+    const steps = summoned || plan.steps.map((s) => (s.fusionName ? `融合·${s.fusionName}`
       : `${ELEMENTS[s.el].name}${FORMS[s.form].name}${s.form === 'bolt' && s.count > 1 ? '×' + s.count : ''}`) +
       `（威力 ${s.power}${s.first ? '，新发现 +20%' : ''}）`).join(' → ');
     const meta = [

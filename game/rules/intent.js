@@ -5,14 +5,14 @@
  * 模型输出的原始格式（字段名用短词，输出越短越快；顺序按用到的先后，咒语名放最后）：
  *   { "s": [ { "e": "ice", "f": "bolt", "t": "front", "p": 2, "n": 1, "r": "straight",
  *              "w": { "e": "冻住", "t": "最前面那只" } } ],
- *     "m": 2, "x": ["变成猫"], "o": false, "nm": "霜缚" }
+ *     "m": 2, "x": ["变成猫"], "o": false, "c": null, "nm": "霜缚" }
  *   s 步骤（≤3）：e 元素、f 形态、t 目标、p 威力、n 颗数（只对弹）、r 轨迹（只对弹）、w 每一栏来自原话的哪几个字
- *   m 气势 0～3；x 游戏里没有的要求（原话片段）；o 是否越权；nm 给这句话起的名字
+ *   m 气势 0～3；x 游戏里没有的要求（原话片段）；o 是否越权；c 点名召唤的龙（元素名，如 ice），没有为 null；nm 给这句话起的名字
  *
  * 清洗原则：模型说什么都不直接信——枚举不在表里就丢或降级，数值夹到上限，来源词必须真在原话里。
  */
 import {
-  BOLT_COUNT_MAX, COMBO_MAX_STEPS, ELEMENTS, FORMS, MOMENTUM_MAX, PHASE, POWER_DEFAULT, POWER_MAX, POWER_MIN,
+  BOLT_COUNT_MAX, COMBO_MAX_STEPS, ELEMENTS, FORMS, MOMENTUM_MAX, PHASE, POWER_DEFAULT, POWER_MAX, POWER_MIN, SUMMONS,
 } from './numbers.js';
 import { hasOverreach } from './keywords.js';
 import { inCharset } from './charset.js';
@@ -38,7 +38,7 @@ const WORD_MAX = 12;
  * @typedef {{ el: string, form: string, target: string, power: number, count: number, path: string,
  *             words: Record<string, string> }} Step
  * @typedef {{ steps: Step[], momentum: number, name: string, unknown: string[], overreach: boolean,
- *             notes: string[] }} Intent
+ *             notes: string[], summon?: string | null }} Intent summon 是点名召唤的龙（按元素，如 ice = 冰龙），没有为 null
  */
 
 /** @param {unknown} v @returns {v is Record<string, any>} */
@@ -132,7 +132,9 @@ export function sanitizeIntent(raw, text, phase = PHASE) {
   const unknown = (Array.isArray(r.x) ? r.x : [])
     .filter((x) => typeof x === 'string' && x.length > 0 && x.length <= WORD_MAX && text.includes(x))
     .slice(0, 3);
+  // 召唤：只认表里的龙（元素名）；召不召得出由裁决器看气势槽和法力
+  const summon = typeof r.c === 'string' && r.c in SUMMONS ? r.c : null;
   // 玩家在原话里指定名字（「给它起名…」「法术名必须叫…」）时不用模型给的名字：名字只能由游戏起，防广告、骂人话借名字上屏
-  const name = (NAMING.test(text) ? '' : usableName(r.nm)) || (steps.length ? defaultName(steps) : '');
-  return { steps, momentum: overreach ? 0 : m.value, name, unknown, overreach, notes };
+  const name = (NAMING.test(text) ? '' : usableName(r.nm)) || (summon ? SUMMONS[summon].name : '') || (steps.length ? defaultName(steps) : '');
+  return { steps, momentum: overreach ? 0 : m.value, name, unknown, overreach, notes, summon };
 }
