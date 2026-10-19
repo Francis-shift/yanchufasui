@@ -1,8 +1,9 @@
 // 内容安全与书法字表的单测：node --test tests/
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { test } from 'node:test';
 
-import { CHARSET, CORE, LEVEL1, UI_TEXTS, inCharset } from '../game/rules/charset.js';
+import { BIG_CHARS, CHARSET, CORE, LEVEL1, UI_TEXTS, inCharset } from '../game/rules/charset.js';
 import { defaultName, sanitizeIntent, usableName } from '../game/rules/intent.js';
 import { ELEMENTS, FORMS, FUSIONS } from '../game/rules/numbers.js';
 import { maskText, nameIsClean } from '../game/rules/safety.js';
@@ -22,6 +23,16 @@ test('字表：界面固定大字、所有默认名、融合名与成语都在�
   for (const f of Object.values(FUSIONS)) must.push(f.name, f.idiom);
   const bad = must.filter((s) => !inCore(s));
   assert.deepEqual(bad, [], `这些字不在先加载的字表里：${bad.join('、')}`);
+});
+
+test('字表：main.js 里所有大字与结算标题的写法，每个字都在大字那份字体里', () => {
+  const src = fs.readFileSync(new URL('../game/main.js', import.meta.url), 'utf8');
+  const calls = [...src.matchAll(/(?:bigText|showOverlay)\(([^;]*?)(?:,\s*'#|,\s*`|,\s*'[^']*',\s*'|\);)/g)].map((m) => m[1]);
+  assert.ok(calls.length >= 6, `只找到 ${calls.length} 处大字，正则可能失效`);
+  const big = new Set(BIG_CHARS);
+  const lits = calls.flatMap((c) => [...c.matchAll(/'([^']*)'|`([^`]*)`/g)].map((m) => (m[1] ?? m[2]).replace(/\$\{[^}]*\}/g, '')));
+  const bad = lits.join('').split('').filter((ch) => !big.has(ch));
+  assert.deepEqual([...new Set(bad)], [], `这些大字不在大字字体里：${[...new Set(bad)].join('')}`);
 });
 
 test('字表：名字里有表外的字（繁体、生僻字）就换默认名', () => {

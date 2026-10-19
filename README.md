@@ -34,6 +34,7 @@
 | `game/main.js` | 入口：把上面接起来，施法流程、五波守关与主循环 |
 | `game/check.js` | 手机检查页：自动跑三段压力测试，判断卡在画面、特效还是物理 |
 | `app/` | 网站（Next.js）：游戏页、`/check` 检查页、`api/parse` 解析接口（`?diag=1` 诊断线上慢在哪） |
+| `public/fonts/` | 按字表裁剪的书法字体（咒语名用马善政，大字用志莽行，SIL OFL 开源协议，协议原文同目录） |
 | `server/` | 解析接口用的提示词、防刷计数 |
 | `tests/` | 单元测试（`npm test`）；`tests/eval/` 封存的评测集与攻击句、勘误、各模型跑分结果 |
 | `tools/` | `build_preview.py` 打离线单文件页面验画面；`bench-parse.mjs` 测解析延迟；`eval-parse.mjs` 跑评测集；`subset_font.py` 按字表裁书法字体；`name-charset.mjs` 查模型起的名字有多少落在字表里 |
