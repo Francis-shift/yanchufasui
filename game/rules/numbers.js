@@ -78,6 +78,25 @@ export const SUMMON_OPEN = ['ice'];
 export const MOMENTUM_RANGE = [1.0, 1.1, 1.2, 1.3];
 export const MOMENTUM_FX = [1.0, 1.25, 1.5, 1.8];
 
+/**
+ * 天赋与按键（设计文档第 4 节"天赋与按键"，10-20 定）：开局从这几种元素里选，最多 TALENT_MAX 个；
+ * 没开放的元素（PHASE.elements 里没有的，如还没做的雷）在选天赋界面上显示但选不了。
+ */
+export const TALENTS = ['fire', 'ice', 'wind', 'earth', 'thunder'];
+export const TALENT_MAX = 3;
+/** 每个天赋按钮的默认招（威力按 POWER_DEFAULT，照常扣法力） */
+export const TALENT_DEFAULT = {
+  fire:    { form: 'bolt',  target: 'front' },     // 火弹打最前面
+  ice:     { form: 'bolt',  target: 'front' },     // 冰弹打最前面
+  wind:    { form: 'burst', target: 'densest' },   // 风爆打最密集的一群，推下悬崖
+  earth:   { form: 'wall',  target: 'front' },     // 土墙挡在最前面的敌人前方
+  thunder: { form: 'bolt',  target: 'front' },     // 雷弹打最前面（连锁）
+};
+/** 按下天赋按钮后咏唱多久（毫秒）：这段时间里再按另一个天赋，两步合成一句（先后就是语序） */
+export const BUTTON_CHANT_MS = 600;
+/** 按键攒气势（按键的招不按描写打分）：一招打中 multiHitMin 个以上 +multiHit，打出融合或元素反应 +combo，一招最多 +max */
+export const BUTTON_GAUGE = { multiHitMin: 3, multiHit: 1, combo: 2, max: 2 };
+
 /** 输入与响应 */
 export const INPUT_MAX_CHARS = 60;    // 一句最多 60 字（防刷）
 export const SLOWMO_SCALE = 0.3;      // 开口就慢放到 0.3 倍
@@ -99,6 +118,8 @@ export const REACTIONS = {
   'wind+fire':  { name: '火旋风', radiusMult: 1.5 },// 火的作用范围 × 1.5
   'earth+wind': { name: '落石', rockDmg: 30 },      // 石墙被风推出
 };
+/** 已经做好的反应（arbiter.js damageTo 里判断的）；火旋风、落石 10-20 顺延到第二批，选天赋的羁绊里先不列 */
+export const REACTION_OPEN = ['ice+fire', 'ice+wind'];
 
 /**
  * 当前批次开放的原件。中期只开火 / 冰 / 风 × 弹 / 爆，第一批起火冰风土 × 弹爆墙雨全开；

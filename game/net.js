@@ -29,6 +29,31 @@ export async function parseRemote(url, text, timeoutMs) {
 }
 
 /**
+ * 求灵感：请服务器上的模型看着天赋和眼前的敌人现写几句咒语（给按钮写咒时用）。
+ * 任何失败都返回空数组，由调用方改给卷轴里写好的句子。
+ * @param {string | undefined} url
+ * @param {{ el: string, talents: string[], foes: Record<string, number> }} ask
+ * @param {number} timeoutMs
+ * @returns {Promise<string[]>}
+ */
+export async function inspireRemote(url, ask, timeoutMs) {
+  if (!url) return [];
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ inspire: ask }), signal: ctrl.signal,
+    });
+    const data = await res.json().catch(() => null);
+    return data?.ok && Array.isArray(data.lines) ? data.lines.filter((s) => typeof s === 'string' && s.trim()).slice(0, 3) : [];
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * 预热：标题画面一出来就发一个极小的请求，先把浏览器到服务器、服务器到模型的连接建好。
  * 实测每个模型的第一次调用要 4.5～6 秒（建连），之后约 1 秒；不预热的话玩家第一句很可能超时。
  * 结果不用，失败也不管。

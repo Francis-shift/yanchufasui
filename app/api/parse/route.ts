@@ -1,12 +1,14 @@
 /**
  * POST /api/parse  { text } → { ok, raw, ms, model } 或 { ok: false, reason, fallback: true }
+ *                  { inspire: { el, talents, foes } } → { ok, lines, ms }（求灵感，见 inspire）
  * 密钥只在服务器上（环境变量 ARK_API_KEY），前端拿不到。失败一律让前端改用关键词解析，不让玩家干等。
  * 模型返回的 JSON 只做"是不是对象"的检查；字段清洗与数值裁决在 game/rules/ 里由程序完成。
  */
 import { checkLimits, clientIp } from '../../../server/limits';
-import { SYSTEM_PROMPT, userMessage } from '../../../server/prompt';
-import { INPUT_MAX_CHARS } from '../../../game/rules/numbers.js';
+import { INSPIRE_PROMPT, SYSTEM_PROMPT, inspireMessage, userMessage } from '../../../server/prompt';
+import { ENEMIES, INPUT_MAX_CHARS, TALENT_MAX } from '../../../game/rules/numbers.js';
 import { maskText } from '../../../game/rules/safety.js';
+import { talentOpen } from '../../../game/rules/talents.js';
 import dns from 'node:dns';
 import net from 'node:net';
 
@@ -34,12 +36,13 @@ function errCode(e: unknown): string {
   return err?.cause?.code || (err?.name === 'TimeoutError' || err?.name === 'AbortError' ? err.name : String(err?.message || e).slice(0, 40));
 }
 
-async function callModel(text: string, signal: AbortSignal) {
+/** 调模型、要回一个 JSON 对象（格式不对就抛错，由调用方决定重不重试） */
+async function chatJson(system: string, user: string, o: { maxTokens: number; temperature: number }, signal: AbortSignal) {
   const body: Record<string, unknown> = {
     model: process.env.ARK_MODEL,
-    messages: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: userMessage(text) }],
-    temperature: 0,
-    max_tokens: 260,
+    messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+    temperature: o.temperature,
+    max_tokens: o.maxTokens,
     response_format: { type: 'json_object' },
   };
   // 带"深度思考"的模型会先想几秒再答，必须关掉；不支持这个参数的模型把 ARK_DISABLE_THINKING 设为 0
@@ -57,6 +60,48 @@ async function callModel(text: string, signal: AbortSignal) {
   const raw = JSON.parse(content.replace(/^```(?:json)?\s*|\s*```$/g, ''));
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new Error('not an object');
   return raw;
+}
+
+const callModel = (text: string, signal: AbortSignal) => chatJson(SYSTEM_PROMPT, userMessage(text), { maxTokens: 260, temperature: 0 }, signal);
+
+/**
+ * 求灵感：POST { inspire: { el, talents, foes } } → { ok, lines: [三句], ms }。
+ * 只认已开放的元素和已知的敌人；写出来的句子过一遍敏感词，被盖住的那句不要，超长的不要。照样计入限流。
+ */
+async function inspire(ask: unknown, req: Request) {
+  const a = (ask ?? {}) as { el?: unknown; talents?: unknown; foes?: unknown };
+  const known = (x: unknown): x is string => typeof x === 'string' && talentOpen(x);
+  if (!known(a.el) || !Array.isArray(a.talents) || !a.talents.every(known) || a.talents.length > TALENT_MAX || !a.talents.includes(a.el)) {
+    return fail('bad_request', 400);
+  }
+  const foes: Record<string, number> = {};
+  if (a.foes && typeof a.foes === 'object') {
+    for (const k of Object.keys(ENEMIES)) {
+      const n = Number((a.foes as Record<string, unknown>)[k]);
+      if (Number.isInteger(n) && n > 0) foes[k] = Math.min(n, 99);
+    }
+  }
+  const limit = checkLimits(clientIp(req.headers));
+  if (!limit.ok) return fail(limit.reason, 429);
+  const t0 = Date.now();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  try {
+    const raw = await chatJson(INSPIRE_PROMPT, inspireMessage(a.el, a.talents as string[], foes), { maxTokens: 200, temperature: 0.9 }, ctrl.signal);
+    const s: unknown = (raw as { s?: unknown }).s;
+    const lines = (Array.isArray(s) ? s : [])
+      .filter((x): x is string => typeof x === 'string')
+      .map((x) => maskText(x.trim()).text)
+      .filter((x) => x && [...x].length <= INPUT_MAX_CHARS && !x.includes('＊'))
+      .slice(0, 3);
+    if (!lines.length) return fail('model_error', 200, Date.now() - t0);
+    return Response.json({ ok: true, lines, ms: Date.now() - t0 });
+  } catch (e) {
+    console.error('inspire failed', errCode(e));
+    return fail(ctrl.signal.aborted ? 'timeout' : 'model_error', 200, Date.now() - t0);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -132,6 +177,7 @@ export async function POST(req: Request) {
       const limit = checkLimits(clientIp(req.headers));
       return limit.ok ? warm() : fail(limit.reason, 429);
     }
+    if (body?.inspire) return inspire(body.inspire, req);
     text = typeof body?.text === 'string' ? body.text.trim() : '';
   } catch {
     return fail('bad_request', 400);

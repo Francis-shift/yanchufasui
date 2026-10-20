@@ -30,7 +30,8 @@ export function totalCost(steps) {
  * @typedef {import('./intent.js').Intent} Intent
  * @typedef {import('./intent.js').Step} Step
  * @typedef {{ mana: number, lastCombo?: { key: string, streak: number } | null,
- *             seen?: Iterable<string>, said?: Iterable<string>, text?: string, gauge?: number }} CastContext
+ *             seen?: Iterable<string>, said?: Iterable<string>, text?: string, gauge?: number, button?: boolean }} CastContext
+ *   button：按天赋按钮放的——不按描写加气势槽（按键的气势看打法，见 talents.js buttonGaugeGain）
  * @typedef {Step & { cost: number, dmgTotal: number, dmgEach: number, first: boolean, repeat: number,
  *             fusion?: string, fusionName?: string, idiom?: string }} PlannedStep fusion 是融合的键（如 wind>fire）
  * @typedef {{ el: string, name: string, target: string, dmg: number, radius: number, cast: boolean, ghost: boolean,
@@ -100,7 +101,7 @@ export function planCast(intent, ctx) {
   fuse(planned, seen, newlySeen);
   return {
     ok, steps: planned, cost: ok ? totalCost(steps) : 0, momentum, momentumHalved, downgrades,
-    backlash: intent.overreach, gaugeGain: ok ? momentum : 0,
+    backlash: intent.overreach, gaugeGain: ok && !ctx.button ? momentum : 0,
     lastCombo, newlySeen, saidKey,
   };
 }

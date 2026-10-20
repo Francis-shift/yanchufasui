@@ -85,6 +85,49 @@ const CSS = FONT_CSS + `
 .yc-btn { margin-top: 12px; font: inherit; font-size: 16px; padding: 10px 26px; border-radius: 12px; border: 1px solid #4a74d9;
   background: #4a74d9; color: #fff; cursor: pointer; }
 .yc-btn:focus-visible { outline: 3px solid rgba(74,116,217,0.4); outline-offset: 2px; }
+/* 天赋：选天赋（开始与结算页上）、战斗中的按钮栏、给按钮写咒的对话框 */
+.yc-picker { margin: 14px 0 2px; }
+.yc-picker-title { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+.yc-talents { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.yc-tal { width: 52px; height: 52px; border-radius: 50%; border: 2px solid var(--c); background: rgba(255,255,255,0.92);
+  font-family: ${BRUSH}; font-size: 26px; line-height: 1; color: var(--c); cursor: pointer; position: relative; padding: 0; }
+.yc-tal.on { background: var(--c); color: #fff; box-shadow: 0 4px 14px -4px var(--c); }
+.yc-tal:disabled { opacity: 0.35; cursor: not-allowed; }
+.yc-tal small { position: absolute; left: 50%; bottom: -17px; transform: translateX(-50%); font: 11px/1 system-ui, sans-serif; color: var(--muted); white-space: nowrap; }
+.yc-syn { margin-top: 18px; font-size: 12px; color: var(--muted); min-height: 1.7em; line-height: 1.7; }
+.yc-syn b { color: #2b3a4a; font-weight: 600; }
+.yc-skills { display: flex; gap: 12px; justify-content: center; align-items: flex-end; margin-bottom: 4px; }
+.yc-skills[hidden] { display: none; }
+.yc-skill { position: relative; }
+.yc-cast { width: 54px; height: 54px; border-radius: 50%; border: 2px solid var(--c); background: rgba(255,255,255,0.9);
+  color: var(--c); font-family: ${BRUSH}; font-size: 26px; line-height: 1.05; padding: 2px; cursor: pointer; touch-action: manipulation;
+  box-shadow: 0 6px 18px -8px rgba(20,40,80,0.5); }
+.yc-cast.named { font-size: 15px; letter-spacing: 1px; }
+.yc-cast:active { transform: scale(0.94); }
+.yc-cast.charging { background: var(--c); color: #fff; animation: yc-charge .6s ease-out; }
+@keyframes yc-charge { from { box-shadow: 0 0 0 0 var(--c); } to { box-shadow: 0 0 0 12px transparent; } }
+.yc-pen { position: absolute; right: -6px; top: -6px; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line);
+  background: #fff; color: #4a5a6a; font-size: 12px; line-height: 20px; padding: 0; cursor: pointer; }
+.yc-key { position: absolute; left: 50%; bottom: -14px; transform: translateX(-50%); font-size: 10px; color: var(--muted); }
+.yc-summon { height: 54px; padding: 0 14px; border-radius: 27px; border: 2px solid #d99a1e; background: linear-gradient(180deg, #ffe6a3, #f0b24a);
+  color: #6b3f00; font-family: ${BRUSH}; font-size: 22px; cursor: pointer; animation: yc-pulse 1.1s ease-in-out infinite; }
+.yc-summon[hidden] { display: none; }
+.yc-write { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(220, 232, 245, 0.45); pointer-events: auto; }
+.yc-write[hidden] { display: none; }
+.yc-write .yc-box { width: min(460px, calc(100% - 24px)); text-align: left; padding: 18px; }
+.yc-write-title { font-size: 15px; margin-bottom: 10px; }
+.yc-write-title b { font-family: ${BRUSH}; font-size: 22px; color: var(--c); }
+.yc-ideas { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.yc-idea { text-align: left; font: inherit; font-size: 14px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line);
+  background: rgba(255,255,255,0.8); cursor: pointer; color: var(--ink); }
+.yc-idea small { color: var(--muted); margin-left: 6px; font-size: 11px; }
+.yc-write-msg { min-height: 1.4em; margin-top: 8px; font-size: 12px; color: #b4541a; }
+.yc-write-btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; margin-top: 8px; }
+.yc-write-btns .yc-btn { margin-top: 0; padding: 8px 14px; font-size: 14px; }
+.yc-btn.ghost { background: #fff; color: #4a74d9; }
+.yc-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.yc-narrow .yc-key { display: none; }
+.yc-short .yc-skills { margin-bottom: 0; } .yc-short .yc-cast, .yc-short .yc-summon { height: 46px; } .yc-short .yc-cast { width: 46px; }
 .yc-debug { position: absolute; right: 12px; bottom: calc(150px + env(safe-area-inset-bottom, 0px)); font: 12px/1.6 ui-monospace, Consolas, monospace;
   max-width: min(420px, calc(100vw - 24px)); overflow: hidden;
   background: rgba(20,24,32,0.72); color: #dfe7f1; padding: 8px 10px; border-radius: 10px; white-space: pre; }
@@ -124,7 +167,7 @@ export class Hud {
       <div class="yc-g"><div class="yc-label"><span>阵眼</span><b data-core>100</b></div><div class="yc-bar yc-core"><i data-corebar></i></div></div>
       <div class="yc-g"><div class="yc-label"><span data-wave>准备守关</span><span data-left></span></div></div>
       <div class="yc-g yc-g-gauge"><div class="yc-label"><span>气势</span><b data-gauge>0 / 8</b></div><div class="yc-bar yc-gauge"><i data-gaugebar style="width:0"></i></div></div></div>`);
-    this.bottom = el(`<div class="yc-bottom">
+    this.bottom = el(`<div class="yc-bottom"><div class="yc-skills" hidden></div>
       <div class="yc-label"><span>法力</span><b data-mana>100</b></div><div class="yc-bar yc-mana"><i data-manabar></i></div>
       <input class="yc-input" maxlength="${INPUT_MAX_CHARS}" enterkeyhint="send" autocomplete="off" aria-label="咒语" placeholder="说出你的咒语……（回车施法）">
       <div class="yc-hint" data-hint>开口就慢放，想好再说。例：先冻住最前面那只，再用风把它们吹下悬崖</div></div>`);
@@ -132,15 +175,131 @@ export class Hud {
     this.big = el(`<div class="yc-big"></div>`);
     this.overlay = el(`<div class="yc-overlay"><div class="yc-box"><h1>言出法随</h1>
       <p>傀儡大军从云海里沿石阶和索桥攻上山门。你是守山门的修士，守住身后的护山大阵。</p>
-      <p>没有技能按钮：打一句中文，法术就是什么。说得越有画面感，气势越足。</p>
+      <p>打一句中文，法术就是什么；说得越有画面感，气势越足。不想打字，就点天赋按钮。</p>
+      <div class="yc-picker"><div class="yc-picker-title">选天赋（最多 3 个）</div><div class="yc-talents"></div><div class="yc-syn"></div></div>
       <button class="yc-btn" data-start>开始守关</button></div></div>`);
+    this.write = el(`<div class="yc-write" hidden><div class="yc-box">
+      <div class="yc-write-title"></div>
+      <input class="yc-input" maxlength="${INPUT_MAX_CHARS}" enterkeyhint="done" autocomplete="off" aria-label="给按钮写的咒" placeholder="写一句咒……（例：三颗火球从天而降）">
+      <div class="yc-ideas"></div><div class="yc-write-msg"></div>
+      <div class="yc-write-btns"><button class="yc-btn ghost" data-inspire>求灵感</button><button class="yc-btn ghost" data-reset>恢复默认</button>
+        <button class="yc-btn ghost" data-cancel>取消</button><button class="yc-btn" data-ok>装进按钮</button></div></div></div>`);
     this.debug = el(`<div class="yc-debug" hidden></div>`);
     this.floats = el(`<div style="position:absolute;inset:0;overflow:hidden"></div>`);
-    this.root.append(this.floats, this.top, this.card, this.big, this.bottom, this.debug, this.overlay);
+    this.root.append(this.floats, this.top, this.card, this.big, this.bottom, this.debug, this.write, this.overlay);
     root.append(this.root);
     this.input = /** @type {HTMLInputElement} */ (this.bottom.querySelector('input'));
     this.q = (sel) => /** @type {HTMLElement} */ (this.root.querySelector(sel));
     this.cardTimer = 0; this.bigTimer = 0;
+    // 写咒对话框的按钮只绑一次，回调在 openWrite 时换成当前这个天赋的
+    /** @type {{ ok: (text: string) => void, inspire: () => void, reset: () => void, cancel: () => void } | null} */
+    this.writeOn = null;
+    this.writeInput = /** @type {HTMLInputElement} */ (this.write.querySelector('input'));
+    const wb = (sel, fn) => /** @type {HTMLElement} */ (this.write.querySelector(sel)).addEventListener('click', fn);
+    wb('[data-ok]', () => this.writeOn?.ok(this.writeInput.value));
+    wb('[data-inspire]', () => this.writeOn?.inspire());
+    wb('[data-reset]', () => this.writeOn?.reset());
+    wb('[data-cancel]', () => this.writeOn?.cancel());
+    this.writeInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); this.writeOn?.ok(this.writeInput.value); }
+      else if (e.key === 'Escape') this.writeOn?.cancel();
+    });
+  }
+
+  /**
+   * 选天赋：画出几个天赋（没开放的灰掉），点了回调；下面写已选天赋之间的羁绊。至少选一个才能开始。
+   * @param {{ el: string, name: string, open: boolean, on: boolean }[]} list
+   * @param {{ a: string, b: string, kind: string, name: string }[]} syn
+   * @param {(el: string) => void} onToggle
+   */
+  renderPicker(list, syn, onToggle) {
+    const box = this.q('.yc-talents');
+    box.innerHTML = '';
+    for (const t of list) {
+      const b = el(`<button class="yc-tal${t.on ? ' on' : ''}" style="--c:${elColor(t.el)}" aria-pressed="${t.on}"${t.open ? '' : ' disabled'}>${esc(t.name)}${t.open ? '' : '<small>即将领悟</small>'}</button>`);
+      b.addEventListener('click', () => onToggle(t.el));
+      box.append(b);
+    }
+    const nm = (x) => list.find((t) => t.el === x)?.name || x;
+    this.q('.yc-syn').innerHTML = syn.length
+      ? '羁绊　' + syn.map((s) => `<span style="white-space:nowrap">先${esc(nm(s.a))}后${esc(nm(s.b))}：<b>${esc(s.name)}</b></span>`).join('　')
+      : (list.some((t) => t.on) ? '再选一个，看看它们之间的羁绊' : '至少选一个天赋');
+    /** @type {HTMLButtonElement} */ (this.q('[data-start]')).disabled = !list.some((t) => t.on);
+  }
+
+  /**
+   * 战斗中的天赋按钮栏：每个天赋一个圆钮（右上角的笔用来写咒），后面是气势满了才出现的"召唤"。
+   * @param {{ el: string, label: string, named: boolean }[]} skills
+   * @param {{ cast: (el: string) => void, pen: (el: string) => void, summon: () => void }} on
+   */
+  setSkills(skills, on) {
+    const bar = this.q('.yc-skills');
+    bar.innerHTML = '';
+    skills.forEach((s, i) => {
+      const w = el(`<div class="yc-skill" style="--c:${elColor(s.el)}" data-el="${s.el}"><button class="yc-cast"></button>
+        <button class="yc-pen" aria-label="给这个按钮写一句咒">✎</button><span class="yc-key">${i + 1}</span></div>`);
+      const cast = /** @type {HTMLElement} */ (w.querySelector('.yc-cast'));
+      // 按下就放（不等松手），也不让按钮抢走输入框的焦点、收起手机键盘
+      cast.addEventListener('pointerdown', (e) => { e.preventDefault(); on.cast(s.el); });
+      /** @type {HTMLElement} */ (w.querySelector('.yc-pen')).addEventListener('click', () => on.pen(s.el));
+      bar.append(w);
+      this.setSkillLabel(s.el, s.label, s.named);
+    });
+    const sm = el(`<button class="yc-summon" hidden>召唤</button>`);
+    sm.addEventListener('pointerdown', (e) => { e.preventDefault(); on.summon(); });
+    bar.append(sm);
+    bar.hidden = !skills.length;
+  }
+  /** @param {string} elKey @param {string} label @param {boolean} named 写过咒的按钮显示咒语名（小一号） */
+  setSkillLabel(elKey, label, named) {
+    const b = this.root.querySelector(`.yc-skill[data-el="${elKey}"] .yc-cast`);
+    if (!b) return;
+    b.textContent = showName(label);
+    b.classList.toggle('named', named);
+    b.setAttribute('aria-label', `放${label}`);
+  }
+  /** 正在咏唱的按钮亮起来 @param {string[]} els */
+  setCharging(els) {
+    for (const w of this.root.querySelectorAll('.yc-skill')) {
+      const b = /** @type {HTMLElement} */ (w.querySelector('.yc-cast'));
+      b.classList.toggle('charging', els.includes(/** @type {HTMLElement} */ (w).dataset.el || ''));
+    }
+  }
+  /** @param {boolean} on */
+  setSummonReady(on) { const b = this.root.querySelector('.yc-summon'); if (b) /** @type {HTMLElement} */ (b).hidden = !on; }
+
+  /**
+   * 给按钮写咒的对话框。
+   * @param {string} name 天赋名 @param {string} elKey
+   * @param {{ ok: (text: string) => void, inspire: () => void, reset: () => void, cancel: () => void }} on
+   */
+  openWrite(name, elKey, on) {
+    this.write.style.setProperty('--c', elColor(elKey));
+    this.q('.yc-write-title').innerHTML = `给 <b>${esc(name)}</b> 的按钮写一句咒`;
+    this.writeInput.value = '';
+    this.q('.yc-ideas').innerHTML = '';
+    this.setWriteMsg('');
+    this.setWriteBusy(false);
+    this.writeOn = on;
+    this.write.hidden = false;
+    this.writeInput.focus();
+  }
+  closeWrite() { this.write.hidden = true; this.writeOn = null; }
+  /** @param {string} text */
+  setWriteMsg(text) { this.q('.yc-write-msg').textContent = text; }
+  /** @param {boolean} busy */
+  setWriteBusy(busy) {
+    for (const b of this.write.querySelectorAll('[data-ok],[data-inspire]')) /** @type {HTMLButtonElement} */ (b).disabled = busy;
+  }
+  /** 灵感：点一句就填进输入框（还能再改） @param {{ text: string, from: string }[]} ideas */
+  setWriteIdeas(ideas) {
+    const box = this.q('.yc-ideas');
+    box.innerHTML = '';
+    for (const it of ideas) {
+      const b = el(`<button class="yc-idea">${esc(it.text)}<small>${esc(it.from)}</small></button>`);
+      b.addEventListener('click', () => { this.writeInput.value = it.text; this.writeInput.focus(); });
+      box.append(b);
+    }
   }
 
   setCore(hp, max) { this.q('[data-core]').textContent = String(Math.max(0, Math.ceil(hp))); this.q('[data-corebar]').style.width = `${Math.max(0, hp / max) * 100}%`; }
@@ -245,7 +404,7 @@ export class Hud {
     /** @type {HTMLElement} */ (this.overlay.querySelector('h1')).textContent = title;
     const ps = this.overlay.querySelectorAll('p');
     ps[0].textContent = body; ps[1].textContent = '';
-    /** @type {HTMLElement} */ (this.overlay.querySelector('button')).textContent = btn;
+    /** @type {HTMLElement} */ (this.overlay.querySelector('[data-start]')).textContent = btn;
     this.overlay.hidden = false;
   }
   hideOverlay() { this.overlay.hidden = true; }
@@ -255,7 +414,7 @@ export class Hud {
 
 /** @param {string} el */
 function elColor(el) {
-  return { fire: '#e8611c', ice: '#2f8de8', wind: '#2fbf86', earth: '#c08a3e' }[el] || '#5b5bd6';
+  return { fire: '#e8611c', ice: '#2f8de8', wind: '#2fbf86', earth: '#c08a3e', thunder: '#8a5cf0' }[el] || '#5b5bd6';
 }
 
 /** 每一栏来源词旁边注明变成了什么 */

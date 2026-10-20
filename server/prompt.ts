@@ -27,3 +27,24 @@ export const SYSTEM_PROMPT = `你把玩家的一句中文咒语翻译成 JSON �
 export function userMessage(text: string): string {
   return `玩家咒语：「${text}」`;
 }
+
+/**
+ * 求灵感（给天赋按钮写咒时用）：看着按钮的元素、玩家的天赋和眼前的敌人，现写 3 句咒语让玩家挑。
+ * 写出来的句子玩家挑了之后照常走解析和裁决，所以这里只管写得好、写得对路；程序还会核对长度、盖敏感词。
+ */
+export const INSPIRE_PROMPT = `你给一个仙侠守山门游戏的玩家写咒语。玩家会把挑中的一句装进一个元素按钮，之后一按就放。只输出一个 JSON 对象，不要解释。
+格式：{"s":["第一句","第二句","第三句"]}
+- 写 3 句，每句 8～24 个汉字，古风、有画面感，三句的写法彼此不同。
+- 每句都要用到按钮的元素；用到别的元素时，只能用玩家天赋里有的。
+- 游戏里能做到的只有：元素 火 冰 风 土；形态 弹（可说一到三颗）、爆、墙、雨；目标 最前面、最强、最密集、左边、右边、中间、索桥、香炉、华表、吊石的绳子；轨迹 从天而降、绕到背后。别写游戏里做不到的事。
+- 看着眼前的敌人写：盾傀儡正面挡八成，适合从天而降或绕到背后；成群的适合爆或雨；巨像适合先冻住再用火；被风推下悬崖就直接消灭。
+- 不写数字威力，不写"满分""无敌""秒杀""无限"之类的话。`;
+
+const ELEMENT_ZH: Record<string, string> = { fire: '火', ice: '冰', wind: '风', earth: '土', thunder: '雷' };
+const FOE_ZH: Record<string, string> = { grunt: '小傀儡', shield: '盾傀儡', colossus: '巨像' };
+
+/** 调用前已核对过：el 与 talents 都是已知元素，foes 只含已知敌人且数量是小整数 */
+export function inspireMessage(el: string, talents: string[], foes: Record<string, number>): string {
+  const seen = Object.entries(foes).filter(([, n]) => n > 0).map(([k, n]) => `${FOE_ZH[k]} ${n} 只`).join('、') || '暂时没有，下一波快来了';
+  return `按钮元素：${ELEMENT_ZH[el]}。玩家天赋：${talents.map((t) => ELEMENT_ZH[t]).join('、')}。眼前的敌人：${seen}。`;
+}

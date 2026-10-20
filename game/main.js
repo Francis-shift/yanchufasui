@@ -17,8 +17,11 @@ import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
 import { maskText } from './rules/safety.js';
 import {
-  BEAM, CHANT_MIN_MS, CORE_HP, FORMS, INPUT_MAX_CHARS, MANA_MAX, MOMENTUM_FX, MOMENTUM_RANGE, PARSE_TIMEOUT_MS, RAIN,
-  SLOWMO_MAX_SEC, SLOWMO_SCALE, TORNADO, ULT_GAUGE, WALL,
+  bindSpell, buttonGaugeGain, combineButtons, defaultIntent, elName, scrollsFor, synergies, talentOpen, toggleTalent,
+} from './rules/talents.js';
+import {
+  BEAM, BUTTON_CHANT_MS, CHANT_MIN_MS, CORE_HP, FORMS, INPUT_MAX_CHARS, MANA_MAX, MOMENTUM_FX, MOMENTUM_RANGE, PARSE_TIMEOUT_MS, RAIN,
+  SLOWMO_MAX_SEC, SLOWMO_SCALE, TALENTS, TORNADO, ULT_GAUGE, WALL,
 } from './rules/numbers.js';
 import { Enemies } from './actors/enemies.js';
 import { DragonFx } from './fx/dragon.js';
@@ -31,7 +34,7 @@ import { buildEnvironment } from './world/environment.js';
 import { fitFrame } from './world/framing.js';
 import { buildLayout, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS } from './world/layout.js';
 import { Hud, preloadFonts } from './ui/hud.js';
-import { parseRemote, warmUp } from './net.js';
+import { inspireRemote, parseRemote, warmUp } from './net.js';
 
 /**
  * 5 波（设计文档第 4 节）。每波一道题：开场提示就是这一波的解法方向。
@@ -185,6 +188,10 @@ export function start(root, opts = {}) {
     last: /** @type {any} */ (null),
     endless: false,   // 检查页用：打空了也不判胜
     restT: 0,         // 波与波之间的休息倒计时（游戏时间）
+    /** 选的天赋（开局界面上选，默认火冰风：三者之间有两种融合、两种反应） */
+    talents: /** @type {string[]} */ (['fire', 'ice', 'wind']),
+    /** 给按钮写过的咒：天赋 → 这句话清洗后的意图、名字、原话（重开一局还在，换掉的天赋就丢掉） */
+    binds: /** @type {Record<string, { intent: import('./rules/intent.js').Intent, name: string, text: string }>} */ ({}),
   };
   /** 按游戏时间延后执行（慢放、顿帧时一起变慢） */
   const timers = [];
@@ -209,14 +216,37 @@ export function start(root, opts = {}) {
     fusions.clear();
     dragon.clear();
     timers.length = 0;   // 上一局没跑完的延时（第二步法术、收锁定标记）不能带进新的一局
+    if (pend) { clearTimeout(pend.t); pend = null; }
+    buttonChant = false; frozen = false;
+    hud.closeWrite();
     Object.assign(S, { phase: 'playing', mana: MANA_MAX, core: CORE_HP, gauge: 0, lastCombo: null, seen: [], said: new Set(),
       wave: 0, busy: false, restT: 0 });
+    S.talents = [...S.talents].sort((a, b) => TALENTS.indexOf(a) - TALENTS.indexOf(b));
+    S.binds = Object.fromEntries(Object.entries(S.binds).filter(([k]) => S.talents.includes(k)));
+    hud.setSkills(S.talents.map((el) => ({ el, label: S.binds[el]?.name || elName(el), named: !!S.binds[el] })),
+      { cast: pressTalent, pen: openWrite, summon: pressSummon });
     startWave(0);
     hud.setCore(S.core, CORE_HP);
-    hud.setGauge(S.gauge, ULT_GAUGE);
+    setGauge(0);
     hud.hideOverlay();
+    layoutCamera();   // 按钮栏出现后，底下被挡住的高度变了
     hud.input.focus();
   }
+
+  /** 气势槽：改数、更新界面；满了亮出召唤按钮，过半先把龙的模型下好 @param {number} g */
+  function setGauge(g) {
+    S.gauge = g;
+    hud.setGauge(g, ULT_GAUGE);
+    hud.setSummonReady(g >= ULT_GAUGE);
+    if (g >= ULT_GAUGE / 2) dragon.preload();
+  }
+
+  // ---------------------------------------------------------------- 选天赋（开始与结算页上）
+  function renderPicker() {
+    hud.renderPicker(TALENTS.map((el) => ({ el, name: elName(el), open: talentOpen(el), on: S.talents.includes(el) })),
+      synergies(S.talents), (el) => { S.talents = toggleTalent(S.talents, el); renderPicker(); });
+  }
+  renderPicker();
 
   function startWave(i) {
     S.wave = i;
@@ -262,18 +292,29 @@ export function start(root, opts = {}) {
     if (input.value.trim() && !slowSince && !slowSpent) slowSince = performance.now();
     fx.setListening(!!input.value.trim());
   };
+  /** 电脑上：输入框空着（或没在打字）时，1、2、3 放对应的天赋，4 召唤 @param {KeyboardEvent} e */
+  const hotkey = (e) => {
+    const k = '1234'.indexOf(e.key);
+    if (k < 0 || e.isComposing || e.ctrlKey || e.metaKey || e.altKey || S.phase !== 'playing') return false;
+    e.preventDefault();
+    if (k < 3) { const el = S.talents[k]; if (el) pressTalent(el); } else pressSummon();
+    return true;
+  };
   const onKey = (e) => {
+    if (!input.value && hotkey(e)) return;
     if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const t = input.value; input.value = ''; onInput(); submit(t); }
     else if (e.key === 'Escape') input.blur();
   };
   const onGlobalKey = (e) => {
     if (e.key === '`') { hud.debug.hidden = !hud.debug.hidden; return; }
-    if (document.activeElement !== input && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && S.phase === 'playing') input.focus();
+    if (document.activeElement instanceof HTMLInputElement) return;   // 在打字（主输入框或写咒对话框）
+    if (hotkey(e)) return;
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && S.phase === 'playing') input.focus();
   };
   input.addEventListener('input', onInput);
   input.addEventListener('keydown', onKey);
   window.addEventListener('keydown', onGlobalKey);
-  const startBtn = /** @type {HTMLButtonElement} */ (hud.overlay.querySelector('button'));
+  const startBtn = /** @type {HTMLButtonElement} */ (hud.overlay.querySelector('[data-start]'));
   startBtn.addEventListener('click', startGame);
   warmUp(opts.parseUrl);   // 玩家看标题的这几秒，把连接先建好
 
@@ -332,14 +373,28 @@ export function start(root, opts = {}) {
       const k = sanitizeIntent(kwRaw, text);
       if (k.steps.length) { intent = { ...k, unknown: intent.unknown, overreach: intent.overreach || k.overreach }; source += '＋关键词'; }
     }
-    if (S.phase !== 'playing') { fx.endChant(); locks.clear(castId); S.busy = false; return; }
+    perform(intent, { text, source, ms, raw, castId });
+  }
+
+  /** 天赋按键放出的法术：每一步的命中记在这里，按打法加气势槽（talents.js buttonGaugeGain） */
+  const stepStats = new WeakMap();
+  let buttonChant = false;   // 按键的咏唱很短：不慢放、不推镜头
+
+  /**
+   * 意图 → 裁决 → 咒语卡 → 放出。打字和天赋按键都走这里。
+   * @param {import('./rules/intent.js').Intent} intent
+   * @param {{ text: string, source: string, ms: number, raw: any, castId: number, button?: boolean }} c
+   */
+  function perform(intent, c) {
+    const { text, source, ms, raw, castId } = c;
+    if (S.phase !== 'playing') { fx.endChant(); buttonChant = false; locks.clear(castId); S.busy = false; return; }
     const firstEl = intent.summon && intent.summon !== 'thunder' ? intent.summon : intent.steps[0]?.el;
     if (firstEl) fx.retint(firstEl);
-    const plan = planCast(intent, { mana: S.mana, lastCombo: S.lastCombo, seen: S.seen, said: S.said, text, gauge: S.gauge });
+    const plan = planCast(intent, { mana: S.mana, lastCombo: S.lastCombo, seen: S.seen, said: S.said, text: c.button ? '' : text,
+      gauge: S.gauge, button: !!c.button });
     S.mana -= plan.cost;
-    S.gauge = plan.gaugeSpent ? 0 : Math.min(ULT_GAUGE, S.gauge + plan.gaugeGain);
-    hud.setGauge(S.gauge, ULT_GAUGE);
-    if (S.gauge >= ULT_GAUGE / 2 || intent.summon) dragon.preload();   // 气势槽过半就先把龙的模型下好
+    setGauge(plan.gaugeSpent ? 0 : Math.min(ULT_GAUGE, S.gauge + plan.gaugeGain));
+    if (intent.summon) dragon.preload();
     S.lastCombo = plan.lastCombo;
     S.seen.push(...plan.newlySeen);
     if (plan.saidKey) S.said.add(plan.saidKey);
@@ -351,6 +406,7 @@ export function start(root, opts = {}) {
     hud.showCard({ name, text, plan, intent, source, ms });
     if (plan.backlash) { fx.backlash(); hud.bigText('天道不允', '#b3261e', 1300); }
     fx.endChant();
+    buttonChant = false;
     if (!plan.ok) {
       locks.clear(castId);
       if (!plan.backlash) hud.bigText(intent.steps.length ? '法力不足' : '未能成咒', '#5d6b7a', 1000);
@@ -362,6 +418,12 @@ export function start(root, opts = {}) {
       runSummon(plan.summon, castId);
       S.busy = false;
       return;
+    }
+    if (c.button) {
+      // 按键：打中几个、有没有打出融合或反应，边打边加气势槽（融合在放出时就算）
+      const stats = { hits: new Set(), combo: plan.steps.some((s) => s.fusion), awarded: 0 };
+      for (const s of plan.steps) stepStats.set(s, stats);
+      awardButton(stats);
     }
     const { resolved, marks } = lockSteps(plan.steps, m);
     locks.show(castId, marks);
@@ -375,9 +437,117 @@ export function start(root, opts = {}) {
       hud.bigText('差一口气', '#2f5d8a', 1200);
       dragon.ghost(plan.summon.el, go);
     } else go();
-    if (m >= 3) hud.bigText('气势如虹', '#16202b', 900);
+    if (m >= 3 && !c.button) hud.bigText('气势如虹', '#16202b', 900);
     S.busy = false;
   }
+
+  // ---------------------------------------------------------------- 天赋按键（设计文档第 4 节"天赋与按键"）
+  /** 按键的这一招打出了新的命中或反应：补上该加的气势 @param {{ hits: Set<string>, combo: boolean, awarded: number }} st */
+  function awardButton(st) {
+    const g = buttonGaugeGain({ hits: st.hits.size, combo: st.combo });
+    if (g <= st.awarded || S.phase !== 'playing') return;
+    setGauge(Math.min(ULT_GAUGE, S.gauge + g - st.awarded));
+    st.awarded = g;
+  }
+
+  /** @param {string} el */
+  const buttonIntent = (el) => S.binds[el]?.intent ?? defaultIntent(el);
+  /** 正在咏唱的按键：0.6 秒里再按另一个天赋，就合成一句（先后是语序） */
+  let pend = /** @type {{ els: string[], castId: number, t: number } | null} */ (null);
+
+  /** @param {string} el */
+  function pressTalent(el) {
+    if (S.phase !== 'playing' || !S.talents.includes(el) || !hud.write.hidden) return;
+    if (pend) {
+      if (pend.els.length < 2 && !pend.els.includes(el)) { pend.els.push(el); hud.setCharging(pend.els); fireButtons(); }
+      return;
+    }
+    if (S.busy) return;
+    S.busy = true;
+    const castId = ++castSeq;
+    pend = { els: [el], castId, t: window.setTimeout(fireButtons, BUTTON_CHANT_MS) };
+    hud.setCharging(pend.els);
+    buttonChant = true;
+    fx.beginChant(el);
+    locks.show(castId, lockSteps(buttonIntent(el).steps).marks);
+  }
+
+  function fireButtons() {
+    if (!pend) return;
+    clearTimeout(pend.t);
+    const p = pend;
+    pend = null;
+    hud.setCharging([]);
+    const intent = combineButtons(p.els.map(buttonIntent));
+    const names = p.els.map((e) => S.binds[e]?.name || elName(e));
+    perform(intent, { text: `按键 · ${names.join(' → ')}`, source: '天赋按键', ms: 0, raw: null, castId: p.castId, button: true });
+  }
+
+  /** 气势满了点"召唤"：冰龙按气势 0 档召（开口召的吃那句话的气势，更猛） */
+  function pressSummon() {
+    if (S.phase !== 'playing' || S.busy || pend || S.gauge < ULT_GAUGE || !hud.write.hidden) return;
+    S.busy = true;
+    buttonChant = true;
+    fx.beginChant('ice');
+    const intent = { steps: [], momentum: 0, name: '冰龙', unknown: [], overreach: false, notes: [], summon: 'ice' };
+    perform(intent, { text: '按键 · 召唤', source: '天赋按键', ms: 0, raw: null, castId: ++castSeq, button: true });
+  }
+
+  // 给按钮写咒：对话框开着时游戏暂停（写咒不限时）；写好的这句解析后装进按钮
+  let frozen = false;
+  /** @param {string} el */
+  function openWrite(el) {
+    if (!(S.phase === 'playing' || S.phase === 'rest') || pend) return;
+    frozen = true;
+    const close = () => { hud.closeWrite(); frozen = false; };
+    hud.openWrite(elName(el), el, {
+      ok: (t) => bindButton(el, t, close),
+      cancel: close,
+      reset: () => { delete S.binds[el]; hud.setSkillLabel(el, elName(el), false); close(); },
+      inspire: () => inspire(el),
+    });
+  }
+
+  /** @param {string} el @param {string} text @param {() => void} close */
+  async function bindButton(el, text, close) {
+    text = maskText([...text.trim()].slice(0, INPUT_MAX_CHARS).join('')).text;
+    if (!text) { hud.setWriteMsg('先写一句，或者点"求灵感"'); return; }
+    hud.setWriteBusy(true);
+    hud.setWriteMsg('正在领会这句话……');
+    const kwRaw = parseKeywords(text);
+    const remote = await parseRemote(opts.parseUrl, text, PARSE_TIMEOUT_MS);
+    const fromModel = 'raw' in remote;
+    let intent = sanitizeIntent(fromModel ? remote.raw : kwRaw, text);
+    if (!intent.steps.length && fromModel) { const k = sanitizeIntent(kwRaw, text); if (k.steps.length) intent = { ...k, unknown: intent.unknown }; }
+    hud.setWriteBusy(false);
+    const r = bindSpell(el, intent, S.talents);
+    if (!r.ok) { hud.setWriteMsg(r.why); return; }
+    const name = r.intent.name || defaultName(r.intent.steps);
+    S.binds[el] = { intent: r.intent, name, text };
+    hud.setSkillLabel(el, name, true);
+    close();
+    // 预览：这一招每次放要花多少、气势几档（不扣法力）
+    const plan = planCast(r.intent, { mana: MANA_MAX, seen: S.seen, text: '', button: true });
+    hud.showCard({ name, text, plan, intent: r.intent, source: `${fromModel ? '模型解析' : '关键词解析'} · 装进「${elName(el)}」的按钮`, ms: 0 });
+  }
+
+  /** 求灵感：先请模型看着天赋和眼前的敌人现写 3 句；连不上就从写好的卷轴里挑 @param {string} el */
+  async function inspire(el) {
+    hud.setWriteBusy(true);
+    hud.setWriteMsg('');
+    /** @type {Record<string, number>} */
+    const foes = {};
+    for (const e of enemies.list) foes[e.type] = (foes[e.type] || 0) + 1;
+    const lines = await inspireRemote(opts.parseUrl, { el, talents: S.talents, foes }, PARSE_TIMEOUT_MS);
+    hud.setWriteBusy(false);
+    const from = scrollTurn[el] || 0;
+    if (!lines.length) scrollTurn[el] = from + 3;   // 每求一次换一批
+    const ideas = lines.length ? lines.map((text) => ({ text, from: '模型现写' }))
+      : scrollsFor(el, S.talents, 3, from).map((text) => ({ text, from: '卷轴' }));
+    hud.setWriteIdeas(ideas);
+  }
+  /** @type {Record<string, number>} */
+  const scrollTurn = {};
 
   /**
    * 真召唤：龙从施法者左前方破土，绕场一周，俯冲砸向目标；砸中时范围内每个敌人按"从天而降"吃一下（盾挡不住）。
@@ -547,6 +717,8 @@ export function start(root, opts = {}) {
     const r = damageTo({ type: e.type, frozen: e.frozen > 0 }, { el: step.el, dmg, ...dir });
     const at = e.pos.clone();
     enemies.applyHit(e, r, from, step.el);
+    const st = stepStats.get(step);   // 天赋按键放的：记命中与反应，按打法加气势
+    if (st) { st.hits.add(e.id); if (r.reaction) st.combo = true; awardButton(st); }
     if (r.aoeBonus) {
       // 蒸汽爆：冻住的目标被火打中，炸开一圈额外伤害
       fx.burst(at.clone().setY(at.y + 0.6), 'fire', 2.5, 0.7);
@@ -605,9 +777,9 @@ export function start(root, opts = {}) {
     lastNow = now;
     // 开口就慢放：输入中（单次最多 8 秒）与咏唱中都是 0.3 倍
     if (slowSince && now - slowSince > SLOWMO_MAX_SEC * 1000) { slowSince = 0; slowSpent = true; }
-    const slow = (slowSince > 0 || fx.chanting > 0) && S.phase === 'playing';
+    const slow = (slowSince > 0 || (fx.chanting > 0 && !buttonChant)) && S.phase === 'playing';
     timeScale += ((slow ? SLOWMO_SCALE : 1) - timeScale) * Math.min(1, realDt * 10);
-    let dt = realDt * timeScale;
+    let dt = frozen ? 0 : realDt * timeScale;   // 写咒对话框开着：游戏停住，画面照画
     if (fx.hitStop > 0) { fx.hitStop -= realDt; dt *= 0.06; }
     idleT += dt;
 
@@ -636,7 +808,7 @@ export function start(root, opts = {}) {
     hud.setMana(S.mana, MANA_MAX);
 
     // 镜头：咏唱时推近，动完回到固定位置
-    const focusT = fx.chanting > 0 || (slowSince > 0 && S.phase === 'playing') ? 0.35 : 0;
+    const focusT = (fx.chanting > 0 && !buttonChant) || (slowSince > 0 && S.phase === 'playing') ? 0.35 : 0;
     cam.focus += (focusT - cam.focus) * Math.min(1, realDt * 3);
     camPos.copy(cam.base).lerp(cam.near, cam.focus);
     camLook.copy(cam.look).lerp(cam.nearLook, cam.focus);
@@ -670,7 +842,12 @@ export function start(root, opts = {}) {
     block: (list = []) => enemies.setObstacles(list),
     wave: (i = 0) => { enemies.clear(); S.phase = 'playing'; startWave(i); },
     killAll: () => { S.queue.length = 0; for (const e of [...enemies.list]) enemies.kill(e, e.pos); },
-    gauge: (n = ULT_GAUGE) => { S.gauge = n; hud.setGauge(S.gauge, ULT_GAUGE); },
+    gauge: (n = ULT_GAUGE) => setGauge(n),
+    /** 天赋按键：按一个，或在 0.6 秒内按两个（press('wind','fire') 出火卷风）；summonBtn 是金色召唤按钮 */
+    press: (...els) => els.forEach((el) => pressTalent(el)),
+    summonBtn: () => pressSummon(),
+    talents: (list) => { if (list) { S.talents = list; renderPicker(); } return [...S.talents]; },
+    binds: () => Object.fromEntries(Object.entries(S.binds).map(([k, v]) => [k, { name: v.name, text: v.text }])),
     // 面板太小时看不清：按 w×h 横屏重画当前这一帧（先 pause 定格），返回 JPEG 的 data URL
     snap: (w = 960, h = 540, focus = 0) => {
       const css = root.style.cssText, ratio = renderer.getPixelRatio();
