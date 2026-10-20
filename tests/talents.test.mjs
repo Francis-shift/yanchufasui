@@ -14,7 +14,8 @@ test('选天赋：最多 3 个，没开放的选不了，再点一下取消', ()
   for (const el of ['fire', 'ice', 'wind', 'earth']) c = toggleTalent(c, el);
   assert.equal(c.length, TALENT_MAX);
   assert.deepEqual(c, ['fire', 'ice', 'wind']);
-  assert.deepEqual(toggleTalent(['fire'], 'thunder'), ['fire'], '雷还没开放，不能选');
+  assert.deepEqual(toggleTalent(['fire'], 'metal'), ['fire'], '金没做，不能选');
+  assert.deepEqual(toggleTalent(['fire'], 'thunder'), ['fire', 'thunder'], '雷 10-20 开放');
   assert.deepEqual(toggleTalent(c, 'ice'), ['fire', 'wind']);
 });
 
@@ -79,7 +80,6 @@ test('按键攒气势：打中 3 个以上 +1，融合或反应 +2，一招最�
 
 test('卷轴：每句用关键词解析也读得对——用到的元素正好是标的那些，装得进自己元素的按钮', () => {
   for (const [el, list] of Object.entries(SCROLLS)) {
-    if (el === 'thunder') continue;   // 雷还没开放
     for (const s of list) {
       const intent = sanitizeIntent(parseKeywords(s.text), s.text);
       const found = [...new Set(intent.steps.map((x) => x.el))].sort();

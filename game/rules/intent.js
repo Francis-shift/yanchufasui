@@ -27,7 +27,7 @@ export const PATHS = ['straight', 'sky', 'behind'];
 export const PATH_NAMES = { straight: '直线', sky: '从天而降', behind: '绕到背后' };
 
 /** 模型偶尔会直接输出中文，按别名收下 */
-const ELEMENT_ALIAS = { 火: 'fire', 冰: 'ice', 风: 'wind', 土: 'earth' };
+const ELEMENT_ALIAS = { 火: 'fire', 冰: 'ice', 风: 'wind', 土: 'earth', 雷: 'thunder' };
 const FORM_ALIAS = { 弹: 'bolt', 爆: 'burst', 墙: 'wall', 雨: 'rain' };
 
 const NAME_MAX = 8;

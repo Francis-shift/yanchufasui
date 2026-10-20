@@ -226,7 +226,8 @@ export function resolveTarget(target, enemies, opt = {}) {
  * 一次命中对一个敌人造成多少伤害、附加什么效果。反应只在这里判断。
  * @param {{ type: string, frozen: boolean, lastEl?: string }} enemy
  * @param {{ el: string, dmg: number, fromAbove?: boolean, fromBehind?: boolean }} hit
- * @returns {{ dmg: number, reaction: string, freezeSec: number, burnSec: number, unfreeze: boolean, push: number, aoeBonus: number }}
+ * @returns {{ dmg: number, reaction: string, freezeSec: number, burnSec: number, unfreeze: boolean, push: number, aoeBonus: number,
+ *             stunSec: number }}
  */
 export function damageTo(enemy, hit) {
   const spec = ENEMIES[enemy.type] || ENEMIES.grunt;
@@ -237,10 +238,43 @@ export function damageTo(enemy, hit) {
     reaction = REACTIONS['ice+wind'].name; dmg *= REACTIONS['ice+wind'].frozenMult;
   } else if (enemy.frozen) {
     dmg *= ELEMENTS.ice.frozenTakenMult;
+    if (hit.el === 'thunder') reaction = REACTIONS['ice+thunder'].name;   // 导电：连锁在冻住的之间不衰减（见 chainTargets）
   }
   if ('frontReduce' in spec && !hit.fromAbove && !hit.fromBehind) dmg *= 1 - spec.frontReduce;
   const freezeSec = hit.el === 'ice' ? ELEMENTS.ice.freezeSec * ('freezeMult' in spec ? spec.freezeMult : 1) : 0;
   const burnSec = hit.el === 'fire' ? ELEMENTS.fire.burnSec : 0;
   const push = hit.el === 'wind' ? ELEMENTS.wind.push : 0;
-  return { dmg, reaction, freezeSec, burnSec, unfreeze, push, aoeBonus };
+  const stunSec = hit.el === 'thunder' ? ELEMENTS.thunder.stunSec : 0;
+  return { dmg, reaction, freezeSec, burnSec, unfreeze, push, aoeBonus, stunSec };
+}
+
+/**
+ * 雷的连锁：从被打中的敌人跳向 range 米内最近、这一下还没打过的敌人，最多跳 jumps 次；
+ * 每跳伤害 × decay，但从冻住的跳到冻住的不衰减（导电）。返回按跳的先后排的落点。
+ * @param {string} fromId 先被打中的那只
+ * @param {{ id: string, x: number, z: number, frozen?: boolean }[]} enemies 活着的敌人
+ * @param {number} dmg 先被打中那一下的伤害（结算前）
+ * @returns {{ id: string, from: string, dmg: number, conduct: boolean }[]}
+ */
+export function chainTargets(fromId, enemies, dmg) {
+  const { jumps, range, decay } = ELEMENTS.thunder.chain;
+  const done = new Set([fromId]);
+  /** @type {{ id: string, from: string, dmg: number, conduct: boolean }[]} */
+  const out = [];
+  let cur = enemies.find((e) => e.id === fromId), d = dmg;
+  for (let k = 0; k < jumps && cur; k++) {
+    let next = null, best = Infinity;
+    for (const e of enemies) {
+      if (done.has(e.id)) continue;
+      const dd = Math.hypot(e.x - cur.x, e.z - cur.z);
+      if (dd <= range && dd < best) { best = dd; next = e; }
+    }
+    if (!next) break;
+    const conduct = !!(cur.frozen && next.frozen);
+    if (!conduct) d *= decay;
+    out.push({ id: next.id, from: cur.id, dmg: d, conduct });
+    done.add(next.id);
+    cur = next;
+  }
+  return out;
 }

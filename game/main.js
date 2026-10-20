@@ -12,7 +12,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-import { damageTo, planCast, regenMana, resolveTarget } from './rules/arbiter.js';
+import { chainTargets, damageTo, planCast, regenMana, resolveTarget } from './rules/arbiter.js';
 import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
 import { maskText } from './rules/safety.js';
@@ -578,6 +578,22 @@ export function start(root, opts = {}) {
   }
 
   /**
+   * 放一发：别的元素是飞弹；雷不飞，是一道闪电——直线就从施法者手上劈过去，从天而降就从头顶劈下来
+   * （绕到背后的仍是一颗电球绕过去）。落点与命中结算和飞弹一样走 onHit。
+   * @param {{ el: string, path: string, delay?: number, target: () => THREE.Vector3, onHit: (p: THREE.Vector3) => void, big?: boolean }} o
+   */
+  function shoot(o) {
+    if (o.el !== 'thunder' || o.path === 'behind') { fx.bolt(o); return; }
+    after(o.delay || 0, () => {
+      if (S.phase !== 'playing') return;
+      const end = o.target().clone();
+      const from = o.path === 'sky' ? end.clone().add(new THREE.Vector3((Math.random() - 0.5) * 3, 15, 1.5)) : origin.clone();
+      fx.arc(from, end);
+      o.onHit(end);
+    });
+  }
+
+  /**
    * @param {import('./rules/arbiter.js').PlannedStep} step
    * @param {{ ids: string[], point: { x: number, z: number } | null }} res 施法时就定好的目标（与锁定标记一致）
    * @param {number} [m] 气势档：范围 × MOMENTUM_RANGE，特效 × MOMENTUM_FX，第 3 档每次命中加顿帧
@@ -592,7 +608,7 @@ export function start(root, opts = {}) {
       for (let i = 0; i < step.count; i++) {
         const id = res.ids.length ? res.ids[i % res.ids.length] : null;
         let last = res.point ? groundPt(res.point) : DEFAULT_AIM.clone();
-        fx.bolt({
+        shoot({
           el: step.el, path: step.path, delay: i * 0.14, big: m >= 2,
           target: () => { const e = id && enemies.get(id); if (e) enemies.aimPoint(e, last); return last; },
           onHit: (p) => {
@@ -608,7 +624,7 @@ export function start(root, opts = {}) {
       for (let i = 0; i < FORMS.rain.hits; i++) {
         const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * RAIN.spread * range;
         const tp = groundPt({ x: c.x + Math.cos(a) * r, z: c.z + Math.sin(a) * r });
-        fx.bolt({
+        shoot({
           el: step.el, path: 'sky', delay: (i * FORMS.rain.sec) / FORMS.rain.hits, target: () => tp,
           onHit: (p) => {
             boom(p, RAIN.hitR * range, 0.4);
@@ -623,7 +639,7 @@ export function start(root, opts = {}) {
     } else {
       const pt = res.point ? groundPt(res.point) : DEFAULT_AIM.clone();
       const R = FORMS.burst.radius * range;
-      fx.bolt({
+      shoot({
         el: step.el, path: 'straight', big: true, target: () => pt,
         onHit: (p) => {
           boom(p, R, 1);
@@ -714,9 +730,11 @@ export function start(root, opts = {}) {
   }
 
   function hitEnemy(e, step, dmg, from, dir) {
-    const r = damageTo({ type: e.type, frozen: e.frozen > 0 }, { el: step.el, dmg, ...dir });
+    const wasFrozen = e.frozen > 0;
+    const r = damageTo({ type: e.type, frozen: wasFrozen }, { el: step.el, dmg, ...dir });
     const at = e.pos.clone();
     enemies.applyHit(e, r, from, step.el);
+    if (step.el === 'thunder' && !dir.chain) chain(e, at, wasFrozen, step, dmg);
     const st = stepStats.get(step);   // 天赋按键放的：记命中与反应，按打法加气势
     if (st) { st.hits.add(e.id); if (r.reaction) st.combo = true; awardButton(st); }
     if (r.aoeBonus) {
@@ -726,6 +744,25 @@ export function start(root, opts = {}) {
         if (o !== e && Math.hypot(o.pos.x - at.x, o.pos.z - at.z) <= 3) enemies.applyHit(o, { dmg: r.aoeBonus, freezeSec: 0, burnSec: 0, unfreeze: true, push: 0, reaction: '蒸汽爆' }, at, 'fire');
       }
     }
+  }
+
+  /**
+   * 雷的连锁：从被劈中的那只（已经死了也算，用它倒下前的位置）一跳一跳劈向旁边的，每跳隔一小会儿，
+   * 打谁、打多疼由 chainTargets 定；跳出来的这几下不再连锁。
+   */
+  function chain(e, at, wasFrozen, step, dmg) {
+    const views = [{ id: e.id, x: at.x, z: at.z, frozen: wasFrozen },
+      ...enemies.list.filter((o) => o !== e).map((o) => ({ id: o.id, x: o.pos.x, z: o.pos.z, frozen: o.frozen > 0 }))];
+    const jumps = chainTargets(e.id, views, dmg);
+    let prev = at.clone().setY(at.y + 0.8);
+    jumps.forEach((j, k) => after(0.08 * (k + 1), () => {
+      const o = enemies.get(j.id);
+      if (!o || S.phase !== 'playing') return;
+      const to = enemies.aimPoint(o);
+      fx.arc(prev, to, { jitter: 0.35 });
+      hitEnemy(o, step, j.dmg, prev.clone(), { chain: true });
+      prev = to.clone();
+    }));
   }
 
   // ---------------------------------------------------------------- 压力测试：从广场上空撒物理方块，到时收走
@@ -846,6 +883,8 @@ export function start(root, opts = {}) {
     /** 天赋按键：按一个，或在 0.6 秒内按两个（press('wind','fire') 出火卷风）；summonBtn 是金色召唤按钮 */
     press: (...els) => els.forEach((el) => pressTalent(el)),
     summonBtn: () => pressSummon(),
+    /** 单独劈一道闪电看样子：zap([x,y,z], [x,y,z]) */
+    zap: (a, b) => fx.arc(new THREE.Vector3(...a), new THREE.Vector3(...b)),
     talents: (list) => { if (list) { S.talents = list; renderPicker(); } return [...S.talents]; },
     binds: () => Object.fromEntries(Object.entries(S.binds).map(([k, v]) => [k, { name: v.name, text: v.text }])),
     // 面板太小时看不清：按 w×h 横屏重画当前这一帧（先 pause 定格），返回 JPEG 的 data URL

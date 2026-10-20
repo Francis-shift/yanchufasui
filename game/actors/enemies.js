@@ -103,7 +103,7 @@ export class Enemies {
     const e = {
       id: `e${++seq}`, type, spec, hp: spec.hp, maxHp: spec.hp, group: g, mat, bar, fill, fillMat, scale,
       path: info, s: 0, lateral: rand(-0.7, 0.7), mode: 'walk', pos: new THREE.Vector3(), vel: new THREE.Vector3(),
-      dir: new THREE.Vector3(0, 0, 1), frozen: 0, burn: 0, hop: rand(0, Math.PI * 2), lastHitEl: '', squash: 0,
+      dir: new THREE.Vector3(0, 0, 1), frozen: 0, burn: 0, stun: 0, hop: rand(0, Math.PI * 2), lastHitEl: '', squash: 0,
     };
     pointAt(info, 0, e.pos, e.dir);
     this.list.push(e);
@@ -139,7 +139,7 @@ export class Enemies {
   /**
    * 结算一次命中（伤害与效果已由 damageTo 算好）。
    * @param {any} e
-   * @param {{ dmg: number, freezeSec: number, burnSec: number, unfreeze: boolean, push: number, reaction: string }} r
+   * @param {{ dmg: number, freezeSec: number, burnSec: number, unfreeze: boolean, push: number, reaction: string, stunSec?: number }} r
    * @param {THREE.Vector3} from 冲击来源点（风往反方向推）
    * @param {string} el
    */
@@ -150,6 +150,7 @@ export class Enemies {
     if (r.unfreeze) e.frozen = 0;
     if (r.freezeSec) e.frozen = Math.max(e.frozen, r.freezeSec);
     if (r.burnSec) e.burn = Math.max(e.burn, r.burnSec);
+    if (r.stunSec) e.stun = Math.max(e.stun, r.stunSec);
     if (r.push && e.mode !== 'fall') {
       // 方向：离爆心向外（四成）+ 背离施法者（六成）——「吹下悬崖」是往外吹，不是原地打转
       const d = this._d.copy(e.pos).sub(from).setY(0);
@@ -255,12 +256,23 @@ export class Enemies {
         }
         if (e.hp <= 0) { this.kill(e, e.pos); continue; }
       }
+      // 麻痹（雷）：停下不动，身上紫白色一闪一闪
+      if (e.stun > 0) {
+        e.stun = Math.max(0, e.stun - dt);
+        if (Math.random() < dt * 24) {
+          const p = this.aimPoint(e, this._p);
+          this.particles.emit(p.x + rand(-0.35, 0.35), p.y + rand(-0.5, 0.5), p.z + rand(-0.35, 0.35), rand(-1.5, 1.5), rand(-1, 1.5), rand(-1.5, 1.5),
+            rand(0.08, 0.16), rand(0.05, 0.1), [3, 3, 3.2], [1.4, 1.1, 3], { drag: 4 });
+        }
+      }
+      const held = e.frozen > 0 || e.stun > 0;
       const frozenK = e.frozen > 0 ? 1 : 0, burnK = e.burn > 0 ? 0.5 + Math.random() * 0.5 : 0;
-      e.mat.emissive.setRGB(0.15 * frozenK + 0.9 * burnK, 0.45 * frozenK + 0.3 * burnK, 1.0 * frozenK + 0.05 * burnK);
-      e.mat.emissiveIntensity = frozenK ? 0.55 : burnK ? 0.6 : 0;
+      const stunK = e.stun > 0 && !frozenK ? (Math.random() < 0.5 ? 1 : 0.3) : 0;
+      e.mat.emissive.setRGB(0.15 * frozenK + 0.9 * burnK + 0.7 * stunK, 0.45 * frozenK + 0.3 * burnK + 0.55 * stunK, 1.0 * frozenK + 0.05 * burnK + 1.0 * stunK);
+      e.mat.emissiveIntensity = frozenK ? 0.55 : stunK ? 0.9 : burnK ? 0.6 : 0;
 
       if (e.mode === 'walk') {
-        if (!e.frozen) {
+        if (!held) {
           const ahead = e.s + e.spec.speed * dt;
           pointAt(e.path, ahead + 0.3, this._p, this._d);
           if (!this.blockedAt(this._p.x, this._p.z)) e.s = ahead;
@@ -273,7 +285,7 @@ export class Enemies {
         e.pos.y = groundHeightAt(e.pos.x, e.pos.z) ?? e.pos.y;
         if (e.s >= e.path.entry) e.mode = 'field';   // 上了广场：改跟流场走，会绕障碍
       } else if (e.mode === 'field') {
-        if (!e.frozen) this.steer(e, dt);
+        if (!held) this.steer(e, dt);
         e.pos.y = groundHeightAt(e.pos.x, e.pos.z) ?? 0;
         if (Math.hypot(e.pos.x - CORE_POS.x, e.pos.z - CORE_POS.z) <= CORE_REACH) {
           this.hooks.onCoreHit(e.spec.coreDmg); this.remove(e, 'core'); continue;
@@ -307,7 +319,7 @@ export class Enemies {
         }
       }
       // 程序动画（不用骨骼，傀儡本来就僵）：一跳一跳，空中拉长、落地压扁，前倾，每步左右晃
-      const walking = (e.mode === 'walk' || e.mode === 'field') && !e.frozen;
+      const walking = (e.mode === 'walk' || e.mode === 'field') && !held;
       if (walking) {
         const before = Math.floor(e.hop / Math.PI);
         e.hop += dt * e.spec.speed * 4.2;

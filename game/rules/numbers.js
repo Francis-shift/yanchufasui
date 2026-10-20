@@ -23,6 +23,8 @@ export const ELEMENTS = {
   ice:   { name: '冰', mult: 0.7, freezeSec: 2, frozenTakenMult: 1.5 },
   wind:  { name: '风', mult: 0.3, push: 12 },                 // push：推出去的初速度（米/秒，约滑 4 米），推下悬崖直接消灭
   earth: { name: '土', mult: 1.0, wallSec: 8 },
+  // 连锁：命中后跳到 range 米内最近的敌人，最多 jumps 次，每跳伤害 × decay；麻痹：停下不动 stunSec 秒
+  thunder: { name: '雷', mult: 1.1, chain: { jumps: 2, range: 3, decay: 0.6 }, stunSec: 0.5 },
 };
 
 /** 威力：1～5，没说按 2；消耗与伤害都乘 1 + 0.5 × (威力 − 1) */
@@ -117,16 +119,17 @@ export const REACTIONS = {
   'ice+wind':   { name: '碎冰', frozenMult: 2 },    // 被冻住的目标受 2 倍伤害
   'wind+fire':  { name: '火旋风', radiusMult: 1.5 },// 火的作用范围 × 1.5
   'earth+wind': { name: '落石', rockDmg: 30 },      // 石墙被风推出
+  'ice+thunder': { name: '导电' },                  // 冻住的敌人之间连锁不衰减
 };
-/** 已经做好的反应（arbiter.js damageTo 里判断的）；火旋风、落石 10-20 顺延到第二批，选天赋的羁绊里先不列 */
-export const REACTION_OPEN = ['ice+fire', 'ice+wind'];
+/** 已经做好的反应（arbiter.js damageTo / chainTargets 里判断的）；火旋风、落石 10-20 顺延到第二批，选天赋的羁绊里先不列 */
+export const REACTION_OPEN = ['ice+fire', 'ice+wind', 'ice+thunder'];
 
 /**
- * 当前批次开放的原件。中期只开火 / 冰 / 风 × 弹 / 爆，第一批起火冰风土 × 弹爆墙雨全开；
- * 设计里有、还没做的（如雷），说到时未生效或降级成最接近的开放原件，并在咒语卡上注明。
+ * 当前批次开放的原件。中期只开火 / 冰 / 风 × 弹 / 爆，第一批起火冰风土雷 × 弹爆墙雨全开；
+ * 设计里有、还没做的，说到时未生效或降级成最接近的开放原件，并在咒语卡上注明。
  */
 export const PHASE = {
-  elements: ['fire', 'ice', 'wind', 'earth'],   // 第一批起土开放；雷在第二批
+  elements: ['fire', 'ice', 'wind', 'earth', 'thunder'],   // 第一批起土开放；雷 10-20 开放（天赋要用，从第二批提前）
   forms: ['bolt', 'burst', 'wall', 'rain'],
   /** 未开放形态 → 降级成哪个（现在全开，留着给以后的新形态用） */
   formFallback: {},

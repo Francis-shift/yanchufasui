@@ -211,6 +211,72 @@ export class SpellFx {
       });
     }
     if (el === 'ice') this.frostShards(p, Math.round(14 * scale), Math.max(scale, 0.5));
+    if (el === 'thunder' && scale >= 0.9) {
+      // 雷爆：几道闪电从天上劈进爆圈里
+      for (let i = 0; i < 4; i++) {
+        const a = Math.random() * Math.PI * 2, r = rand(0, R * 0.7);
+        const end = new THREE.Vector3(p.x + Math.cos(a) * r, p.y, p.z + Math.sin(a) * r);
+        this.arc(end.clone().add(new THREE.Vector3(rand(-2, 2), 14, rand(-2, 2))), end, { delay: i * 0.06 });
+      }
+    }
+  }
+
+  /**
+   * 一道闪电：从 a 到 b 的一条折线（中段抖得最厉害），0.3 秒里闪两下就灭，沿线撒电火花、落点亮一下。
+   * 白天背景很亮，一像素的发光线叠上去就看不见：做成两层管子——白芯（泛光）+ 半透明的紫色外壳（在亮处也有对比）。
+   * @param {THREE.Vector3} a @param {THREE.Vector3} b @param {{ delay?: number, jitter?: number }} [o]
+   */
+  arc(a, b, o = {}) {
+    const pal = PALETTE.thunder;
+    const len = a.distanceTo(b), n = Math.max(6, Math.round(len * 2.2));
+    const jitter = o.jitter ?? Math.min(0.9, 0.12 + len * 0.05);
+    const dir = b.clone().sub(a);
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+      const q = a.clone().addScaledVector(dir, i / n);
+      if (i > 0 && i < n) q.add(randDir().multiplyScalar(jitter * Math.sin((Math.PI * i) / n) + 0.04));
+      pts.push(q);
+    }
+    const path = /** @type {THREE.CurvePath<THREE.Vector3>} */ (new THREE.CurvePath());
+    for (let i = 0; i < n; i++) path.add(new THREE.LineCurve3(pts[i], pts[i + 1]));
+    const coreGeo = new THREE.TubeGeometry(path, n * 2, 0.05, 5, false);
+    const shellGeo = new THREE.TubeGeometry(path, n * 2, 0.16, 6, false);
+    const coreMat = new THREE.MeshBasicMaterial({ color: col(pal.core, 3.2), transparent: true, opacity: 0, fog: false, depthWrite: false });
+    const mat = new THREE.MeshBasicMaterial({ color: col([0.42, 0.28, 1.0], 1.1), transparent: true, opacity: 0, fog: false, depthWrite: false });
+    const line = new THREE.Group();
+    line.add(new THREE.Mesh(shellGeo, mat), new THREE.Mesh(coreGeo, coreMat));
+    this.scene.add(line);
+    let t = -(o.delay || 0), lit = false;
+    this.fx.push({
+      update: (dt) => {
+        t += dt;
+        if (t < 0) return true;
+        if (!lit) {
+          lit = true;
+          for (const q of pts) {
+            for (let k = 0; k < 3; k++) {
+              this.p.emit(q.x, q.y, q.z, rand(-1, 1), rand(-1, 1), rand(-1, 1), rand(0.1, 0.22), rand(0.05, 0.11),
+                scaleArr(pal.core, 3), scaleArr(pal.primary, 1.6), { drag: 5, alpha: 0.9 });
+            }
+          }
+          for (let k = 0; k < 18; k++) {
+            const v = randDir().multiplyScalar(rand(2, 7));
+            this.p.emit(b.x, b.y, b.z, v.x, Math.abs(v.y), v.z, rand(0.2, 0.45), rand(0.04, 0.08),
+              scaleArr(pal.secondary, 3), scaleArr(pal.primary, 1.2), { drag: 2.5, grav: pal.sparkGravity });
+          }
+          this.blastLight.position.copy(b).setY(b.y + 0.8);
+          this.blastLight.color.copy(col(pal.primary));
+          this.blastT = 0; this.blastBoost = 0.5;
+          this.shake = Math.max(this.shake, 0.12);
+        }
+        const k = t / 0.32;
+        const a1 = k < 0.25 ? 1 : k < 0.4 ? 0.15 : k < 0.55 ? 0.95 : Math.max(0, 1 - k);   // 闪两下
+        coreMat.opacity = a1;
+        mat.opacity = a1 * 0.6;
+        return k < 1;
+      },
+      dispose: () => { this.scene.remove(line); coreGeo.dispose(); shellGeo.dispose(); coreMat.dispose(); mat.dispose(); },
+    });
   }
 
   /** 寒冰：地面炸出一圈冰棱 */

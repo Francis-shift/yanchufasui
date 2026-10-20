@@ -123,6 +123,9 @@ export const SCROLLS = {
   ],
   thunder: [
     { text: '天雷劈向最前面那只', els: ['thunder'] },
+    { text: '电光织成雷雨，落在最密集的那群', els: ['thunder'] },
+    { text: '惊雷炸开，轰向最强的那只', els: ['thunder'] },
+    { text: '先冰封最前面那只，再引天雷劈碎它', els: ['ice', 'thunder'] },
   ],
 };
 

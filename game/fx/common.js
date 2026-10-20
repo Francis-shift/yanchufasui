@@ -9,6 +9,7 @@ export const PALETTE = {
   wind:   { primary: [0.3, 0.95, 0.65], secondary: [0.7, 1.0, 0.85],  core: [0.9, 1.0, 0.95],  sparkGravity: -2, emberGravity: 0.8 },
   earth:  { primary: [0.85, 0.55, 0.25], secondary: [1.0, 0.8, 0.5],  core: [1.0, 0.92, 0.8],  sparkGravity: -12, emberGravity: -2 },
   arcane: { primary: [0.62, 0.38, 1.0], secondary: [0.35, 0.85, 1.0], core: [1.0, 0.95, 1.0],  sparkGravity: -6, emberGravity: 0.4 },
+  thunder: { primary: [0.55, 0.45, 1.0], secondary: [0.95, 0.92, 0.55], core: [0.95, 0.95, 1.0], sparkGravity: -3, emberGravity: 0 },
 };
 
 /** @param {number[]} a @param {number} [k] */

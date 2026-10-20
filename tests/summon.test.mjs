@@ -51,15 +51,18 @@ test('召唤：气势槽满但法力不够 → 化作冰雨；冰雨也放不起
   assert.equal(broke.summon?.ghost, false, '什么都没放出来就不演龙影');
 });
 
-test('召唤：没开放的龙（火龙）不管槽满不满都召不出，化作火雨；雷龙连雨都化不成', () => {
+test('召唤：没开放的龙（火龙、雷龙）不管槽满不满都召不出，化作同元素的雨（雷 10-20 开放后雷龙也化成雷雨）', () => {
   const fire = planCast(intentOf({ s: [{ e: 'fire', f: 'bolt', t: 'strongest' }], c: 'fire' }, '召唤火龙'), ctx());
   assert.equal(fire.summon?.cast, false);
   assert.equal(fire.summon?.ghost, false);
   assert.match(fire.downgrades[0], /火龙尚未现世，化作火雨/);
   assert.equal(fire.steps[0].el, 'fire');
   const thunder = planCast(intentOf({ s: [], c: 'thunder' }, '召唤雷龙'), ctx());
-  assert.equal(thunder.ok, false);
-  assert.match(thunder.downgrades[0], /^雷龙尚未现世$/);
+  assert.equal(thunder.summon?.cast, false);
+  assert.equal(thunder.summon?.ghost, false, '没开放的龙不演龙影');
+  assert.match(thunder.downgrades[0], /雷龙尚未现世，化作雷雨/);
+  assert.equal(thunder.steps[0].el, 'thunder');
+  assert.equal(thunder.steps[0].form, 'rain');
 });
 
 test('召唤：模型给了表外的召唤物（凤凰）就当没召唤；关键词解析认得冰龙、火龙，只说"召唤神龙"按句里的元素', () => {

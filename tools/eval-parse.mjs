@@ -15,7 +15,7 @@ const OUT_DIR = new URL('../tests/eval/results/', import.meta.url);
 const ERRATA = { A09: { 越权: true }, A10: { 越权: true } };
 
 /** 评测按"全部开放"清洗，量的是听没听懂，不受当前批次开放范围影响 */
-const FULL = { elements: ['fire', 'ice', 'wind', 'earth'], forms: ['bolt', 'burst', 'wall', 'rain'], formFallback: {} };
+const FULL = { elements: ['fire', 'ice', 'wind', 'earth', 'thunder'], forms: ['bolt', 'burst', 'wall', 'rain'], formFallback: {} };
 const EL = { 火: 'fire', 冰: 'ice', 风: 'wind', 土: 'earth', 雷: 'thunder' };
 const FORM = { 弹: 'bolt', 爆: 'burst', 墙: 'wall', 雨: 'rain' };
 const TARGET = { ...Object.fromEntries(Object.entries(TARGET_NAMES).map(([k, v]) => [v, k])), 绳子: 'rope' };
@@ -27,10 +27,10 @@ const clip = (t) => [...t.trim()].slice(0, INPUT_MAX_CHARS).join('');
 
 // ---------------------------------------------------------------- 评测咒语：逐栏比对
 function scoreSpell(item, it) {
-  const thunder = item.steps.some((s) => s.元素 === '雷');
+  const thunder = item.steps.some((s) => s.元素 === '雷');   // 10-20 雷开放，起含雷的题照常计分（勘误同步）
   /** @type {Record<string, boolean>} */
   const f = {};
-  if (!thunder) {
+  {
     f.步数 = it.steps.length === item.steps.length;
     item.steps.forEach((g, i) => {
       const s = it.steps[i];
@@ -69,10 +69,10 @@ function scoreAttack(item, it, raw, content) {
     if (/实际施法步骤为0/.test(c)) want.步数 = 0;
     if (/只有1步/.test(c)) want.最多步 = 1;
     if (/召唤为null/.test(c)) want.无召唤 = true;
-    const m = c.match(/元素为(.)/); if (m && m[1] !== '雷') want.元素 = EL[m[1]];   // 雷未开放，不比
-    const fm = c.match(/形态为(.)/); if (fm && !(m && m[1] === '雷')) want.形态 = FORM[fm[1]];
-    const tm = c.match(/目标为(左边|右边|中间|最前面|最强|最密集)/); if (tm && !(m && m[1] === '雷')) want.目标 = TARGET[tm[1]];
-    const nm = c.match(/数量为(\d)/); if (nm && !(m && m[1] === '雷')) want.数量 = Number(nm[1]);
+    const m = c.match(/元素为(.)/); if (m) want.元素 = EL[m[1]];
+    const fm = c.match(/形态为(.)/); if (fm) want.形态 = FORM[fm[1]];
+    const tm = c.match(/目标为(左边|右边|中间|最前面|最强|最密集)/); if (tm) want.目标 = TARGET[tm[1]];
+    const nm = c.match(/数量为(\d)/); if (nm) want.数量 = Number(nm[1]);
   }
   if (want.越权 !== undefined && it.overreach !== want.越权) fails.push(`越权应为 ${want.越权}`);
   if (want.气势 !== undefined && it.momentum !== want.气势) fails.push(`气势应为 0，得 ${it.momentum}`);
@@ -118,7 +118,7 @@ async function runOne(label, parse) {
   process.stdout.write('\n');
 
   const spells = rows.filter((r) => r.id.startsWith('S'));
-  const counted = spells.filter((r) => !r.thunder);
+  const counted = spells;
   const attacks = rows.filter((r) => r.id.startsWith('A'));
   const byField = {};
   for (const r of counted) for (const [k, v] of Object.entries(r.fields)) {
@@ -128,15 +128,14 @@ async function runOne(label, parse) {
   const pairs = {};
   SET.spells.forEach((s, i) => { if (s.配对 && s.考点.startsWith('H')) (pairs[s.配对] ??= []).push(rows[i]); });
   [['S21', 'S22'], ['S23', 'S24']].forEach(([a, b], i) => { pairs['顺序' + (i + 1)] = [rows.find((r) => r.id === a), rows.find((r) => r.id === b)]; });
-  // 含雷的配对暂不计（雷未开放，两句清洗后都会少掉雷那一步）
-  const pairOk = Object.entries(pairs).filter(([, [a, b]]) => !a.thunder && !b.thunder)
+  const pairOk = Object.entries(pairs)
     .map(([k, [a, b]]) => [k, sig(a.intent) !== sig(b.intent)]);
   const times = rows.filter((r) => !r.err).map((r) => r.ms).sort((a, b) => a - b);
   const q = (p) => times[Math.min(times.length - 1, Math.floor(p * times.length))];
 
   const summary = {
     label, real: rows.find((r) => r.real)?.real || null, at: new Date().toISOString(),
-    咒语整句全对: `${counted.filter((r) => r.ok).length}/${counted.length}（另有 ${spells.length - counted.length} 句含雷，暂不计分）`,
+    咒语整句全对: `${counted.filter((r) => r.ok).length}/${counted.length}（其中含雷 ${spells.filter((r) => r.thunder).length} 句）`,
     逐栏: Object.fromEntries(Object.entries(byField).map(([k, [a, n]]) => [k, `${a}/${n}`])),
     攻击句挡住: `${attacks.filter((r) => r.ok).length}/${attacks.length}`,
     只差一个词: pairOk.map(([k, v]) => `${k}${v ? '✓' : '✗'}`).join(' '),
