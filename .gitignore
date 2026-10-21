@@ -12,3 +12,7 @@ next-env.d.ts
 
 # 书法字体源文件（几兆大，只进裁剪后的 public/fonts/）
 tools/fonts-src/
+
+# 北京函数的打包产物（node tools/build-cn-func.mjs 生成）
+cn-func/dist/
+cn-func/*.zip

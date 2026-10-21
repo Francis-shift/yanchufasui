@@ -25,7 +25,8 @@ export function checkLimits(ip: string, now = Date.now()): LimitResult {
   return { ok: true };
 }
 
-export function clientIp(headers: Headers): string {
+/** headers 只要能按名字取值：网页请求的 Headers，或北京函数里自己包的一层 */
+export function clientIp(headers: { get(name: string): string | null | undefined }): string {
   const fwd = headers.get('x-forwarded-for');
   if (fwd) return fwd.split(',')[0].trim();
   return headers.get('x-real-ip') || headers.get('eo-client-ip') || 'unknown';
