@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>线路测速</title>
+<style>
+  :root { --bg: #f6f4ef; --card: #fff; --ink: #222; --mute: #666; --line: #ddd; --accent: #2b5bd7; --bad: #c0392b; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1b1b1d; --card: #26262a; --ink: #eee; --mute: #aaa; --line: #3a3a40; --accent: #6b8cff; --bad: #ff7b6b; } }
+  body { font: 15px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 16px; background: var(--bg); color: var(--ink); }
+  h1 { font-size: 18px; margin: 0 0 6px; }
+  p { margin: 4px 0 12px; color: var(--mute); }
+  button { font-size: 16px; padding: 10px 18px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; }
+  table { border-collapse: collapse; width: 100%; margin-top: 12px; background: var(--card); }
+  th, td { border: 1px solid var(--line); padding: 6px 4px; text-align: right; font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: center; }
+  .sum { margin-top: 12px; padding: 10px 12px; background: var(--card); border-radius: 8px; }
+  .bad { color: var(--bad); }
+</style>
+</head>
+<body>
+<h1>线路测速</h1>
+<p>比较两条解析线路：北京函数（同机房调模型）和现在用的新加坡函数。每轮各发一次只要 1 个字的请求，共 6 轮，约半分钟。总耗时是这台手机从发出到收到的时间，"其中模型"是服务器调模型花的时间。</p>
+<button id="go">开始测试</button>
+<table id="t" hidden>
+  <thead><tr><th>轮</th><th>北京<br>总耗时</th><th>其中<br>模型</th><th>新加坡<br>总耗时</th><th>其中<br>模型</th></tr></thead>
+  <tbody></tbody>
+</table>
+<div class="sum" id="sum" hidden></div>
+<script>
+const BJ = 'https://sid78qptt76cd70t46mml.apigateway-cn-beijing.volceapi.com/probe?n=1';
+const SG = '/api/parse?diag=1';
+const ROUNDS = 6;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const med = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor((s.length - 1) / 2)] : '-'; };
+
+async function hit(url) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 15000);
+  const t0 = performance.now();
+  try {
+    const r = await fetch(url + '&t=' + Date.now(), { cache: 'no-store', signal: ctl.signal });
+    const j = await r.json();
+    const c = (j.calls || [])[0] || {};
+    return { total: Math.round(performance.now() - t0), model: c.ms, ok: c.status === 200 };
+  } catch (e) {
+    return { total: Math.round(performance.now() - t0), ok: false, err: e.name === 'AbortError' ? '超时' : '失败' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const cell = (x) => x.ok ? `<td>${x.total}</td><td>${x.model ?? '-'}</td>` : `<td class="bad">${x.err || '出错'}</td><td>-</td>`;
+
+document.getElementById('go').onclick = async (ev) => {
+  const btn = ev.currentTarget;
+  btn.disabled = true;
+  const table = document.getElementById('t');
+  const body = table.querySelector('tbody');
+  const sum = document.getElementById('sum');
+  body.innerHTML = '';
+  table.hidden = false;
+  sum.hidden = true;
+  const res = { bj: [], sg: [] };
+  for (let i = 1; i <= ROUNDS; i++) {
+    const bj = await hit(BJ);
+    const sg = await hit(SG);
+    res.bj.push(bj);
+    res.sg.push(sg);
+    body.insertAdjacentHTML('beforeend', `<tr><td>${i}</td>${cell(bj)}${cell(sg)}</tr>`);
+    if (i < ROUNDS) await sleep(2000);
+  }
+  const line = (name, xs) => {
+    const ok = xs.filter((x) => x.ok).map((x) => x.total);
+    const later = xs.slice(1).filter((x) => x.ok).map((x) => x.total);
+    return `${name}：成功 ${ok.length}/${xs.length}，中位 ${med(ok)} 毫秒，最慢 ${ok.length ? Math.max(...ok) : '-'} 毫秒，去掉第 1 轮的中位 ${med(later)} 毫秒`;
+  };
+  const conn = navigator.connection && navigator.connection.effectiveType ? `（网络：${navigator.connection.effectiveType}）` : '';
+  sum.innerHTML = `${line('北京', res.bj)}<br>${line('新加坡', res.sg)}<br>第 1 轮含建立连接的时间 ${conn}`;
+  sum.hidden = false;
+  btn.disabled = false;
+  btn.textContent = '再测一次';
+};
+</script>
+</body>
+</html>
