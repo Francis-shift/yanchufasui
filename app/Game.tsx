@@ -2,6 +2,9 @@
 
 import { useEffect, useRef } from 'react';
 
+/** 北京线路：火山引擎函数服务，经 API 网关的默认域名访问（源码 cn-func/）。构建时配了 NEXT_PUBLIC_PARSE_URL 就用它 */
+const CN_PARSE_URL = process.env.NEXT_PUBLIC_PARSE_URL || 'https://sid78qptt76cd70t46mml.apigateway-cn-beijing.volceapi.com/parse';
+
 /**
  * 只负责挂载：游戏本体在 game/ 里，是不依赖 React 的浏览器模块，
  * 同一份代码也能打成单文件页面做画面验证。
@@ -14,7 +17,8 @@ export default function Game() {
     import('../game/main.js').then(({ start }) => {
       if (cancelled || !root.current) return;
       dispose = start(root.current, {
-        parseUrl: '/api/parse',
+        // 先走北京（与模型同机房，国内手机实测一来一回约 0.8 秒），不通再走网站自带的新加坡线路
+        parseUrl: [CN_PARSE_URL, '/api/parse'],
         // 冰龙：气势槽过半或第一次召唤时才下载（模型 gzip 后约 310 KB，贴图约 220 KB）
         dragon: { mesh: '/models/ice-dragon.drg2.gz', tex: '/models/ice-dragon-1024.webp' },
       });

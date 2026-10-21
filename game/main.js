@@ -79,7 +79,7 @@ const FAIL_TEXT = {
 
 /**
  * @param {HTMLElement} root
- * @param {{ parseUrl?: string, dragon?: { mesh?: string, tex?: string | null } }} [opts] dragon：冰龙模型与贴图的地址
+ * @param {{ parseUrl?: string | string[], dragon?: { mesh?: string, tex?: string | null } }} [opts] parseUrl：解析接口，给一串就按顺序当后备（见 net.js）；dragon：冰龙模型与贴图的地址
  * @returns {() => void} 卸载
  */
 export function start(root, opts = {}) {
