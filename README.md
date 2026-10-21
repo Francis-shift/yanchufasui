@@ -33,12 +33,13 @@
 | `game/ui/` | 界面：输入框、法力与阵眼、咒语卡、浮字、开始与结算 |
 | `game/main.js` | 入口：把上面接起来，施法流程、五波守关与主循环 |
 | `game/check.js` | 手机检查页：自动跑三段压力测试，判断卡在画面、特效还是物理 |
-| `app/` | 网站（Next.js）：游戏页、`/check` 检查页、`api/parse` 解析接口（也管"求灵感"现写咒语；`?diag=1` 诊断线上慢在哪） |
+| `app/` | 网站（Next.js）：游戏页、`/check` 检查页、`api/parse` 解析接口的新加坡线路（北京不通时的后备；`?diag=1` 诊断线上慢在哪） |
+| `cn-func/` | 解析接口的北京线路：火山引擎函数服务的外壳（收发、跨域只认本站、来源 IP），打包后在控制台上传 |
 | `public/models/` | 冰龙模型（本人用 Tripo 生成，打包成 DRG2 格式后 gzip）与贴图；气势槽过半才下载 |
 | `public/fonts/` | 按字表裁剪的书法字体（咒语名用马善政，大字用志莽行，SIL OFL 开源协议，协议原文同目录） |
-| `server/` | 解析接口用的提示词、防刷计数 |
+| `server/` | 解析接口的核心（`parse-core.ts`，两条线路共用：解析、求灵感、预热、诊断）、提示词、防刷计数 |
 | `tests/` | 单元测试（`npm test`）；`tests/eval/` 封存的评测集与攻击句、勘误、各模型跑分结果 |
-| `tools/` | `build_preview.py` 打离线单文件页面验画面；`bench-parse.mjs` 测解析延迟；`eval-parse.mjs` 跑评测集；`subset_font.py` 按字表裁书法字体；`name-charset.mjs` 查模型起的名字有多少落在字表里 |
+| `tools/` | `build_preview.py` 打离线单文件页面验画面；`build-cn-func.mjs` 打包北京线路的函数；`bench-parse.mjs` 测解析延迟；`eval-parse.mjs` 跑评测集；`subset_font.py` 按字表裁书法字体；`name-charset.mjs` 查模型起的名字有多少落在字表里 |
 | `docs/` | 设计文档、出题说明、试玩记录 |
 
 ## 本地运行
@@ -64,6 +65,13 @@ python tools/build_preview.py  # 生成 preview/index.html（离线单文件，�
 线上地址：https://www.yanchufasui.top （国内手机流量、微信内都能打开）。
 
 部署在 EdgeOne Makers（原名 Pages；加速区域选"全球可用区（不含中国大陆）"，免备案）+ 自己的域名，推送到 main 即自动构建；同一仓库接 Vercel 作后备（未接）。平台给的预览地址在国内网络打不开，要用自己的域名访问。环境变量与 `.env.example` 同名；密钥只配在平台上，不进仓库。
+
+解析接口有两条线路，网页先走北京、不通自动换新加坡：
+
+- **北京**（首选）：火山引擎函数服务（华北2，与模型同机房），经 API 网关的默认域名访问。国内手机实测一句约 1.1 秒。更新：`node tools/build-cn-func.mjs` 生成 `cn-func/yanchu-parse.zip`，在函数控制台上传后发布；函数的环境变量配 `ARK_API_KEY`、`ARK_MODEL`。
+- **新加坡**（后备）：网站自带的 `/api/parse`。服务器在境外，调北京的模型要跨境，白天也常超过 4 秒。
+
+`/probe.html` 是线路测速页，在手机上打开能比较两条线路的耗时。
 
 ## 进度
 
