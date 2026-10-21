@@ -28,10 +28,11 @@ beforeEach(() => resetRoutes());
 test('北京连不上：换新加坡，之后一分钟内直接走新加坡', async () => {
   const calls = mockFetch({ [BJ]: 'network', [SG]: () => json(GOOD) });
   const r = await parseRemote([BJ, SG], '火球', 4500);
-  assert.deepEqual(r, { raw: GOOD.raw, ms: 800, model: 'm' });
+  assert.deepEqual(r, { raw: GOOD.raw, ms: 800, model: 'm', via: 1 });   // 注明走的是后备线路
   assert.deepEqual(calls.map((c) => c.url), [BJ, SG]);
-  await parseRemote([BJ, SG], '冰墙', 4500);
+  const again = await parseRemote([BJ, SG], '冰墙', 4500);
   assert.deepEqual(calls.map((c) => c.url), [BJ, SG, SG]);
+  assert.equal('via' in again && again.via, 1);
 });
 
 test('网关报错（不是我们的答复）：换新加坡', async () => {
@@ -68,8 +69,9 @@ test('时间用完：不换线路，也不把北京记成连不上（下一句�
   assert.deepEqual(r, { fail: 'timeout' });
   assert.deepEqual(calls.map((c) => c.url), [BJ]);
   byUrl[BJ] = () => json(GOOD);
-  await parseRemote([BJ, SG], '冰墙', 4500);
+  const r2 = await parseRemote([BJ, SG], '冰墙', 4500);
   assert.deepEqual(calls.map((c) => c.url), [BJ, BJ]);
+  assert.equal('via' in r2 && r2.via, 0);
 });
 
 test('剩下的时间不够就不换', async () => {

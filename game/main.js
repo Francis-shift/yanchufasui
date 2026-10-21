@@ -362,7 +362,11 @@ export function start(root, opts = {}) {
     let raw, source;
     const ms = Math.round(performance.now() - t0);
     const server = remote.ms ? `，模型 ${remote.ms} 毫秒` : '';
-    if ('raw' in remote) { raw = remote.raw; source = remote.ms ? `模型解析（模型 ${remote.ms} 毫秒）` : '模型解析'; }
+    if ('raw' in remote) {
+      raw = remote.raw;
+      const notes = [remote.ms ? `模型 ${remote.ms} 毫秒` : '', remote.via ? '走后备线路' : ''].filter(Boolean);   // 首选线路不通时注明
+      source = notes.length ? `模型解析（${notes.join('，')}）` : '模型解析';
+    }
     else {
       raw = kwRaw;
       source = remote.fail === 'offline' ? '关键词解析（离线）'

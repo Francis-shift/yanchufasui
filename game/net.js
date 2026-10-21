@@ -53,11 +53,12 @@ async function post(url, payload, timeoutMs) {
  * @param {string | string[] | undefined} url
  * @param {object} payload
  * @param {number} timeoutMs
- * @returns {Promise<{ data: any } | { fail: string, ms?: number }>}
+ * @returns {Promise<{ data: any, via: number } | { fail: string, ms?: number }>} via：答复来自给定的第几条线路（0 是首选）
  */
 async function ask(url, payload, timeoutMs) {
   const list = routes(url);
   if (!list.length) return { fail: 'offline' };
+  const all = Array.isArray(url) ? url : [url];
   const t0 = Date.now();
   /** @type {{ fail: string, ms?: number }} */
   let last = { fail: 'offline' };
@@ -72,7 +73,7 @@ async function ask(url, payload, timeoutMs) {
       continue;
     }
     const ours = !!r.data && typeof r.data.ok === 'boolean';   // 是我们的接口答的，不是网关的报错页
-    if (ours && r.data.ok) { downUntil.delete(u); return { data: r.data }; }
+    if (ours && r.data.ok) { downUntil.delete(u); return { data: r.data, via: all.indexOf(u) }; }
     last = { fail: (ours && r.data.reason) || `http_${r.status}`, ms: ours ? r.data.ms : undefined };
     if (ours && r.status < 500 && !CONFIG_FAIL.has(r.data.reason)) break;   // 服务器正常答了"不行"，不换
     downUntil.set(u, Date.now() + SKIP_MS);   // 网关报错、页面不存在、那边没配好之类，换下一条
@@ -84,11 +85,11 @@ async function ask(url, payload, timeoutMs) {
  * @param {string | string[] | undefined} url
  * @param {string} text
  * @param {number} timeoutMs
- * @returns {Promise<{ raw: any, ms: number, model: string } | { fail: string, ms?: number }>} ms 是服务器上调模型花的毫秒数
+ * @returns {Promise<{ raw: any, ms: number, model: string, via: number } | { fail: string, ms?: number }>} ms 是服务器上调模型花的毫秒数；via 见 ask
  */
 export async function parseRemote(url, text, timeoutMs) {
   const r = await ask(url, { text }, timeoutMs);
-  return 'data' in r ? { raw: r.data.raw, ms: r.data.ms, model: r.data.model } : r;
+  return 'data' in r ? { raw: r.data.raw, ms: r.data.ms, model: r.data.model, via: r.via } : r;
 }
 
 /**
