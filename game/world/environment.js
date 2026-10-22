@@ -10,32 +10,43 @@ export const HORIZON = new THREE.Color(0.84, 0.9, 0.96);
 const ZENITH = new THREE.Color(0.3, 0.52, 0.84);
 export const SUN_DIR = new THREE.Vector3(-0.55, 0.62, 0.56).normalize();
 
+// 压暗世界（大招时）：天空、云海、雾、灯一起变暗变灰，发光的法术不受灯光影响、照样亮——参考里"特效是全场最亮的东西"
+// 着色器与 JS 用同一个公式（dimColor），天边与雾的颜色才接得上
+const DIM_GLSL = `vec3 dimColor(vec3 c, float k){ float l = dot(c, vec3(0.2126, 0.7152, 0.0722)); return mix(c, vec3(l), 0.6 * k) * (1. - 0.8 * k) + vec3(0.0, 0.004, 0.02) * k; }`;
+/** @param {THREE.Color} out @param {THREE.Color} c @param {number} k */
+function dimColor(out, c, k) {
+  const l = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b, s = 0.6 * k, f = 1 - 0.8 * k;
+  return out.setRGB((c.r + (l - c.r) * s) * f, (c.g + (l - c.g) * s) * f + 0.004 * k, (c.b + (l - c.b) * s) * f + 0.02 * k);
+}
+
 /** @param {THREE.Scene} scene */
 export function buildEnvironment(scene) {
   scene.background = HORIZON.clone();
   scene.fog = new THREE.FogExp2(HORIZON.getHex(), 0.0062);
 
   // 天空：地平线发白、天顶偏蓝，太阳附近一圈光晕
-  const sky = new THREE.Mesh(
+  const skyMesh = new THREE.Mesh(
     new THREE.SphereGeometry(600, 32, 16),
     new THREE.ShaderMaterial({
       side: THREE.BackSide, depthWrite: false, fog: false,
-      uniforms: { uTop: { value: ZENITH }, uHorizon: { value: HORIZON }, uSun: { value: SUN_DIR } },
+      uniforms: { uTop: { value: ZENITH }, uHorizon: { value: HORIZON }, uSun: { value: SUN_DIR }, uDim: { value: 0 } },
       vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position);
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
-      fragmentShader: `varying vec3 vDir; uniform vec3 uTop; uniform vec3 uHorizon; uniform vec3 uSun;
+      fragmentShader: `varying vec3 vDir; uniform vec3 uTop; uniform vec3 uHorizon; uniform vec3 uSun; uniform float uDim;
+        ${DIM_GLSL}
         void main(){ vec3 d = normalize(vDir); float h = clamp(d.y, 0., 1.);
           vec3 c = mix(uHorizon, uTop, pow(h, 0.5));
           float s = max(dot(d, uSun), 0.);
-          c += vec3(1., 0.95, 0.82) * (pow(s, 600.) * 2.5 + pow(s, 12.) * 0.18);
-          gl_FragColor = vec4(c, 1.); }`,
+          c += vec3(1., 0.95, 0.82) * (pow(s, 600.) * 2.5 + pow(s, 12.) * 0.18) * (1. - uDim);
+          gl_FragColor = vec4(dimColor(c, uDim), 1.); }`,
     }),
   );
-  sky.renderOrder = -10;
-  scene.add(sky);
+  skyMesh.renderOrder = -10;
+  scene.add(skyMesh);
 
   // 天光 + 太阳（灯的数量固定，只改强度）
-  scene.add(new THREE.HemisphereLight(0xd7e8ff, 0x7d7262, 1.15));
+  const hemi = new THREE.HemisphereLight(0xd7e8ff, 0x7d7262, 1.15);
+  scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xfff0d8, 2.7);
   sun.position.copy(SUN_DIR).multiplyScalar(40);
   sun.target.position.set(0, 0, -2);
@@ -49,17 +60,31 @@ export function buildEnvironment(scene) {
 
   const clouds = buildCloudSea(scene);
   buildDistantPeaks(scene);
-  return { sun, clouds };
+  const sky = /** @type {THREE.ShaderMaterial} */ (skyMesh.material);
+  const bg = /** @type {THREE.Color} */ (scene.background), fog = /** @type {THREE.FogExp2} */ (scene.fog);
+  /** 压暗世界：k = 0 正常，1 最暗（灯降到约三成、天空云海变暗变灰） @param {number} k */
+  const setDim = (k) => {
+    hemi.intensity = 1.15 * (1 - 0.7 * k);
+    sun.intensity = 2.7 * (1 - 0.8 * k);
+    sky.uniforms.uDim.value = k;
+    clouds.uniforms.uDim.value = k;
+    dimColor(bg, HORIZON, k);
+    fog.color.copy(bg);
+  };
+  /** 阴影贴图大小（画质档定）@param {number} size */
+  const setShadowMap = (size) => { sun.shadow.mapSize.set(size, size); };
+  return { sun, clouds, setDim, setShadowMap };
 }
 
 /** 云海：一大片流动的噪声，远处融进地平线色 */
 function buildCloudSea(scene) {
   const mat = new THREE.ShaderMaterial({
     fog: false,
-    uniforms: { uTime: { value: 0 }, uHorizon: { value: HORIZON }, uSun: { value: SUN_DIR } },
+    uniforms: { uTime: { value: 0 }, uHorizon: { value: HORIZON }, uSun: { value: SUN_DIR }, uDim: { value: 0 } },
     vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position, 1.); vW = w.xyz;
       gl_Position = projectionMatrix * viewMatrix * w; }`,
-    fragmentShader: `varying vec3 vW; uniform float uTime; uniform vec3 uHorizon; uniform vec3 uSun;
+    fragmentShader: `varying vec3 vW; uniform float uTime; uniform vec3 uHorizon; uniform vec3 uSun; uniform float uDim;
+      ${DIM_GLSL}
       float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       float noise(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3. - 2. * f);
         return mix(mix(hash(i), hash(i + vec2(1., 0.)), u.x), mix(hash(i + vec2(0., 1.)), hash(i + vec2(1., 1.)), u.x), u.y); }
@@ -74,7 +99,7 @@ function buildCloudSea(scene) {
         c += vec3(1., 0.95, 0.85) * pow(max(dot(normalize(vec3(-vW.x, 30., -vW.z)), uSun), 0.), 8.) * 0.12;
         float dist = length(vW.xz - cameraPosition.xz);
         c = mix(c, uHorizon, smoothstep(60., 420., dist));
-        gl_FragColor = vec4(c, 1.); }`,
+        gl_FragColor = vec4(dimColor(c, uDim), 1.); }`,
   });
   const sea = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), mat);
   sea.rotation.x = -Math.PI / 2;

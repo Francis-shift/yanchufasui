@@ -185,6 +185,7 @@ export class DragonFx {
     this.preload();
     if (this.active) this.active.finish();
     this.active = new Flight(this, 'summon', target, el, onImpact, follow);
+    this.fx.pulseDim(0.85, 3.2);   // 龙出场：世界压暗，龙和它的光成为画面里最亮的东西
   }
 
   /**
@@ -504,6 +505,8 @@ class Flight {
   impactFx() {
     const T = this.target, fx = this.o.fx, pal = this.pal;
     fx.burst(T, this.el, 4.5, 1.6);
+    fx.impact(T, 1);
+    fx.pulseDim(0.62, 1.2);
     fx.shake = Math.max(fx.shake, 0.55);
     fx.hitStop = Math.max(fx.hitStop, 0.09);
     for (let i = 0; i < 50; i++) {

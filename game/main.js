@@ -28,6 +28,7 @@ import { DragonFx } from './fx/dragon.js';
 import { Locks } from './fx/locks.js';
 import { distToSegment, Walls } from './fx/walls.js';
 import { FusionFx } from './fx/fusions.js';
+import { GradePass } from './fx/grade.js';
 import { Particles } from './fx/particles.js';
 import { SpellFx } from './fx/spells.js';
 import { buildEnvironment } from './world/environment.js';
@@ -35,6 +36,8 @@ import { fitFrame } from './world/framing.js';
 import { buildLayout, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS } from './world/layout.js';
 import { Hud, preloadFonts } from './ui/hud.js';
 import { inspireRemote, parseRemote, warmUp } from './net.js';
+import { pickQuality } from './quality.js';
+import { mountLab } from './ui/lab.js';
 
 /**
  * 5 波（设计文档第 4 节）。每波一道题：开场提示就是这一波的解法方向。
@@ -79,15 +82,16 @@ const FAIL_TEXT = {
 
 /**
  * @param {HTMLElement} root
- * @param {{ parseUrl?: string | string[], dragon?: { mesh?: string, tex?: string | null } }} [opts] parseUrl：解析接口，给一串就按顺序当后备（见 net.js）；dragon：冰龙模型与贴图的地址
+ * @param {{ parseUrl?: string | string[], lab?: boolean, dragon?: { mesh?: string, tex?: string | null } }} [opts] lab：直接进特效试验场； parseUrl：解析接口，给一串就按顺序当后备（见 net.js）；dragon：冰龙模型与贴图的地址
  * @returns {() => void} 卸载
  */
 export function start(root, opts = {}) {
   const mobile = window.matchMedia('(pointer: coarse)').matches;
+  const quality = pickQuality(location.search, mobile);   // 电脑电影档、手机流畅档（?q= 可强制）
 
   // ---------------------------------------------------------------- 渲染
   const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, mobile ? 1.5 : 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality.pixelRatio));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -101,16 +105,22 @@ export function start(root, opts = {}) {
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
   // 白天天空本身就接近 1，阈值必须高于它，否则整屏发白；只让亮度超过 1 的法术特效泛光
-  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), mobile ? 0.45 : 0.6, 0.45, 1.05);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), quality.bloom.strength, quality.bloom.radius, quality.bloom.threshold);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
+  // 调色放在色调映射之后：对比、饱和、冷暖分离、暗角、颗粒，命中时径向模糊（fx/grade.js）
+  const grade = new GradePass(quality.grade);
+  composer.addPass(grade);
 
   const env = buildEnvironment(scene);
+  env.setShadowMap(quality.shadowMap);
   const layout = buildLayout(scene);
-  const particles = new Particles(scene, mobile ? 4500 : 9000);
+  const particles = new Particles(scene, quality.particles);
   particles.floorAt = (x, z) => (groundHeightAt(x, z) ?? -60) + 0.03;
+  const ink = new Particles(scene, quality.ink, { ink: true });   // 墨点、墨烟（特效风格 v2）
+  ink.floorAt = particles.floorAt;
   const origin = CASTER_POS.clone().setY(1.5);
-  const fx = new SpellFx(scene, particles, origin);
+  const fx = new SpellFx(scene, particles, origin, { ink, quality });
   const locks = new Locks(scene);
 
   const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -18, 0) });
@@ -157,7 +167,9 @@ export function start(root, opts = {}) {
     renderer.setSize(w, h);
     composer.setSize(w, h);
     bloom.setSize(w, h);
-    particles.resize(renderer.getDrawingBufferSize(new THREE.Vector2()).y, camera.fov);
+    const hpx = renderer.getDrawingBufferSize(new THREE.Vector2()).y;
+    particles.resize(hpx, camera.fov);
+    ink.resize(hpx, camera.fov);
   }
   layoutCamera();
   // iOS 的 Safari 弹出键盘时页面本身不变矮，只是下半截被盖住：把游戏区域缩到看得见的那块（微信、安卓会自己变矮，不受影响）
@@ -808,8 +820,42 @@ export function start(root, opts = {}) {
   }
   renderer.info.autoReset = false;   // 后期处理一帧要画好几遍，手动清零才能数出整帧的绘制次数
 
+  // ---------------------------------------------------------------- 特效试验场（?lab 或 demo.lab()；面板在 ui/lab.js）
+  const lab = { on: false, dim: -1, speed: 1, panel: /** @type {ReturnType<typeof mountLab> | null} */ (null) };
+  /** 放一发：raw 是模型格式的意图，走和玩家一样的清洗、裁决、演出；不扣法力、不计重复衰减 @param {any} raw @param {string} label */
+  function labCast(raw, label) {
+    if (S.phase !== 'playing') return;
+    S.mana = MANA_MAX; S.lastCombo = null; S.said = new Set(); S.busy = false;
+    if (raw.c) setGauge(ULT_GAUGE);
+    const castId = ++castSeq;
+    const intent = sanitizeIntent(raw, label);
+    locks.show(castId, lockSteps(intent.steps, intent.momentum).marks);
+    fx.beginChant(intent.summon || intent.steps[0]?.el || 'arcane');
+    after(0.2, () => perform(intent, { text: label, source: '试验场', ms: 0, raw, castId }));
+  }
+  function labTargets() {
+    for (let i = 0; i < 4; i++) enemies.spawn('grunt', i % 2);
+    enemies.spawn('shield', 0);
+    enemies.spawn('grunt', 1);
+  }
+  function enterLab() {
+    if (lab.on) return;
+    lab.on = true;
+    S.endless = true;
+    startGame();
+    S.queue.length = 0;
+    hud.setHint('特效试验场：在面板里挑招放，可放慢、定格、锁定压暗');
+    labTargets();
+    lab.panel = mountLab(root, {
+      cast: labCast, speed: (s) => { lab.speed = s; }, dim: (v) => { lab.dim = v; },
+      targets: labTargets, clear: () => { for (const e of [...enemies.list]) enemies.kill(e, e.pos); },
+      quality: quality.name,
+    });
+  }
+
   // ---------------------------------------------------------------- 主循环
-  let raf = 0, lastNow = performance.now(), timeScale = 1, fpsAcc = 0, fpsN = 0, fps = 0, dbgT = 0, idleT = 0;
+  let raf = 0, lastNow = performance.now(), timeScale = 1, fpsAcc = 0, fpsN = 0, fps = 0, dbgT = 0, idleT = 0, worldDim = 0, labT = 0;
+  const impactUv = new THREE.Vector2(0.5, 0.5);
   const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), shakeOff = new THREE.Vector3();
   function frame() {
     raf = requestAnimationFrame(frame);
@@ -820,7 +866,7 @@ export function start(root, opts = {}) {
     if (slowSince && now - slowSince > SLOWMO_MAX_SEC * 1000) { slowSince = 0; slowSpent = true; }
     const slow = (slowSince > 0 || (fx.chanting > 0 && !buttonChant)) && S.phase === 'playing';
     timeScale += ((slow ? SLOWMO_SCALE : 1) - timeScale) * Math.min(1, realDt * 10);
-    let dt = frozen ? 0 : realDt * timeScale;   // 写咒对话框开着：游戏停住，画面照画
+    let dt = frozen ? 0 : realDt * timeScale * lab.speed;   // 写咒对话框开着：游戏停住，画面照画；试验场可放慢、定格
     if (fx.hitStop > 0) { fx.hitStop -= realDt; dt *= 0.06; }
     idleT += dt;
 
@@ -840,6 +886,11 @@ export function start(root, opts = {}) {
     fx.update(dt);
     locks.update(dt, enemies);
     const live = particles.update(dt);
+    const inkLive = ink.update(dt);
+    // 压暗世界：大招（fx.dimLevel）或开口咏唱时轻压一点；试验场可以锁定
+    const dimTarget = lab.dim >= 0 ? lab.dim : Math.max(fx.dimLevel, fx.chanting > 0 && !buttonChant ? 0.18 : 0);
+    worldDim += (dimTarget - worldDim) * Math.min(1, realDt * 6);
+    env.setDim(worldDim);
     env.clouds.uniforms.uTime.value += dt;
     layout.coreSigil.rotation.z += dt * 0.2;
     layout.crystal.rotation.y += dt * 0.8;
@@ -847,6 +898,15 @@ export function start(root, opts = {}) {
     const cm = layout.crystal.material;
     cm.emissiveIntensity += (0.8 - cm.emissiveIntensity) * Math.min(1, dt * 3);
     hud.setMana(S.mana, MANA_MAX);
+    if (lab.on) {   // 试验场：法力、阵眼一直满
+      S.mana = MANA_MAX;
+      if (S.core < CORE_HP) { S.core = CORE_HP; hud.setCore(S.core, CORE_HP); }
+      labT += realDt;
+      if (lab.panel && labT > 0.3) {
+        labT = 0;
+        lab.panel.setStatus(`帧率 ${fps} · 粒子 ${live} · 墨 ${inkLive}\n压暗 ${worldDim.toFixed(2)} · 时间 ×${(timeScale * lab.speed).toFixed(2)}`);
+      }
+    }
 
     // 镜头：咏唱时推近，动完回到固定位置
     const focusT = (fx.chanting > 0 && !buttonChant) || (slowSince > 0 && S.phase === 'playing') ? 0.35 : 0;
@@ -856,6 +916,11 @@ export function start(root, opts = {}) {
     shakeOff.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(fx.shake * 0.5);
     camera.position.copy(camPos).add(shakeOff);
     camera.lookAt(camLook);
+    fx.cameraPos.copy(camera.position);
+    fx.impactK *= Math.exp(-realDt * 9);
+    _v.copy(fx.impactPos).project(camera);
+    impactUv.set(_v.x * 0.5 + 0.5, _v.y * 0.5 + 0.5);
+    grade.tick(realDt, _v.z < 1 ? fx.impactK : 0, impactUv, camera.aspect);
     renderer.info.reset();
     composer.render();
 
@@ -865,7 +930,7 @@ export function start(root, opts = {}) {
     if (!hud.debug.hidden && dbgT > 0.25) {
       dbgT = 0;
       const l = S.last;
-      hud.debug.textContent = [`帧率 ${fps}`, `粒子 ${live}`, `敌人 ${enemies.alive}`, `法力 ${Math.floor(S.mana)}  气势槽 ${S.gauge}`,
+      hud.debug.textContent = [`帧率 ${fps}  ${quality.label}`, `粒子 ${live}  墨 ${inkLive}`, `敌人 ${enemies.alive}`, `法力 ${Math.floor(S.mana)}  气势槽 ${S.gauge}`,
         `时间 ×${timeScale.toFixed(2)}`, l ? `上一句：${l.source} ${l.ms} 毫秒` : '', l ? `意图：${JSON.stringify(l.raw).slice(0, 80)}` : ''].join('\n');
     }
   }
@@ -882,6 +947,7 @@ export function start(root, opts = {}) {
     pause: (on = true) => { if (on) cancelAnimationFrame(raf); else { lastNow = performance.now(); frame(); } },
     block: (list = []) => enemies.setObstacles(list),
     wave: (i = 0) => { enemies.clear(); S.phase = 'playing'; startWave(i); },
+    lab: () => enterLab(),
     killAll: () => { S.queue.length = 0; for (const e of [...enemies.list]) enemies.kill(e, e.pos); },
     gauge: (n = ULT_GAUGE) => setGauge(n),
     /** 天赋按键：按一个，或在 0.6 秒内按两个（press('wind','fire') 出火卷风）；summonBtn 是金色召唤按钮 */
@@ -918,6 +984,7 @@ export function start(root, opts = {}) {
       size: renderer.getDrawingBufferSize(new THREE.Vector2()).toArray(), cubes: stressList.length, mobile }),
   };
   /** @type {any} */ (window).demo = demo;
+  if (opts.lab) enterLab();
 
   return () => {
     cancelAnimationFrame(raf);

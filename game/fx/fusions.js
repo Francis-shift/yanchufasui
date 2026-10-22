@@ -29,6 +29,7 @@ export class FusionFx {
     const tw = { pos: at.clone(), dir: dir.clone(), t: 0, hit: new Set(), step, shell };
     this.tornadoes.push(tw);
     this.fx.shake = Math.max(this.fx.shake, 0.3);
+    this.fx.pulseDim(0.6, 2.4);   // 融合是招牌：火卷风卷着走的这几秒压暗
     return tw;
   }
 
@@ -60,6 +61,8 @@ export class FusionFx {
     }
     this.fx.shake = Math.max(this.fx.shake, 0.55);
     this.fx.hitStop = Math.max(this.fx.hitStop, 0.06);
+    this.fx.pulseDim(0.65, 0.8);
+    this.fx.impact(from.clone().addScaledVector(dir, len * 0.5), 0.8);
   }
 
   /** @param {number} dt */

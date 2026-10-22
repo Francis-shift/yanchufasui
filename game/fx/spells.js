@@ -6,7 +6,7 @@
  */
 import * as THREE from 'three';
 import {
-  PALETTE, arcsTex, clamp01, col, easeOutBack, easeOutCubic, glowShellMat, glowTex, perSec, rand, randDir, ringMat,
+  PALETTE, arcsTex, clamp01, col, easeOutBack, easeOutCubic, glowShellMat, glowTex, inkColors, perSec, rand, randDir, ringMat,
   scaleArr, sigilMat, sigilTex,
 } from './common.js';
 
@@ -15,9 +15,19 @@ export class SpellFx {
    * @param {THREE.Scene} scene
    * @param {import('./particles.js').Particles} particles
    * @param {THREE.Vector3} origin 施法者胸口位置
+   * @param {{ ink?: import('./particles.js').Particles, quality?: import('../quality.js').Quality }} [o] ink：墨池；quality：画质档
    */
-  constructor(scene, particles, origin) {
+  constructor(scene, particles, origin, o = {}) {
     this.scene = scene; this.p = particles; this.origin = origin.clone();
+    this.ink = o.ink || null;
+    this.inkK = o.quality ? o.quality.inkK : 1;
+    this.foreground = !!o.quality?.foreground;
+    /** 镜头位置（主循环每帧更新）：前景光斑要摆在镜头和落点之间 */
+    this.cameraPos = new THREE.Vector3(0, 8, 14);
+    /** 压暗世界：dimLevel 由大招冲上去，撑 dimHold 秒后慢慢退；主循环把它交给 environment.setDim */
+    this.dimLevel = 0; this.dimHold = 0;
+    /** 冲击后期：impactK 一瞬间冲到 1 再很快衰减（主循环按真实时间衰减，慢放、定格时不糊着不走），impactPos 是落点 */
+    this.impactK = 0; this.impactPos = new THREE.Vector3();
     /** @type {{ update(dt: number): boolean, dispose(): void }[]} */
     this.fx = [];
     this.shake = 0;
@@ -53,6 +63,57 @@ export class SpellFx {
 
   /** @param {boolean} on */
   setListening(on) { this.listening = on ? 1 : 0; }
+
+  /** 压暗世界一段时间（取较大的那个，不叠加）@param {number} level 0～1 @param {number} hold 秒 */
+  pulseDim(level, hold) {
+    if (level >= this.dimLevel) { this.dimLevel = level; this.dimHold = Math.max(this.dimHold, hold); }
+  }
+
+  /** 冲击后期（径向模糊、色散）@param {THREE.Vector3} p @param {number} k 0～1 */
+  impact(p, k) {
+    if (k >= this.impactK * 0.6) { this.impactK = Math.max(this.impactK, k); this.impactPos.copy(p); }
+  }
+
+  /**
+   * 墨：随冲击飞散的小墨点，加几团慢慢胀开的墨烟把亮色框住（特效风格 v2）。
+   * 元素的 ink 系数与画质档的 inkK 决定多少；没有墨池（检查页之类）就不画。
+   * @param {THREE.Vector3} p @param {string} el @param {number} R 爆炸半径 @param {number} scale
+   */
+  inkSplash(p, el, R, scale) {
+    const pal = PALETTE[el];
+    const k = (pal.ink ?? 0.6) * this.inkK;
+    if (!this.ink || k <= 0) return;
+    const { a, b } = inkColors(pal.primary);
+    for (let i = Math.round(46 * scale * k); i > 0; i--) {
+      const d = randDir(); d.y = Math.abs(d.y) * 0.8 + 0.2;
+      const v = d.multiplyScalar(rand(4, 13) * Math.sqrt(scale));
+      this.ink.emit(p.x, p.y + 0.15, p.z, v.x, v.y, v.z, rand(0.5, 1.1), rand(0.07, 0.2), a, b,
+        { drag: 1.3, grav: -10, alpha: 0.9, grow: 0.8 });
+    }
+    for (let i = Math.round(9 * scale * k); i > 0; i--) {
+      const ang = Math.random() * Math.PI * 2, r = rand(0.3, R * 0.9);
+      this.ink.emit(p.x + Math.cos(ang) * r, p.y + rand(0.2, 1.4), p.z + Math.sin(ang) * r,
+        Math.cos(ang) * rand(0.6, 2.2), rand(0.3, 1.3), Math.sin(ang) * rand(0.6, 2.2),
+        rand(1.1, 2.1), rand(0.7, 1.5) * Math.sqrt(scale), a, b, { drag: 1.4, alpha: 0.5, grow: 2.3 });
+    }
+  }
+
+  /**
+   * 前景光斑（电影档）：镜头和落点之间、偏到画面两侧的几颗大而虚的光点，慢慢飘——参考里的"粒子分前中后三层"。
+   * @param {THREE.Vector3} p @param {string} el @param {number} scale
+   */
+  foregroundBokeh(p, el, scale) {
+    if (!this.foreground) return;
+    const pal = PALETTE[el];
+    const toP = p.clone().sub(this.cameraPos);
+    const side = new THREE.Vector3(-toP.z, 0, toP.x).normalize();
+    for (let i = Math.round(7 * Math.min(scale, 2)); i > 0; i--) {
+      const q = this.cameraPos.clone().addScaledVector(toP, rand(0.22, 0.5))
+        .addScaledVector(side, (Math.random() < 0.5 ? -1 : 1) * rand(1.2, 3.2)).add(new THREE.Vector3(0, rand(-0.8, 1.2), 0));
+      this.p.emit(q.x, q.y, q.z, rand(-0.3, 0.3), rand(-0.1, 0.4), rand(-0.3, 0.3), rand(1.4, 2.4), rand(0.25, 0.6),
+        scaleArr(pal.secondary, 0.9), scaleArr(pal.primary, 0.5), { alpha: 0.22, drag: 0.8, grow: 1.4 });
+    }
+  }
 
   /** 通用：挂一个有时长的特效 */
   addTimed(obj, duration, step) {
@@ -121,6 +182,12 @@ export class SpellFx {
             rand(-0.6, 0.6), rand(-0.3, 0.9), rand(-0.6, 0.6), rand(0.3, 0.55), rand(0.1, 0.2),
             scaleArr(pal.secondary, 1.8), scaleArr(pal.primary, 1.1), { drag: 2.5, grav: pal.emberGravity * 0.5, alpha: 0.85 });
         }
+        // 墨重的元素（火的黑烟、土、雷）沿路留一点墨迹
+        if (this.ink && (pal.ink ?? 0) >= 0.75 && Math.random() < steps * 0.04 * this.inkK) {
+          const ic = inkColors(pal.primary);
+          this.ink.emit(pos.x, pos.y, pos.z, rand(-0.4, 0.4), rand(-0.1, 0.5), rand(-0.4, 0.4), rand(0.5, 0.9), rand(0.12, 0.28),
+            ic.a, ic.b, { drag: 2, alpha: 0.45, grow: 1.8 });
+        }
         prev.copy(pos);
         if (k >= 1 && !done) { done = true; this.orbLight.intensity = 0; o.onHit(pos.clone()); return false; }
         return true;
@@ -153,6 +220,10 @@ export class SpellFx {
     this.blastT = 0; this.blastBoost = scale;
     this.shake = Math.max(this.shake, 0.4 * scale);
     this.hitStop = Math.max(this.hitStop, 0.05 * Math.min(scale, 1.2));   // 顿帧
+    this.impact(p, Math.min(1, 0.35 + 0.45 * scale));
+    if (scale >= 0.9) this.pulseDim(Math.min(0.75, 0.32 + 0.3 * (scale - 0.9)), 0.25 + 0.2 * scale);
+    this.inkSplash(p, el, R, scale);
+    this.foregroundBokeh(p, el, scale);
     const n = Math.round(420 * scale);
     for (let i = 0; i < n; i++) {
       const d = randDir(); d.y = Math.abs(d.y) * 0.9 + 0.1;
@@ -268,6 +339,14 @@ export class SpellFx {
           this.blastLight.color.copy(col(pal.primary));
           this.blastT = 0; this.blastBoost = 0.5;
           this.shake = Math.max(this.shake, 0.12);
+          this.impact(b, 0.35);
+          if (this.ink) {   // 落雷处溅起墨点（沧元图式：亮线配墨点）
+            const ic = inkColors(pal.primary);
+            for (let k = Math.round(14 * this.inkK); k > 0; k--) {
+              const v = randDir().multiplyScalar(rand(2, 8));
+              this.ink.emit(b.x, b.y + 0.1, b.z, v.x, Math.abs(v.y) + 1, v.z, rand(0.4, 0.8), rand(0.05, 0.14), ic.a, ic.b, { drag: 1.5, grav: -10, alpha: 0.85, grow: 0.8 });
+            }
+          }
         }
         const k = t / 0.32;
         const a1 = k < 0.25 ? 1 : k < 0.4 ? 0.15 : k < 0.55 ? 0.95 : Math.max(0, 1 - k);   // 闪两下
@@ -351,5 +430,6 @@ export class SpellFx {
       if (this.blastT > 4) { this.blastT = -1; this.blastLight.intensity = 0; }
     }
     this.shake *= Math.exp(-dt * 5.5);
+    if (this.dimHold > 0) this.dimHold -= dt; else this.dimLevel *= Math.exp(-dt * 1.6);
   }
 }
