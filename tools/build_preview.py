@@ -152,6 +152,12 @@ def main():
     locs: dict = {}
     collect_local(entry, locs)
     used = {m.group(2) for src in locs.values() for m in BARE_IMPORT.finditer(src)}
+    # 去掉本地模块里的注释（面板 512 KB 的上限很紧；见 tools/strip-comments.mjs）
+    r = subprocess.run(["node", str(ROOT / "tools" / "strip-comments.mjs")], input=json.dumps(locs), capture_output=True,
+                       text=True, encoding="utf-8", cwd=ROOT, shell=sys.platform == "win32")
+    if r.returncode != 0:
+        raise SystemExit("去注释失败：" + r.stderr[-500:])
+    locs = json.loads(r.stdout)
     pkgs: dict = {}
     for name, p in ENTRIES.items():
         if name in used:

@@ -15,7 +15,7 @@
  */
 import * as THREE from 'three';
 import { PALETTE, arcsTex, col, easeOutBack, easeOutCubic, perSec, rand, randDir, ringMat, scaleArr, sigilMat, sigilTex } from './common.js';
-import { CASTER_POS } from '../world/layout.js';
+import { CASTER_POS, GATE } from '../world/layout.js';
 import { decodeDRG2, fetchBytes } from '../world/drg2.js';
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -24,6 +24,49 @@ const STATIONS = 160;           // 沿龙身取多少个截面算曲线位置，
 const REST = 7;                 // 每个顶点的预计算量：截面号、插值比例、侧偏移、上偏移、法线在侧/上/前三个方向的分量
 /** 破土点：施法者左前方（广场上，地面以下看不见） */
 const EMERGE = new THREE.Vector3(CASTER_POS.x - 3, 0, CASTER_POS.z - 1.2);
+const v3 = (x, y, z) => new THREE.Vector3(x, y, z);
+
+/**
+ * 俯冲段的五个控制点：拐弯点、俯冲起点、落点、钻地的两点（目标走动时整段跟着重算）。
+ * 平常绕到右前方、从目标斜上方 5 米扑下去；目标在牌坊背后的石阶上时，这样扑会直接撞上柱子（10-21 实机截图），
+ * 改成先拐到中线前方、对准门洞、贴着地面从镇山石底下穿过去（龙身中线离地约 2 米，石头底在 4 米）——
+ * 从右前方直接斜插门洞会擦过右边华表的顶。
+ * 走哪种在召唤那一刻定下（diveMode），之后目标走动只挪落点：中途换拐弯点，龙会在曲线上跳一下。
+ * @param {THREE.Vector3} T 落点 @param {'open' | 'gate'} mode
+ */
+export function divePoints(T, mode) {
+  let turn = v3(7.2, 6.5, 0.5), dive = v3(T.x + 1.5, T.y + 5.5, T.z + 6);
+  if (mode === 'gate') { turn = v3(2.5, 5.5, 1.5); dive = v3(0, 2.2, GATE.z + 2.2); }
+  const dir = T.clone().sub(dive).normalize();
+  return { dir, pts: [turn, dive, T.clone(), T.clone().addScaledVector(dir, 1.2).add(v3(0, -3, 0)), T.clone().add(v3(dir.x * 2, -30, dir.z * 2))] };
+}
+
+/**
+ * 真召唤的整条曲线控制点（14 个，落点是第 11 个）：地下 → 破土 → 螺旋上升 → 绕广场上空 → 俯冲（divePoints）。
+ * 绕场高度按固定镜头算过：后排 10 米高会出画面顶边（10-19 截图），压到 7～7.6 米；
+ * 后排原在 z ≈ -8.5，牌坊换成 13 米宽的模型后正好穿过横梁和屋顶（10-21 实机截图），挪到牌坊前面 z ≈ -4.2
+ * （两点之间的曲线会往后鼓约 1 米）。
+ * @param {THREE.Vector3} T 落点 @param {'open' | 'gate'} [mode]
+ */
+export function summonPoints(T, mode = diveMode(T)) {
+  const E = EMERGE;
+  return [
+    E.clone().add(v3(0, -4, 0)), E.clone().add(v3(0, -0.5, 0)),                  // 地下 → 破土
+    E.clone().add(v3(0.9, 1.6, -0.7)), E.clone().add(v3(2.1, 3.1, 0.5)),         // 螺旋上升
+    E.clone().add(v3(0.7, 4.4, 1.9)), E.clone().add(v3(-1.6, 5.2, 0.8)),
+    v3(-6.8, 7, 0.5), v3(-5, 7.6, -4.2), v3(5, 7.6, -4.0),                      // 绕场
+    ...divePoints(T, mode).pts,
+  ];
+}
+
+/**
+ * 目标在门洞里或牌坊背后的石阶上（中线 3 米以内、在柱子前沿以后）就走门洞：
+ * 平常的扑法在这里要么撞柱子，要么从右前方斜下来擦着右边华表的顶过去。
+ * @param {THREE.Vector3} T @returns {'open' | 'gate'}
+ */
+export function diveMode(T) {
+  return T.z < GATE.z + 1.6 && Math.abs(T.x) < 3 ? 'gate' : 'open';
+}
 
 /** 外层辉光：同一份网格再画一遍，越是侧对镜头的面越亮（菲涅尔）。法线由屏幕空间导数算出，模型不必带法线 */
 function glowMat(color, alpha) {
@@ -166,18 +209,9 @@ class Flight {
     const T = this.target = target.clone(), E = EMERGE;
     const v = (x, y, z) => new THREE.Vector3(x, y, z);
     if (kind === 'summon') {
-      const dive = v(T.x + 1.5, T.y + 5, T.z + 5);
-      this.dir = T.clone().sub(dive).normalize();
-      this.curve = new THREE.CatmullRomCurve3([
-        E.clone().add(v(0, -4, 0)), E.clone().add(v(0, -0.5, 0)),                  // 地下 → 破土
-        E.clone().add(v(0.9, 1.6, -0.7)), E.clone().add(v(2.1, 3.1, 0.5)),         // 螺旋上升
-        E.clone().add(v(0.7, 4.4, 1.9)), E.clone().add(v(-1.6, 5.2, 0.8)),
-        // 绕广场上空一圈。高度按固定镜头算过：后排 10 米高会出画面顶边（10-19 截图），压到 7～7.5 米
-        v(-6.5, 7, 0.5), v(-4, 7.5, -8.5), v(5, 7.5, -8), v(7, 6.5, 0.5),
-        dive, T.clone(),                                                            // 俯冲撞向目标
-        T.clone().add(this.dir.clone().multiplyScalar(1.2)).add(v(0, -3, 0)),        // 之后钻进地下，身体跟着灌进去
-        T.clone().add(v(this.dir.x * 2, -30, this.dir.z * 2)),
-      ], false, 'centripetal');
+      this.mode = diveMode(T);
+      this.dir = divePoints(T, this.mode).dir;
+      this.curve = new THREE.CatmullRomCurve3(summonPoints(T, this.mode), false, 'centripetal');
     } else {
       this.dir = v(0, 1, 0);
       this.curve = new THREE.CatmullRomCurve3([
@@ -227,18 +261,17 @@ class Flight {
   }
 
   /**
-   * 目标走动了：只挪曲线最后四个点（俯冲起点、落点、钻地的两点），前面的盘旋绕场不动。
+   * 目标走动了：只挪俯冲段（divePoints，走法沿用召唤时定下的），前面的盘旋绕场不动。
+   * 拐弯点在同一种走法里不随目标变，实际挪的是俯冲起点、落点、钻地的两点。
    * 落点在第 11 个控制点上；曲线参数 t = 11/13 处的弧长就是撞上目标的位置。
    * @param {THREE.Vector3 | null} p
    */
   retarget(p) {
     if (!p || p.distanceToSquared(this.target) < 0.0025) return;
     const T = this.target.copy(p), pts = this.curve.points;
-    const dive = new THREE.Vector3(T.x + 1.5, T.y + 5, T.z + 5);
-    this.dir.copy(T).sub(dive).normalize();
-    pts[10].copy(dive); pts[11].copy(T);
-    pts[12].copy(T).addScaledVector(this.dir, 1.2).add(new THREE.Vector3(0, -3, 0));
-    pts[13].copy(T).add(new THREE.Vector3(this.dir.x * 2, -30, this.dir.z * 2));
+    const d = divePoints(T, /** @type {'open' | 'gate'} */ (this.mode));
+    this.dir.copy(d.dir);
+    for (let k = 0; k < 5; k++) pts[9 + k].copy(d.pts[k]);
     this.curve.updateArcLengths();
     this.L = this.curve.getLength();
     const lens = this.curve.getLengths();

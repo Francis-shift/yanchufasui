@@ -40,7 +40,7 @@
 | `public/fonts/` | 按字表裁剪的书法字体（咒语名用马善政，大字用志莽行，SIL OFL 开源协议，协议原文同目录） |
 | `server/` | 解析接口的核心（`parse-core.ts`，两条线路共用：解析、求灵感、预热、诊断）、提示词、防刷计数 |
 | `tests/` | 单元测试（`npm test`）；`tests/eval/` 封存的评测集与攻击句、勘误、各模型跑分结果 |
-| `tools/` | `build_preview.py` 打离线单文件页面验画面（`props` 打物件材质检查页）；`pack_prop.py` 把 Tripo 导出的场景物件打包成网页用的模型与贴图；`build-cn-func.mjs` 打包北京线路的函数；`bench-parse.mjs` 测解析延迟；`eval-parse.mjs` 跑评测集；`subset_font.py` 按字表裁书法字体；`name-charset.mjs` 查模型起的名字有多少落在字表里 |
+| `tools/` | `build_preview.py` 打离线单文件页面验画面（`props` 打物件材质检查页；本地模块经 `strip-comments.mjs` 去掉注释，省体积）；`pack_prop.py` 把 Tripo 导出的场景物件打包成网页用的模型与贴图；`build-cn-func.mjs` 打包北京线路的函数；`bench-parse.mjs` 测解析延迟；`eval-parse.mjs` 跑评测集；`subset_font.py` 按字表裁书法字体；`name-charset.mjs` 查模型起的名字有多少落在字表里 |
 | `docs/` | 设计文档、出题说明、试玩记录 |
 
 ## 本地运行

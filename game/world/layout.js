@@ -47,11 +47,26 @@ export const OBSTACLES = [
   { x: -LION.x, z: LION.z, r: 1.0 }, { x: LION.x, z: LION.z, r: 1.0 },
 ];
 
+/** @param {number} x0 @param {number} x1 @param {number} y0 @param {number} y1 @param {number} z0 @param {number} z1 */
+const box = (x0, x1, y0, y1, z0, z1) => ({ min: [x0, y0, z0], max: [x1, y1, z1] });
+const STONE_BOTTOM = STONE.ringTop - STONE.height;
+/**
+ * 场景里实心的东西（轴对齐盒子，米；尺寸取自打包后的模型）：在空中飞的东西（冰龙）要绕开。
+ * 两组柱子、横梁和屋顶、镇山石、两只石兽、两根华表。
+ */
+export const SOLIDS = [
+  ...[-1, 1].map((s) => box(s > 0 ? 2.24 : -4.92, s > 0 ? 4.92 : -2.24, 0, GATE.openTop, GATE.z - 0.81, GATE.z + 0.81)),
+  box(-6.5, 6.5, GATE.openTop, GATE.height, GATE.z - 1.39, GATE.z + 1.39),
+  box(-0.9, 0.9, STONE_BOTTOM, STONE.ringTop, GATE.z - 0.9, GATE.z + 0.9),
+  ...[-1, 1].map((s) => box(s * LION.x - 1.04, s * LION.x + 1.04, 0, 3, LION.z - 1.03, LION.z + 1.03)),
+  ...[-1, 1].map((s) => box(s * HUABIAO_X - 0.7, s * HUABIAO_X + 0.7, 0, 4.6, HUABIAO_Z - 0.4, HUABIAO_Z + 0.4)),
+];
+
 /** 模型摆放的位置（props.js 用）：牌坊、两只石兽（右边那只镜像）、镇山石（模型原点在底面中心） */
 export const PROP_SPOTS = {
   gate: { x: 0, y: 0, z: GATE.z, rotY: 0, mirror: false },
   lions: [{ x: -LION.x, y: 0, z: LION.z, rotY: LION.turn, mirror: false }, { x: LION.x, y: 0, z: LION.z, rotY: -LION.turn, mirror: true }],
-  stone: { x: 0, y: STONE.ringTop - STONE.height, z: GATE.z, rotY: 0, mirror: false },
+  stone: { x: 0, y: STONE_BOTTOM, z: GATE.z, rotY: 0, mirror: false },
 };
 
 /**
