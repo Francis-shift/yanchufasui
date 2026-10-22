@@ -112,7 +112,7 @@ export function start(root, opts = {}) {
   const grade = new GradePass(quality.grade);
   composer.addPass(grade);
 
-  const env = buildEnvironment(scene);
+  const env = buildEnvironment(scene, renderer);
   env.setShadowMap(quality.shadowMap);
   const layout = buildLayout(scene);
   const particles = new Particles(scene, quality.particles);
@@ -164,6 +164,7 @@ export function start(root, opts = {}) {
       cam.near.copy(CASTER_POS).add(new THREE.Vector3(1.6, 2.9, 4.6));   // 横屏开口时推到施法者肩后
       cam.nearLook.set(0, 1.2, -6);
     }
+    env.aim(_v.copy(cam.look).sub(cam.base));   // 雾取镜头朝向那段天边的颜色
     renderer.setSize(w, h);
     composer.setSize(w, h);
     bloom.setSize(w, h);
@@ -980,6 +981,8 @@ export function start(root, opts = {}) {
     refill: () => { S.mana = MANA_MAX; S.core = CORE_HP; hud.setCore(S.core, CORE_HP); },
     endless: (on = true) => { S.endless = on; },
     cubes: (n = 300, life = 12) => dropCubes(n, life),
+    /** 调画面：env.look 里改灯的基准强度与天空、云海的颜色，renderer.toneMappingExposure 改曝光 */
+    world: { scene, renderer, env },
     gl: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles, ratio: renderer.getPixelRatio(),
       size: renderer.getDrawingBufferSize(new THREE.Vector2()).toArray(), cubes: stressList.length, mobile }),
   };
