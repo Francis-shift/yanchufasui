@@ -22,6 +22,8 @@ export default function Game() {
         lab: new URLSearchParams(location.search).has('lab'),   // 特效试验场：地址加 ?lab
         // 冰龙：气势槽过半或第一次召唤时才下载（模型 gzip 后约 310 KB，贴图约 220 KB）
         dragon: { mesh: '/models/ice-dragon.drg2.gz', tex: '/models/ice-dragon-1024.webp' },
+        // 场景物件（牌坊、石兽、镇山石）：开局后台下载，电脑约 1.6 MB、手机约 1 MB；没到之前是方块占位
+        models: '/models/',
       });
     });
     return () => { cancelled = true; dispose?.(); };

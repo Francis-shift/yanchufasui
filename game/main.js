@@ -33,6 +33,7 @@ import { Particles } from './fx/particles.js';
 import { SpellFx } from './fx/spells.js';
 import { buildEnvironment } from './world/environment.js';
 import { fitFrame } from './world/framing.js';
+import { loadProps } from './world/props.js';
 import { buildLayout, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS } from './world/layout.js';
 import { Hud, preloadFonts } from './ui/hud.js';
 import { inspireRemote, parseRemote, warmUp } from './net.js';
@@ -82,7 +83,7 @@ const FAIL_TEXT = {
 
 /**
  * @param {HTMLElement} root
- * @param {{ parseUrl?: string | string[], lab?: boolean, dragon?: { mesh?: string, tex?: string | null } }} [opts] lab：直接进特效试验场； parseUrl：解析接口，给一串就按顺序当后备（见 net.js）；dragon：冰龙模型与贴图的地址
+ * @param {{ parseUrl?: string | string[], lab?: boolean, dragon?: { mesh?: string, tex?: string | null }, models?: string }} [opts] lab：直接进特效试验场； parseUrl：解析接口，给一串就按顺序当后备（见 net.js）；dragon：冰龙模型与贴图的地址；models：场景物件模型的目录（不给就一直用方块占位）
  * @returns {() => void} 卸载
  */
 export function start(root, opts = {}) {
@@ -115,6 +116,7 @@ export function start(root, opts = {}) {
   const env = buildEnvironment(scene, renderer);
   env.setShadowMap(quality.shadowMap);
   const layout = buildLayout(scene);
+  if (opts.models) loadProps(scene, layout, quality.name, opts.models, renderer);   // 牌坊、石兽、镇山石的模型，到了替换方块占位
   const particles = new Particles(scene, quality.particles);
   particles.floorAt = (x, z) => (groundHeightAt(x, z) ?? -60) + 0.03;
   const ink = new Particles(scene, quality.ink, { ink: true });   // 墨点、墨烟（特效风格 v2）

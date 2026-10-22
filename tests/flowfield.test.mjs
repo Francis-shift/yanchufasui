@@ -2,8 +2,34 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { FlowField } from '../game/world/flowfield.js';
+import { CASTER_POS, CORE_POS, GATE, OBSTACLES, PLAZA_R } from '../game/world/layout.js';
 
 const goal = { x: 0, z: 8.6, r: 2.4 };
+
+/** 从 (x, z) 跟着流场一步步走，返回走过的点；走进 2.6 米（actors/enemies.js 的 CORE_REACH，撞上阵眼）或走不动为止 */
+function walk(f, x, z) {
+  const pts = [{ x, z }];
+  for (let i = 0; i < 400; i++) {
+    if (Math.hypot(x - CORE_POS.x, z - CORE_POS.z) < 2.6) return { pts, reached: true };
+    const d = f.dirAt(x, z);
+    if (!d) break;
+    x += d.x * 0.25; z += d.z * 0.25;
+    pts.push({ x, z });
+  }
+  return { pts, reached: false };
+}
+
+test('场景布局：牌坊、石兽、华表、香炉都摆上后，石阶口进来的敌人穿门洞走到阵眼，索桥口进来的也走得到', () => {
+  // 与 actors/enemies.js 同样的参数
+  const f = new FlowField({ radius: PLAZA_R - 0.4, goal: { x: CORE_POS.x, z: CORE_POS.z, r: 2.4 } });
+  f.setObstacles([...OBSTACLES, { x: CASTER_POS.x, z: CASTER_POS.z, r: 0.5 }]);
+  const stairs = walk(f, 0.6, -9.7);
+  assert.ok(stairs.reached, '石阶口走不到阵眼');
+  const atGate = stairs.pts.find((p) => p.z >= GATE.z);
+  assert.ok(atGate && Math.abs(atGate.x) < 2.4, `过牌坊时应在门洞里（|x| < 2.4），得到 ${JSON.stringify(atGate)}`);
+  assert.ok(stairs.pts.length * 0.25 < 24, `石阶口到阵眼绕得太远：${stairs.pts.length * 0.25} 米`);
+  assert.ok(walk(f, -8.3, -4.6).reached, '索桥口走不到阵眼');
+});
 
 test('流场：空广场上，北边的敌人朝阵眼（+z）走', () => {
   const f = new FlowField({ radius: 10.6, goal });

@@ -8,6 +8,9 @@
       python tools/build_preview.py check    → preview/check.html（手机检查页）
       python tools/build_preview.py --dragon preview/assets/dragon-6k.bin  → 游戏页另外内嵌一条龙（减面版，无贴图）
         正式的上色龙 gzip 后 310 KB、贴图 220 KB，塞进来就超过面板 512 KB 的上限，所以预览只验召唤的代码路径和飞行路线。
+      python tools/build_preview.py props --asset public/models/lion.drg2.gz --asset ...  → preview/props.html（物件材质检查页）
+        --asset 可重复，文件原样内嵌，页面里按文件名取（game/dev/propcheck.js）。
+只打包页面真正引用到的库（扫本地模块里的 import）：检查页用不到物理引擎，省下来给模型。
 """
 import sys
 import base64
@@ -123,7 +126,14 @@ TARGETS = {
              "言出法随 · 预览", "index.html"),
     "check": ("game/check.js", "import { startCheck } from '@local/game/check.js'; startCheck(document.getElementById('app'));",
               "言出法随 · 手机检查", "check.html"),
+    "props": ("game/dev/propcheck.js", "import { startPropCheck } from '@local/game/dev/propcheck.js';"
+              " const assets = {};"
+              " for (const s of document.querySelectorAll('script[data-asset]'))"
+              " assets[s.dataset.asset] = URL.createObjectURL(new Blob([Uint8Array.from(atob(s.textContent.trim()), (c) => c.charCodeAt(0))]));"
+              " startPropCheck(document.getElementById('app'), assets);",
+              "言出法随 · 物件材质检查", "props.html"),
 }
+BARE_IMPORT = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(?\s*)(['"])([^'".][^'"]*)\1""")
 
 
 def main():
@@ -133,17 +143,25 @@ def main():
         i = args.index("--dragon")
         dragon = pathlib.Path(args[i + 1]).read_bytes()
         del args[i:i + 2]
+    assets = []
+    while "--asset" in args:
+        i = args.index("--asset")
+        assets.append(pathlib.Path(args[i + 1]))
+        del args[i:i + 2]
     entry, boot, title, out_name = TARGETS[args[0] if args else "game"]
-    pkgs: dict = {}
-    for p in ENTRIES.values():
-        collect_pkg(p, pkgs)
     locs: dict = {}
     collect_local(entry, locs)
+    used = {m.group(2) for src in locs.values() for m in BARE_IMPORT.finditer(src)}
+    pkgs: dict = {}
+    for name, p in ENTRIES.items():
+        if name in used:
+            collect_pkg(p, pkgs)
     blocks = [f'<script type="application/octet-stream" data-mod="@pkg/{p}">{gz_b64(c)}</script>' for p, c in pkgs.items()]
     blocks += [f'<script type="application/octet-stream" data-mod="@local/{p}">{gz_b64(c)}</script>' for p, c in locs.items()]
     if dragon:   # 模型数据 gzip 后内联，游戏里按开头两个字节自己判断要不要解压
         blocks.append(f'<script type="application/octet-stream" id="asset-dragon">{base64.b64encode(gzip.compress(dragon, 9)).decode()}</script>')
-    alias = {name: f"@pkg/{path}" for name, path in ENTRIES.items()}
+    blocks += [f'<script type="application/octet-stream" data-asset="{a.name}">{base64.b64encode(a.read_bytes()).decode()}</script>' for a in assets]
+    alias = {name: f"@pkg/{path}" for name, path in ENTRIES.items() if name in used}
     page = SHELL % (title, "\n".join(blocks) + "\n" + BOOT % (json.dumps(alias), json.dumps(boot)))
     OUT.mkdir(exist_ok=True)
     (OUT / out_name).write_text(page, encoding="utf-8")

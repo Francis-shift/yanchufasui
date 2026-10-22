@@ -11,12 +11,12 @@
  *   - ghost：差一口气——只有一层发光的龙影从法阵里升起，盘到半空散成冰屑，然后 main 放同元素的雨。
  * 同一时间只演一条（共用一份网格）；正在演时再来，龙影就省掉，雨照放。
  *
- * 模型按需加载（第一次要用时，或气势槽过半时预先加载）：DRG2 格式（见 spell-demo/tools/dragonpack.py），
- * 文件可以是原样或 gzip 压过的（看开头两个字节）。没加载成功时，召唤照样结算，只是没有龙的画面。
+ * 模型按需加载（第一次要用时，或气势槽过半时预先加载）：DRG2 格式（读法见 world/drg2.js）。没加载成功时，召唤照样结算，只是没有龙的画面。
  */
 import * as THREE from 'three';
 import { PALETTE, arcsTex, col, easeOutBack, easeOutCubic, perSec, rand, randDir, ringMat, scaleArr, sigilMat, sigilTex } from './common.js';
 import { CASTER_POS } from '../world/layout.js';
+import { decodeDRG2, fetchBytes } from '../world/drg2.js';
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const DRAGON_LEN = 20;          // 龙身长（米）
@@ -24,61 +24,6 @@ const STATIONS = 160;           // 沿龙身取多少个截面算曲线位置，
 const REST = 7;                 // 每个顶点的预计算量：截面号、插值比例、侧偏移、上偏移、法线在侧/上/前三个方向的分量
 /** 破土点：施法者左前方（广场上，地面以下看不见） */
 const EMERGE = new THREE.Vector3(CASTER_POS.x - 3, 0, CASTER_POS.z - 1.2);
-
-/**
- * 解开 DRG2：坐标、贴图坐标、索引、法线。
- * @param {ArrayBuffer} buf
- */
-function decodeDRG2(buf) {
-  const dv = new DataView(buf);
-  if (dv.getUint32(0, true) !== 0x32475244) throw new Error('不是 DRG2 格式');    // 'DRG2'
-  const nv = dv.getUint32(4, true), nf = dv.getUint32(8, true), flags = dv.getUint32(12, true);
-  const f32 = (i) => dv.getFloat32(16 + i * 4, true);
-  const lo = [f32(0), f32(1), f32(2)], hi = [f32(3), f32(4), f32(5)], axis = [f32(6), f32(7)];
-  const anc = Array.from({ length: 9 }, (_, i) => f32(8 + i));
-  let off = 84;
-  const P = new Float32Array(nv * 3);
-  for (let k = 0; k < 3; k++) {                       // x、y、z 各一段，存的是与上一个顶点的差
-    const d = new Int16Array(buf, off, nv); off += nv * 2;
-    let q = 0;
-    for (let i = 0; i < nv; i++) {
-      q = ((q + d[i] + 32768) % 65536 + 65536) % 65536 - 32768;
-      P[i * 3 + k] = lo[k] + ((q + 32768) / 65535) * (hi[k] - lo[k]);
-    }
-  }
-  let uv = null;
-  if (flags & 1) {
-    uv = new Float32Array(nv * 2);
-    for (let k = 0; k < 2; k++) {
-      const u16 = new Uint16Array(buf, off, nv); off += nv * 2;
-      for (let i = 0; i < nv; i++) uv[i * 2 + k] = u16[i] / 65535;
-    }
-  }
-  const zz = new Uint16Array(buf, off, nf * 3), index = new Uint16Array(nf * 3);
-  off += nf * 6;
-  for (let i = 0, prev = 0; i < nf * 3; i++) {        // 索引差分 + zigzag 的逆变换
-    const z = zz[i];
-    prev += (z & 1) ? -(z + 1) / 2 : z / 2;
-    index[i] = prev;
-  }
-  let N = null;
-  if (flags & 2) {
-    N = new Float32Array(nv * 3);
-    for (let k = 0; k < 3; k++) {
-      const s8 = new Int8Array(buf, off, nv); off += nv;
-      for (let i = 0; i < nv; i++) N[i * 3 + k] = s8[i] / 127;
-    }
-  }
-  return { nv, lo, hi, axis, anc, P, uv, index, N };
-}
-
-/** @param {string} url @returns {Promise<ArrayBuffer>} 原样或 gzip 压过的都行 */
-async function fetchBytes(url) {
-  const buf = await (await fetch(url)).arrayBuffer();
-  const b = new Uint8Array(buf, 0, 2);
-  if (b[0] !== 0x1f || b[1] !== 0x8b) return buf;
-  return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-}
 
 /** 外层辉光：同一份网格再画一遍，越是侧对镜头的面越亮（菲涅尔）。法线由屏幕空间导数算出，模型不必带法线 */
 function glowMat(color, alpha) {

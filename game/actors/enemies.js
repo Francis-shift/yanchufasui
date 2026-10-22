@@ -7,20 +7,15 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { ELEMENTS, ENEMIES } from '../rules/numbers.js';
-import { CASTER_POS, CORE_POS, groundHeightAt, PATHS, PLAZA_R } from '../world/layout.js';
+import { CASTER_POS, CORE_POS, groundHeightAt, OBSTACLES, PATHS, PLAZA_R } from '../world/layout.js';
 import { FlowField } from '../world/flowfield.js';
 import { col, PALETTE, rand } from '../fx/common.js';
 
 const CORE_FRONT = new THREE.Vector3(CORE_POS.x, 0, CORE_POS.z - 2.2);
 /** 走进阵眼这么近就算撞上阵眼 */
 const CORE_REACH = 2.6;
-/** 广场上的固定障碍：华表、香炉、牌坊两根柱子、施法者本人 */
-const STATIC_OBSTACLES = [
-  { x: -4.4, z: -9.4, r: 0.45 }, { x: 4.4, z: -9.4, r: 0.45 },
-  { x: -7.2, z: 1.5, r: 0.7 }, { x: 7.2, z: 1.5, r: 0.7 },
-  { x: -3, z: -10.8, r: 0.5 }, { x: 3, z: -10.8, r: 0.5 },
-  { x: CASTER_POS.x, z: CASTER_POS.z, r: 0.5 },
-];
+/** 广场上的固定障碍：场景物件（位置以 layout.js 为准）加上施法者本人 */
+const STATIC_OBSTACLES = [...OBSTACLES, { x: CASTER_POS.x, z: CASTER_POS.z, r: 0.5 }];
 
 /** 路径长度表，便于按走过的距离取位置；entry 是走到哪里算上了广场（之后改跟流场走） */
 function pathInfo(pts) {
