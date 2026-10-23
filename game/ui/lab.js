@@ -1,7 +1,7 @@
 // @ts-check
 /**
  * 特效试验场的面板（地址加 ?lab，或调试接口 demo.lab()）：
- * 挑元素、形态、颗数、轨迹、威力、气势放一发；招牌特效一键放；放慢、定格、锁定压暗、切画质档，逐个看、逐个改。
+ * 挑元素、形态、颗数、轨迹、威力、气势放一发；招牌特效一键放；放慢、定格、锁定压暗、锁定入侵程度、切画质档，逐个看、逐个改。
  * 只是一层按钮，放法术走的是游戏本身的流程（main.js labCast），看到的就是玩家会看到的。
  */
 
@@ -41,7 +41,7 @@ export const LAB_PRESETS = [
 /**
  * @param {HTMLElement} root
  * @param {{
- *   cast: (raw: object, label: string) => void, speed: (s: number) => void, dim: (v: number) => void,
+ *   cast: (raw: object, label: string) => void, speed: (s: number) => void, dim: (v: number) => void, inv: (v: number) => void,
  *   targets: () => void, clear: () => void, quality: string,
  * }} api
  */
@@ -109,6 +109,8 @@ export function mountLab(root, api) {
   radio('时间', [[1, '×1'], [0.5, '×0.5'], [0.25, '×0.25'], [0.1, '×0.1'], [0, '定格']], () => speed, (v) => { speed = v; api.speed(v); });
   let dim = -1;
   radio('压暗', [[-1, '自动'], [0, '不压'], [0.5, '一半'], [0.85, '压满']], () => dim, (v) => { dim = v; api.dim(v); });
+  let inv = -1;   // 入侵：各波开打时的样子（world/invasion.js），看天色、云海、远山
+  radio('入侵', [[-1, '自动'], [0, '无'], [0.33, '二波'], [0.51, '三波'], [0.69, '四波'], [0.9, '末波'], [1, '输了']], () => inv, (v) => { inv = v; api.inv(v); });
   if (/^https?:$/.test(location.protocol)) {
     radio('画质', [['cinema', '电影档'], ['smooth', '流畅档']], () => api.quality, (v) => {
       const u = new URL(location.href);

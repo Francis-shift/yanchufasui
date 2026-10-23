@@ -32,6 +32,7 @@ import { GradePass } from './fx/grade.js';
 import { Particles } from './fx/particles.js';
 import { SpellFx } from './fx/spells.js';
 import { buildEnvironment } from './world/environment.js';
+import { invasionTarget, stepInvasion } from './world/invasion.js';
 import { fitFrame } from './world/framing.js';
 import { loadProps } from './world/props.js';
 import { buildLayout, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS } from './world/layout.js';
@@ -203,6 +204,7 @@ export function start(root, opts = {}) {
     last: /** @type {any} */ (null),
     endless: false,   // 检查页用：打空了也不判胜
     restT: 0,         // 波与波之间的休息倒计时（游戏时间）
+    inv: 0,           // 入侵程度（画面用，见 world/invasion.js）：0 目标图的傍晚，1 全暗
     /** 选的天赋（开局界面上选，默认火冰风：三者之间有两种融合、两种反应） */
     talents: /** @type {string[]} */ (['fire', 'ice', 'wind']),
     /** 给按钮写过的咒：天赋 → 这句话清洗后的意图、名字、原话（重开一局还在，换掉的天赋就丢掉） */
@@ -235,7 +237,7 @@ export function start(root, opts = {}) {
     buttonChant = false; frozen = false;
     hud.closeWrite();
     Object.assign(S, { phase: 'playing', mana: MANA_MAX, core: CORE_HP, gauge: 0, lastCombo: null, seen: [], said: new Set(),
-      wave: 0, busy: false, restT: 0 });
+      wave: 0, busy: false, restT: 0, inv: 0 });   // 新的一局天先放晴，再随第一波慢慢压上来
     S.talents = [...S.talents].sort((a, b) => TALENTS.indexOf(a) - TALENTS.indexOf(b));
     S.binds = Object.fromEntries(Object.entries(S.binds).filter(([k]) => S.talents.includes(k)));
     hud.setSkills(S.talents.map((el) => ({ el, label: S.binds[el]?.name || elName(el), named: !!S.binds[el] })),
@@ -824,7 +826,7 @@ export function start(root, opts = {}) {
   renderer.info.autoReset = false;   // 后期处理一帧要画好几遍，手动清零才能数出整帧的绘制次数
 
   // ---------------------------------------------------------------- 特效试验场（?lab 或 demo.lab()；面板在 ui/lab.js）
-  const lab = { on: false, dim: -1, speed: 1, panel: /** @type {ReturnType<typeof mountLab> | null} */ (null) };
+  const lab = { on: false, dim: -1, inv: -1, speed: 1, panel: /** @type {ReturnType<typeof mountLab> | null} */ (null) };
   /** 放一发：raw 是模型格式的意图，走和玩家一样的清洗、裁决、演出；不扣法力、不计重复衰减 @param {any} raw @param {string} label */
   function labCast(raw, label) {
     if (S.phase !== 'playing') return;
@@ -850,7 +852,7 @@ export function start(root, opts = {}) {
     hud.setHint('特效试验场：在面板里挑招放，可放慢、定格、锁定压暗');
     labTargets();
     lab.panel = mountLab(root, {
-      cast: labCast, speed: (s) => { lab.speed = s; }, dim: (v) => { lab.dim = v; },
+      cast: labCast, speed: (s) => { lab.speed = s; }, dim: (v) => { lab.dim = v; }, inv: (v) => { lab.inv = v; },
       targets: labTargets, clear: () => { for (const e of [...enemies.list]) enemies.kill(e, e.pos); },
       quality: quality.name,
     });
@@ -894,7 +896,10 @@ export function start(root, opts = {}) {
     const dimTarget = lab.dim >= 0 ? lab.dim : Math.max(fx.dimLevel, fx.chanting > 0 && !buttonChant ? 0.18 : 0);
     worldDim += (dimTarget - worldDim) * Math.min(1, realDt * 6);
     env.setDim(worldDim);
-    env.clouds.uniforms.uTime.value += dt;
+    // 入侵：天色跟波次走、守住散开、输了全暗；试验场可以锁定某一档
+    const invT = invasionTarget({ phase: S.phase, wave: S.wave, waves: WAVES.length, progress: S.spawned / Math.max(1, S.spawned + S.queue.length) });
+    S.inv = lab.inv >= 0 ? lab.inv : stepInvasion(S.inv, invT, S.phase, dt);
+    env.setInvasion(S.inv);
     layout.coreSigil.rotation.z += dt * 0.2;
     layout.crystal.rotation.y += dt * 0.8;
     layout.crystal.position.y = 1.7 + Math.sin(idleT * 1.6) * 0.12;
@@ -919,6 +924,7 @@ export function start(root, opts = {}) {
     shakeOff.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(fx.shake * 0.5);
     camera.position.copy(camPos).add(shakeOff);
     camera.lookAt(camLook);
+    env.update(dt, camera.position);   // 云、雾流动，雾里的闪电（游戏时间，慢放时一起变慢）
     fx.cameraPos.copy(camera.position);
     fx.impactK *= Math.exp(-realDt * 9);
     _v.copy(fx.impactPos).project(camera);
@@ -958,6 +964,9 @@ export function start(root, opts = {}) {
     summonBtn: () => pressSummon(),
     /** 单独劈一道闪电看样子：zap([x,y,z], [x,y,z]) */
     zap: (a, b) => fx.arc(new THREE.Vector3(...a), new THREE.Vector3(...b)),
+    /** 入侵程度锁在 k（0～1），不给就回到跟着波次走；flash 在黑雾里劈一道闪电 */
+    invade: (k = -1) => { lab.inv = k; },
+    flash: () => env.flash(),
     talents: (list) => { if (list) { S.talents = list; renderPicker(); } return [...S.talents]; },
     binds: () => Object.fromEntries(Object.entries(S.binds).map(([k, v]) => [k, { name: v.name, text: v.text }])),
     // 面板太小时看不清：按 w×h 横屏重画当前这一帧（先 pause 定格），返回 JPEG 的 data URL
