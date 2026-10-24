@@ -10,6 +10,7 @@ import {
   scaleArr, sigilMat, sigilTex,
 } from './common.js';
 import { fireball, scorchTextures } from './fire.js';
+import { chipGeo, crystalGeo, frostTexture, iceMaterial } from './ice.js';
 
 const _plane = new THREE.PlaneGeometry(1, 1);
 
@@ -38,6 +39,7 @@ export class SpellFx {
     /** 某处地面高度（主循环接上 layout 的 groundHeightAt；null 是悬空）：焦痕只落在平地上 @type {(x: number, z: number) => number | null} */
     this.groundAt = () => 0;
     this.scorchCount = 0;
+    this.frostCount = 0;
     this.orbLight = new THREE.PointLight(0xffffff, 0, 0, 2);
     this.blastLight = new THREE.PointLight(0xffffff, 0, 0, 2);
     scene.add(this.orbLight, this.blastLight);
@@ -150,6 +152,15 @@ export class SpellFx {
       fb.material.uniforms.uHeat.value = 1.5;   // 飞着的火团比炸开时更热：正中白黄、边上橙红（1 的话整团是哑光的橙，实测）
       fb.material.uniforms.uAmp.value = 0.45;
     }
+    // 冰：一根顺着飞行方向、自己转着的冰锥（半透明切面），白芯藏起来
+    const ice = o.el === 'ice', spear = ice ? new THREE.Mesh(new THREE.OctahedronGeometry(1, 0), iceMaterial()) : null;
+    if (spear) {
+      spear.scale.set(0.17, 0.7, 0.17).multiplyScalar(o.big ? 1.3 : 1);
+      orb.add(spear); core.visible = false;
+    }
+    const haloS = (o.big ? 2 : 1.4) * (ice ? 0.45 : 1);
+    if (ice) halo.material.color.copy(col(pal.primary, 0.7));   // 光晕小一点、暗一点，看得出冰锥本身
+    const _up = new THREE.Vector3(0, 1, 0), _q = new THREE.Quaternion(), _spin = new THREE.Quaternion();
     orb.visible = false;
     this.scene.add(orb);
     const start = this.origin.clone();
@@ -183,7 +194,7 @@ export class SpellFx {
           pos.y += Math.sin(Math.PI * e) * 0.9;
         }
         orb.position.copy(pos);
-        halo.scale.setScalar((o.big ? 2 : 1.4) + Math.sin(t * 40) * 0.12);
+        halo.scale.setScalar(haloS + Math.sin(t * 40) * 0.12);
         this.orbLight.position.copy(pos);
         this.orbLight.color.copy(col(pal.primary));
         this.orbLight.intensity = 26;
@@ -204,6 +215,19 @@ export class SpellFx {
                 [3, 1.9, 0.7], [1.2, 0.22, 0.02], { drag: 1.4, grav: 1.2, alpha: 0.95 });
             }
           }
+        } else if (spear) {
+          // 冰锥顺着飞行方向，绕自己的轴转
+          if (seg.lengthSq() > 1e-6) spear.quaternion.copy(_q.setFromUnitVectors(_up, seg.clone().normalize())).multiply(_spin.setFromAxisAngle(_up, t * 9));
+          // 雪尘两层：细的冰蓝亮粉（叠加、闪一下就没）+ 淡淡的冷雾（墨池普通混合、浅色，白石头上也看得出）
+          for (let i = Math.ceil(steps * 0.7); i > 0; i--) {
+            const q = prev.clone().addScaledVector(seg, Math.random());
+            this.p.emit(q.x + rand(-0.1, 0.1), q.y + rand(-0.1, 0.1), q.z + rand(-0.1, 0.1), rand(-0.8, 0.8), rand(-0.4, 0.6), rand(-0.8, 0.8),
+              rand(0.25, 0.55), rand(0.04, 0.08), [1.1, 1.7, 2.3], [0.2, 0.55, 1.0], { drag: 2.5, grav: -1.5, alpha: 0.9 });
+          }
+          if (this.ink && Math.random() < steps * 0.05 * this.inkK) {
+            this.ink.emit(pos.x, pos.y, pos.z, rand(-0.3, 0.3), rand(-0.2, 0.2), rand(-0.3, 0.3), rand(0.6, 1), rand(0.25, 0.4),
+              [0.72, 0.84, 0.96], [0.86, 0.93, 1.0], { drag: 2, alpha: 0.3, grow: 2.2 });
+          }
         } else {
           for (let i = 0; i < steps; i++) {
             const q = prev.clone().addScaledVector(seg, i / steps);
@@ -222,7 +246,7 @@ export class SpellFx {
         if (k >= 1 && !done) { done = true; this.orbLight.intensity = 0; o.onHit(pos.clone()); return false; }
         return true;
       },
-      dispose: () => { this.scene.remove(orb); core.material.dispose(); halo.material.dispose(); if (fb) fb.material.dispose(); },
+      dispose: () => { this.scene.remove(orb); core.material.dispose(); halo.material.dispose(); if (fb) fb.material.dispose(); if (spear) { spear.geometry.dispose(); spear.material.dispose(); } },
     });
   }
 
@@ -243,22 +267,25 @@ export class SpellFx {
    */
   burst(p, el, radius, scale = 1) {
     const pal = PALETTE[el];
-    const P = col(pal.primary, 2.5), S = col(pal.secondary, 2.2);
+    // 地上的冲击环、法印：冰蓝在 2.5 倍时和白石头叠成一块白热的圆盘（实测），冰压到六成
+    const ringK = el === 'ice' ? 0.6 : 1, P = col(pal.primary, 2.5 * ringK), S = col(pal.secondary, 2.2 * ringK);
     const R = radius;
     this.blastLight.position.set(p.x, p.y + 0.6, p.z);
     this.blastLight.color.copy(col(pal.primary));
-    this.blastT = 0; this.blastBoost = scale;
+    // 冰蓝的灯光照在白石头上整片发蓝（实测），冰的落点灯光压到四成
+    this.blastT = 0; this.blastBoost = scale * (el === 'ice' ? 0.4 : 1);
     this.shake = Math.max(this.shake, 0.4 * scale);
     this.hitStop = Math.max(this.hitStop, 0.05 * Math.min(scale, 1.2));   // 顿帧
     this.impact(p, Math.min(1, 0.35 + 0.45 * scale));
     if (scale >= 0.9) this.pulseDim(Math.min(0.75, 0.32 + 0.3 * (scale - 0.9)), 0.25 + 0.2 * scale);
     this.inkSplash(p, el, R, scale);
     this.foregroundBokeh(p, el, scale);
-    const fire = el === 'fire';
+    const fire = el === 'fire', ice = el === 'ice';
     if (fire) this.fireBurst(p, R, scale);
-    const n = Math.round((fire ? 160 : 420) * scale);   // 火的大头是火团和火星，四溅的火花少一些
+    if (ice) this.iceBurst(p, R, scale);
+    const n = Math.round((fire ? 160 : ice ? 240 : 420) * scale);   // 火的大头是火团和火星、冰的大头是冰棱和晶片，四溅的火花少一些
     // 火花刚溅出时的颜色：火用橙黄（白热的火花挤在中间，叠加起来是一团白，看不出火团，实测）
-    const spark0 = fire ? [1.9, 1.0, 0.25] : scaleArr(pal.core, 2.6);
+    const spark0 = fire ? [1.9, 1.0, 0.25] : ice ? [0.8, 1.3, 1.9] : scaleArr(pal.core, 2.6);   // 冰也别用白热（理由同火）
     for (let i = 0; i < n; i++) {
       const d = randDir(); d.y = Math.abs(d.y) * 0.9 + 0.1;
       const v = d.multiplyScalar(rand(3, 15) * Math.sqrt(scale));
@@ -279,7 +306,7 @@ export class SpellFx {
           rand(0.4, 0.8), rand(0.08, 0.16), scaleArr(pal.secondary, 1.6), scaleArr(pal.primary, 0.8), { drag: 2.2, alpha: 0.7 });
       }
     }
-    const flash = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 18), glowShellMat(fire ? col(pal.primary, 0.7) : col(pal.secondary, 1.2)));
+    const flash = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 18), glowShellMat(fire || ice ? col(pal.primary, ice ? 0.55 : 0.7) : col(pal.secondary, 1.2)));
     flash.material.uniforms.uFill.value = 0.04;      // 只亮边缘，中间通透，像一层冲击波壳
     flash.position.copy(p);
     this.addTimed(flash, 0.4, (k) => {
@@ -298,7 +325,7 @@ export class SpellFx {
       });
     }
     if (scale >= 0.9) {
-      if (!fire) {   // 火用火柱代替光柱（fireBurst 里）
+      if (!fire && !ice) {   // 火用火柱代替光柱（fireBurst 里），冰的主角是冰棱，不要光柱
         const pillar = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 10, 28, 1, true), glowShellMat(col(pal.primary, 1.6), 1));
         pillar.geometry.translate(0, 5, 0);
         pillar.position.set(p.x, p.y, p.z);
@@ -492,33 +519,96 @@ export class SpellFx {
     });
   }
 
-  /** 寒冰：地面炸出一圈冰棱 */
+  /**
+   * 寒冰：地面炸出一圈冰棱——六棱晶柱（冰晶材质，半透明切面），实例化一次画完；一根根接连长出来，最后一起化掉。
+   * @param {THREE.Vector3} p @param {number} count @param {number} k 大小
+   */
   frostShards(p, count, k) {
-    const pal = PALETTE.ice;
-    const g = new THREE.Group();
-    g.position.set(p.x, p.y, p.z);
-    const shards = [];
-    for (let i = 0; i < count; i++) {
-      const h = rand(0.8, 2.0) * k;
-      const m = new THREE.Mesh(new THREE.ConeGeometry(rand(0.1, 0.2) * k, h, 5).translate(0, h / 2, 0),
-        new THREE.MeshStandardMaterial({ color: 0xcfefff, emissive: col(pal.primary), emissiveIntensity: 1.2,
-          roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.92 }));
+    const mat = iceMaterial();
+    const mesh = new THREE.InstancedMesh(crystalGeo(), mat, count);
+    mesh.frustumCulled = false;
+    mesh.castShadow = true;
+    const specs = Array.from({ length: count }, (_, i) => {
       const a = (i / count) * Math.PI * 2 + rand(-0.15, 0.15), r = rand(0.5, 2.0) * k;
-      m.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
-      m.rotation.set(Math.sin(a) * rand(0.3, 0.7), 0, -Math.cos(a) * rand(0.3, 0.7));
-      m.castShadow = true;
-      shards.push(m); g.add(m);
-    }
-    this.addTimed(g, 2.4, (kk, t) => {
-      shards.forEach((m, i) => {
-        const grow = easeOutBack(clamp01(t * 6 - i * 0.05));
-        const fade = kk > 0.7 ? 1 - (kk - 0.7) / 0.3 : 1;
-        m.scale.set(1, Math.max(grow * fade, 0.001), 1);
-        m.material.opacity = 0.92 * fade;
+      return { x: p.x + Math.cos(a) * r, z: p.z + Math.sin(a) * r, h: rand(0.8, 2.0) * k, w: rand(0.1, 0.2) * k,
+        q: new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.sin(a) * rand(0.3, 0.7), rand(0, 6.28), -Math.cos(a) * rand(0.3, 0.7))) };
+    });
+    const m4 = new THREE.Matrix4(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+    this.addTimed(mesh, 2.4, (kk, t) => {
+      const fade = kk > 0.7 ? 1 - (kk - 0.7) / 0.3 : 1;
+      specs.forEach((s, i) => {
+        const grow = Math.max(easeOutBack(clamp01(t * 6 - i * 0.05)) * fade, 0.001);
+        mesh.setMatrixAt(i, m4.compose(v.set(s.x, p.y, s.z), s.q, sc.set(s.w, s.h * grow, s.w)));
       });
+      mesh.instanceMatrix.needsUpdate = true;
+      mat.uniforms.uAlpha.value = fade;
     });
   }
 
+  /**
+   * 冰炸开（特效风格 v2：半透明晶片 + 三层雪尘）：一把六角晶片飞散翻滚、落地弹一下再化掉；一团冷雾往外漫；
+   * 落在平地上留霜痕。冰棱由 burst 里的 frostShards 长出来。
+   * @param {THREE.Vector3} p @param {number} R @param {number} scale
+   */
+  iceBurst(p, R, scale) {
+    const n = Math.round(24 + 70 * scale), mat = iceMaterial();
+    const chips = new THREE.InstancedMesh(chipGeo(), mat, n);
+    chips.frustumCulled = false;
+    const st = Array.from({ length: n }, () => {
+      const d = randDir(); d.y = Math.abs(d.y) * 0.9 + 0.25;
+      return { p: p.clone(), v: d.multiplyScalar(rand(3, 9) * Math.sqrt(scale)), q: new THREE.Quaternion().setFromEuler(new THREE.Euler(rand(0, 6), rand(0, 6), rand(0, 6))),
+        axis: randDir(), spin: rand(4, 14), s: rand(0.06, 0.2) * Math.sqrt(scale) };
+    });
+    const m4 = new THREE.Matrix4(), sc = new THREE.Vector3(), dq = new THREE.Quaternion();
+    let last = 0;
+    this.addTimed(chips, 1.6, (k, t) => {
+      const dt = t - last; last = t;
+      for (let i = 0; i < n; i++) {
+        const c = st[i];
+        c.v.y -= 12 * dt; c.v.multiplyScalar(Math.exp(-0.8 * dt));
+        c.p.addScaledVector(c.v, dt);
+        const fl = this.groundAt(c.p.x, c.p.z);
+        if (fl !== null && c.p.y < fl + 0.03) { c.p.y = fl + 0.03; c.v.y *= -0.3; c.v.x *= 0.5; c.v.z *= 0.5; c.spin *= 0.5; }   // 落地弹一下
+        c.q.multiply(dq.setFromAxisAngle(c.axis, c.spin * dt));
+        chips.setMatrixAt(i, m4.compose(c.p, c.q, sc.setScalar(c.s)));
+      }
+      chips.instanceMatrix.needsUpdate = true;
+      mat.uniforms.uAlpha.value = k < 0.7 ? 1 : 1 - (k - 0.7) / 0.3;
+    });
+    if (this.ink) {   // 冷雾：浅色、普通混合，往外漫开
+      for (let i = Math.round(9 * scale * this.inkK); i > 0; i--) {
+        const a = Math.random() * Math.PI * 2, r = rand(0, R * 0.5);
+        this.ink.emit(p.x + Math.cos(a) * r, p.y + rand(0, 0.6), p.z + Math.sin(a) * r, Math.cos(a) * rand(0.8, 2.2), rand(0.1, 0.6), Math.sin(a) * rand(0.8, 2.2),
+          rand(1.2, 2), rand(0.6, 1.1) * Math.sqrt(scale), [0.74, 0.85, 0.97], [0.88, 0.94, 1.0], { drag: 1.5, grav: 0.1, alpha: 0.32, grow: 2.4 });
+      }
+    }
+    this.frost(p, R * (scale >= 0.9 ? 0.9 : 0.6));
+  }
+
+  /**
+   * 霜痕：平地上一片放射状的冰花，冷蓝色（暖白的汉白玉上才看得出），先闪一下冰蓝的光，留 6 秒多再淡掉；最多同时 14 块。
+   * @param {THREE.Vector3} p @param {number} r
+   */
+  frost(p, r) {
+    const gy = this.groundAt(p.x, p.z);
+    if (gy === null || Math.abs(gy) > 0.05 || p.y - gy > 2 || this.frostCount >= 14) return;
+    const flat = { transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 };
+    const tintMat = new THREE.MeshBasicMaterial({ ...flat, map: frostTexture(), color: new THREE.Color(0.55, 0.74, 0.95), opacity: 0 });
+    const glowMat = new THREE.MeshBasicMaterial({ ...flat, map: frostTexture(), color: new THREE.Color(0.5, 1.2, 2.2), blending: THREE.AdditiveBlending, fog: false, opacity: 0 });
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(_plane, tintMat), new THREE.Mesh(_plane, glowMat));
+    g.rotation.set(-Math.PI / 2, 0, Math.random() * Math.PI * 2);
+    g.position.set(p.x, gy + 0.025, p.z);
+    g.scale.setScalar(r * 2);
+    this.frostCount++;
+    this.addTimed(g, 9, (k, t) => {
+      const grow = easeOutCubic(Math.min(1, t / 0.35));   // 冰花从中间长出去
+      g.scale.setScalar(r * 2 * (0.4 + 0.6 * grow));
+      tintMat.opacity = grow * 0.9 * (t < 6.5 ? 1 : Math.max(0, 1 - (t - 6.5) / 2.5));
+      glowMat.opacity = Math.max(0, 1 - t / 1.2) * 0.6;
+      if (k >= 1) this.frostCount--;
+    });
+  }
   /** 法则反噬：脚下法阵染红、碎裂成红色碎片 */
   backlash() {
     const red = [1.6, 0.15, 0.1];
