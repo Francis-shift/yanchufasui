@@ -48,7 +48,8 @@ export class Enemies {
    * @param {CANNON.World} world
    * @param {import('../fx/particles.js').Particles} particles
    * @param {{ onCoreHit: (dmg: number) => void, onGone: (e: any, how: 'kill' | 'fall' | 'core') => void,
-   *           floatText: (p: THREE.Vector3, text: string, color: string) => void }} hooks
+   *           floatText: (p: THREE.Vector3, text: string, color: string) => void, pushed?: (e: any) => void }} hooks
+   *   pushed：被风吹飞的那一下（画面在身后拖笔触）
    */
   constructor(scene, world, particles, hooks) {
     this.scene = scene; this.world = world; this.particles = particles; this.hooks = hooks;
@@ -156,6 +157,7 @@ export class Enemies {
       d.normalize();
       e.vel.set(d.x * r.push, 1.5, d.z * r.push);
       e.mode = 'slide';
+      this.hooks.pushed?.(e);
     }
     this.hooks.floatText(this.aimPoint(e).setY(e.pos.y + 1.7 * e.scale),
       (r.reaction ? r.reaction + ' ' : '') + Math.round(r.dmg), r.reaction ? '#ffe27a' : '#ffffff');

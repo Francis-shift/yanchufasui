@@ -134,6 +134,7 @@ export function start(root, opts = {}) {
   world.addBody(plaza);
 
   const walls = new Walls(scene, world, particles);
+  walls.fx = fx;   // 土墙碎成碎石、风墙的笔触
   const fusions = new FusionFx(fx, particles);
   const dragon = new DragonFx(fx, particles, opts.dragon);
   const hud = new Hud(root);
@@ -142,6 +143,7 @@ export function start(root, opts = {}) {
   const enemies = new Enemies(scene, world, particles, {
     onCoreHit: (dmg) => hitCore(dmg),
     onGone: () => {},
+    pushed: (e) => fx.windTrail(e.group),   // 被风吹飞的身后拖两道笔触，推下悬崖那一下看得清
     floatText: (p, text, color) => {
       _v.copy(p).project(camera);
       if (_v.z > 1) return;
@@ -964,7 +966,8 @@ export function start(root, opts = {}) {
     state: () => ({ phase: S.phase, mana: Math.round(S.mana), core: S.core, gauge: S.gauge, enemies: enemies.views(), last: S.last && { source: S.last.source, ms: S.last.ms, plan: S.last.plan } }),
     view: (px, py, pz, tx, ty, tz) => { cam.base.set(px, py, pz); cam.look.set(tx, ty, tz); },
     debug: (on = true) => { hud.debug.hidden = !on; },
-    pause: (on = true) => { if (on) cancelAnimationFrame(raf); else { lastNow = performance.now(); frame(); } },
+    // 先停掉排着的那一帧再续：没停着时调 pause(false) 会多起一条循环，之后 pause(true) 只停得住其中一条（实测）
+    pause: (on = true) => { cancelAnimationFrame(raf); if (!on) { lastNow = performance.now(); frame(); } },
     block: (list = []) => enemies.setObstacles(list),
     wave: (i = 0) => { enemies.clear(); S.phase = 'playing'; startWave(i); },
     lab: () => enterLab(),
@@ -985,13 +988,15 @@ export function start(root, opts = {}) {
     flash: () => env.flash(),
     talents: (list) => { if (list) { S.talents = list; renderPicker(); } return [...S.talents]; },
     binds: () => Object.fromEntries(Object.entries(S.binds).map(([k, v]) => [k, { name: v.name, text: v.text }])),
-    // 面板太小时看不清：按 w×h 横屏重画当前这一帧（先 pause 定格），返回 JPEG 的 data URL
-    snap: (w = 960, h = 540, focus = 0) => {
+    // 面板太小时看不清：按 w×h 横屏重画当前这一帧（先 pause 定格），返回 JPEG 的 data URL。
+    // at = [机位 xyz, 看向 xyz]：凑近看一个东西（带泛光和色调，跟游戏里一样亮）
+    snap: (w = 960, h = 540, focus = 0, /** @type {number[] | null} */ at = null) => {
       const css = root.style.cssText, ratio = renderer.getPixelRatio();
       root.style.cssText += `;width:${w}px;height:${h}px;right:auto;bottom:auto`;
       renderer.setPixelRatio(1);
       layoutCamera();
-      camera.position.copy(cam.base).lerp(cam.near, focus); camera.lookAt(_v.copy(cam.look).lerp(cam.nearLook, focus));
+      if (at) { camera.position.set(at[0], at[1], at[2]); camera.lookAt(at[3], at[4], at[5]); }
+      else { camera.position.copy(cam.base).lerp(cam.near, focus); camera.lookAt(_v.copy(cam.look).lerp(cam.nearLook, focus)); }
       composer.render();
       const url = renderer.domElement.toDataURL('image/jpeg', 0.72);
       root.style.cssText = css;

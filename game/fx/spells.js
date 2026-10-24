@@ -11,8 +11,17 @@ import {
 } from './common.js';
 import { fireball, scorchTextures } from './fire.js';
 import { chipGeo, crystalGeo, frostTexture, iceMaterial } from './ice.js';
+import { Trail, crescent, helix, scroll, stroke } from './wind.js';
+import { chunkGeo, crackTextures, rockMat } from './earth.js';
 
 const _plane = new THREE.PlaneGeometry(1, 1);
+
+/** 一笔从写出来到擦掉（风的笔触）：前一半写到头，三成以后从尾巴开始擦 @param {THREE.ShaderMaterial} mat @param {number} t 这一笔自己的时间 @param {number} dur */
+function sweepAt(mat, t, dur) {
+  const u = mat.uniforms;
+  u.uHead.value = easeOutCubic(clamp01(t / (dur * 0.5)));
+  u.uTail.value = Math.pow(clamp01((t - dur * 0.32) / (dur * 0.68)), 1.4);
+}
 
 export class SpellFx {
   /**
@@ -40,6 +49,7 @@ export class SpellFx {
     this.groundAt = () => 0;
     this.scorchCount = 0;
     this.frostCount = 0;
+    this.crackCount = 0;
     this.orbLight = new THREE.PointLight(0xffffff, 0, 0, 2);
     this.blastLight = new THREE.PointLight(0xffffff, 0, 0, 2);
     scene.add(this.orbLight, this.blastLight);
@@ -127,9 +137,13 @@ export class SpellFx {
   addTimed(obj, duration, step) {
     this.scene.add(obj);
     let t = 0;
+    // 挂上就先按 t = 0 摆一次：在别的特效的回调里挂上的，要到下一帧才轮到 update，中间会先画一帧没摆过的样子
+    // （实例化的碎块全叠在原点、笔触整条画满）
+    step(0, 0);
     this.fx.push({
       update: (dt) => { t += dt; const k = Math.min(t / duration, 1); step(k, t); return k < 1; },
-      dispose: () => { this.scene.remove(obj); obj.traverse((o) => { if (o.material) o.material.dispose(); }); },
+      // 几何体多半是共用的不释放；风的笔触一笔一个几何体（userData.ownGeo），跟着释放
+      dispose: () => { this.scene.remove(obj); obj.traverse((o) => { if (o.material) o.material.dispose(); if (o.userData.ownGeo) o.geometry.dispose(); }); },
     });
   }
 
@@ -158,9 +172,20 @@ export class SpellFx {
       spear.scale.set(0.17, 0.7, 0.17).multiplyScalar(o.big ? 1.3 : 1);
       orb.add(spear); core.visible = false;
     }
-    const haloS = (o.big ? 2 : 1.4) * (ice ? 0.45 : 1);
+    // 风：一道往前凸的青色风刃（笔触），两个尖和正中各拖一条笔触，白芯藏起来
+    const wind = o.el === 'wind', bladeR = o.big ? 0.62 : 0.45;
+    const blade = wind ? stroke(crescent(bladeR), o.big ? 0.14 : 0.1) : null;
+    const trails = wind ? [new Trail(22, o.big ? 0.07 : 0.05), new Trail(22, o.big ? 0.07 : 0.05), new Trail(28, o.big ? 0.1 : 0.075)] : [];
+    if (blade) { orb.add(blade); core.visible = false; for (const tr of trails) this.scene.add(tr.mesh); }
+    const tipA = new THREE.Vector3(Math.sin(1.15) * bladeR, 0, (Math.cos(1.15) - 1) * bladeR), tipB = tipA.clone().setX(-tipA.x);
+    // 土：一块透着金色熔纹、翻滚着飞的石头
+    const earth = o.el === 'earth', rock = earth ? new THREE.Mesh(chunkGeo(), rockMat({ heat: 1.2, veinK: 1.8 })) : null;
+    if (rock) { rock.scale.setScalar(o.big ? 0.36 : 0.26); rock.castShadow = true; orb.add(rock); core.visible = false; }
+    const haloS = (o.big ? 2 : 1.4) * (ice ? 0.45 : wind ? 0.5 : earth ? 0.55 : 1);
     if (ice) halo.material.color.copy(col(pal.primary, 0.7));   // 光晕小一点、暗一点，看得出冰锥本身
-    const _up = new THREE.Vector3(0, 1, 0), _q = new THREE.Quaternion(), _spin = new THREE.Quaternion();
+    if (wind) halo.material.color.copy(col(pal.primary, 0.45));
+    if (earth) halo.material.color.copy(col(pal.primary, 0.4));
+    const _up = new THREE.Vector3(0, 1, 0), _q = new THREE.Quaternion(), _spin = new THREE.Quaternion(), _w = new THREE.Vector3();
     orb.visible = false;
     this.scene.add(orb);
     const start = this.origin.clone();
@@ -197,7 +222,7 @@ export class SpellFx {
         halo.scale.setScalar(haloS + Math.sin(t * 40) * 0.12);
         this.orbLight.position.copy(pos);
         this.orbLight.color.copy(col(pal.primary));
-        this.orbLight.intensity = 26;
+        this.orbLight.intensity = wind ? 10 : earth ? 6 : 26;   // 风刃、石头本身不怎么发光，青光照在白石头上还会把地面染绿
         const seg = pos.clone().sub(prev);
         const steps = Math.min(60, Math.ceil(seg.length() * 22));   // 按飞过的距离撒粒子，慢动作下密度不变
         if (fb) {
@@ -228,6 +253,31 @@ export class SpellFx {
             this.ink.emit(pos.x, pos.y, pos.z, rand(-0.3, 0.3), rand(-0.2, 0.2), rand(-0.3, 0.3), rand(0.6, 1), rand(0.25, 0.4),
               [0.72, 0.84, 0.96], [0.86, 0.93, 1.0], { drag: 2, alpha: 0.3, grow: 2.2 });
           }
+        } else if (blade) {
+          // 风刃朝着飞的方向，轻轻左右晃；两个尖和正中留下笔触
+          if (seg.lengthSq() > 1e-6) blade.lookAt(_w.copy(pos).add(seg));
+          blade.rotateZ(Math.sin(t * 26) * 0.18);
+          orb.updateMatrixWorld(true);
+          trails[0].push(_w.copy(tipA).applyMatrix4(blade.matrixWorld));
+          trails[1].push(_w.copy(tipB).applyMatrix4(blade.matrixWorld));
+          trails[2].push(pos);
+          for (let i = Math.ceil(steps * 0.25); i > 0; i--) {   // 零星的青色亮点
+            const q = prev.clone().addScaledVector(seg, Math.random());
+            this.p.emit(q.x + rand(-0.25, 0.25), q.y + rand(-0.15, 0.15), q.z + rand(-0.25, 0.25), rand(-1, 1), rand(-0.3, 0.6), rand(-1, 1),
+              rand(0.2, 0.4), rand(0.03, 0.06), [0.5, 1.6, 1.15], [0.1, 0.5, 0.4], { drag: 2.5, alpha: 0.8 });
+          }
+        } else if (rock) {
+          rock.rotation.x += dt * 7; rock.rotation.z += dt * 4.5;
+          // 一路掉碎屑：土色的尘（墨池普通混合，白石头上看得出）+ 几颗往下掉的金火星
+          if (this.ink && Math.random() < steps * 0.08 * this.inkK) {
+            this.ink.emit(pos.x, pos.y, pos.z, rand(-0.3, 0.3), rand(-0.2, 0.3), rand(-0.3, 0.3), rand(0.5, 0.9), rand(0.18, 0.32),
+              [0.4, 0.33, 0.25], [0.62, 0.55, 0.46], { drag: 2, alpha: 0.35, grow: 1.8 });
+          }
+          for (let i = Math.ceil(steps * 0.2); i > 0; i--) {
+            const q = prev.clone().addScaledVector(seg, Math.random());
+            this.p.emit(q.x, q.y, q.z, rand(-0.8, 0.8), rand(-0.5, 0.5), rand(-0.8, 0.8), rand(0.3, 0.6), rand(0.03, 0.06),
+              [2.4, 1.3, 0.35], [0.8, 0.3, 0.05], { drag: 1.5, grav: -8 });
+          }
         } else {
           for (let i = 0; i < steps; i++) {
             const q = prev.clone().addScaledVector(seg, i / steps);
@@ -236,8 +286,8 @@ export class SpellFx {
               scaleArr(pal.secondary, 1.8), scaleArr(pal.primary, 1.1), { drag: 2.5, grav: pal.emberGravity * 0.5, alpha: 0.85 });
           }
         }
-        // 墨重的元素（火的黑烟、土、雷）沿路留一点墨迹；火的烟多一些
-        if (this.ink && (pal.ink ?? 0) >= 0.75 && Math.random() < steps * (fire ? 0.07 : 0.04) * this.inkK) {
+        // 墨重的元素（火的黑烟、雷）沿路留一点墨迹；火的烟多一些。风的笔触边上已经是深青、土一路掉尘，不再加墨
+        if (this.ink && !wind && !earth && (pal.ink ?? 0) >= 0.75 && Math.random() < steps * (fire ? 0.07 : 0.04) * this.inkK) {
           const ic = inkColors(pal.primary);
           this.ink.emit(pos.x, pos.y, pos.z, rand(-0.4, 0.4), rand(-0.1, 0.5), rand(-0.4, 0.4), rand(0.5, 0.9), rand(0.12, 0.28),
             ic.a, ic.b, { drag: 2, alpha: 0.45, grow: 1.8 });
@@ -246,8 +296,52 @@ export class SpellFx {
         if (k >= 1 && !done) { done = true; this.orbLight.intensity = 0; o.onHit(pos.clone()); return false; }
         return true;
       },
-      dispose: () => { this.scene.remove(orb); core.material.dispose(); halo.material.dispose(); if (fb) fb.material.dispose(); if (spear) { spear.geometry.dispose(); spear.material.dispose(); } },
+      dispose: () => {
+        this.scene.remove(orb); core.material.dispose(); halo.material.dispose(); if (fb) fb.material.dispose(); if (spear) { spear.geometry.dispose(); spear.material.dispose(); }
+        if (blade) { blade.geometry.dispose(); /** @type {THREE.Material} */ (blade.material).dispose(); this.eraseTrails(trails, 0.3); }
+        if (rock) /** @type {THREE.Material} */ (rock.material).dispose();
+      },
     });
+  }
+
+  /** 拖尾收尾：从尾巴往头擦掉，擦完释放 @param {Trail[]} trails @param {number} dur */
+  eraseTrails(trails, dur) {
+    let t = 0;
+    this.fx.push({
+      update: (dt) => { t += dt; for (const tr of trails) tr.mat.uniforms.uTail.value = Math.min(1, t / dur); return t < dur; },
+      dispose: () => { for (const tr of trails) { this.scene.remove(tr.mesh); tr.dispose(); } },
+    });
+  }
+
+  /**
+   * 被风吹飞的傀儡：身后拖两道笔触（腰、肩各一道），跟一阵子再从尾巴擦掉。推下悬崖时这两道线一路跟着掉进云海。
+   * @param {THREE.Object3D} obj 傀儡的模型（读它的位置和缩放） @param {number} [life]
+   */
+  windTrail(obj, life = 0.9) {
+    const k = obj.scale.y;
+    // 0.09 / 0.06 宽时只有凑近才看得见，默认机位上被吹飞的傀儡身后什么都没有（实测）
+    const lanes = [[0.45, 0.14], [1.15, 0.1]].map(([h, w]) => ({ h, tr: new Trail(24, w * Math.max(1, k), 0.08) }));
+    for (const { tr } of lanes) this.scene.add(tr.mesh);
+    let t = 0;
+    const q = new THREE.Vector3();
+    this.fx.push({
+      update: (dt) => {
+        t += dt;
+        if (t < life) for (const { h, tr } of lanes) tr.push(q.copy(obj.position).setY(obj.position.y + h * k));
+        else return false;
+        return true;
+      },
+      dispose: () => this.eraseTrails(lanes.map((l) => l.tr), 0.35),
+    });
+  }
+
+  /** 风墙上往上卷的一笔（Walls 每隔一小会儿叫一次） @param {number} x @param {number} y @param {number} z */
+  windRise(x, y, z) {
+    // 0.07 宽、每 0.1 秒一笔时，默认机位上只剩一层淡青的光幕，看不出笔触（实测）
+    const m = stroke(helix(Math.random() * 6.28, 0.9, 0.1, 0.45, rand(1.8, 2.6), 30), 0.12);
+    const mat = /** @type {THREE.ShaderMaterial} */ (m.material), spin = rand(4, 7), dur = 0.8;
+    m.position.set(x, y, z);
+    this.addTimed(m, dur, (k, t) => { m.rotation.y = -spin * t; sweepAt(mat, t, dur); });
   }
 
   /** 发射瞬间的一圈火花 */
@@ -267,52 +361,50 @@ export class SpellFx {
    */
   burst(p, el, radius, scale = 1) {
     const pal = PALETTE[el];
-    // 地上的冲击环、法印：冰蓝在 2.5 倍时和白石头叠成一块白热的圆盘（实测），冰压到六成
-    const ringK = el === 'ice' ? 0.6 : 1, P = col(pal.primary, 2.5 * ringK), S = col(pal.secondary, 2.2 * ringK);
+    const fire = el === 'fire', ice = el === 'ice', wind = el === 'wind', earth = el === 'earth';
+    // 地上的冲击环、法印：冰蓝在 2.5 倍时和白石头叠成一块白热的圆盘（实测），冰压到六成；风、土的主角是笔触和石块，也压下去
+    const ringK = ice ? 0.6 : wind ? 0.35 : earth ? 0.5 : 1, P = col(pal.primary, 2.5 * ringK), S = col(pal.secondary, 2.2 * ringK);
     const R = radius;
     this.blastLight.position.set(p.x, p.y + 0.6, p.z);
     this.blastLight.color.copy(col(pal.primary));
-    // 冰蓝的灯光照在白石头上整片发蓝（实测），冰的落点灯光压到四成
-    this.blastT = 0; this.blastBoost = scale * (el === 'ice' ? 0.4 : 1);
-    this.shake = Math.max(this.shake, 0.4 * scale);
+    // 冰蓝的灯光照在白石头上整片发蓝（实测），冰的落点灯光压到四成；风的青光同理
+    this.blastT = 0; this.blastBoost = scale * (ice ? 0.4 : wind ? 0.35 : earth ? 0.3 : 1);
+    this.shake = Math.max(this.shake, (earth ? 0.55 : 0.4) * scale);   // 土砸得沉，多震一点
     this.hitStop = Math.max(this.hitStop, 0.05 * Math.min(scale, 1.2));   // 顿帧
     this.impact(p, Math.min(1, 0.35 + 0.45 * scale));
     if (scale >= 0.9) this.pulseDim(Math.min(0.75, 0.32 + 0.3 * (scale - 0.9)), 0.25 + 0.2 * scale);
     this.inkSplash(p, el, R, scale);
     this.foregroundBokeh(p, el, scale);
-    const fire = el === 'fire', ice = el === 'ice';
     if (fire) this.fireBurst(p, R, scale);
     if (ice) this.iceBurst(p, R, scale);
-    const n = Math.round((fire ? 160 : ice ? 240 : 420) * scale);   // 火的大头是火团和火星、冰的大头是冰棱和晶片，四溅的火花少一些
-    // 火花刚溅出时的颜色：火用橙黄（白热的火花挤在中间，叠加起来是一团白，看不出火团，实测）
-    const spark0 = fire ? [1.9, 1.0, 0.25] : ice ? [0.8, 1.3, 1.9] : scaleArr(pal.core, 2.6);   // 冰也别用白热（理由同火）
+    if (wind) this.windBurst(p, R, scale);
+    if (earth) this.earthBurst(p, R, scale);
+    // 四溅的火花：火的大头是火团和火星、冰是冰棱和晶片、风是笔触、土是石块，火花都少一些
+    const n = Math.round((fire ? 160 : ice ? 240 : wind ? 60 : earth ? 30 : 420) * scale);
+    // 火花刚溅出时的颜色：火用橙黄（白热的火花挤在中间，叠加起来是一团白，看不出火团，实测）；冰、风、土也别用白热（理由同火；
+    // 土的金火花多了在落点叠成一团金白的光，盖住了石块，实测）
+    const spark0 = fire ? [1.9, 1.0, 0.25] : ice ? [0.8, 1.3, 1.9] : wind ? [0.5, 1.6, 1.15] : earth ? [1.3, 0.7, 0.2] : scaleArr(pal.core, 2.6);
     for (let i = 0; i < n; i++) {
       const d = randDir(); d.y = Math.abs(d.y) * 0.9 + 0.1;
       const v = d.multiplyScalar(rand(3, 15) * Math.sqrt(scale));
       this.p.emit(p.x, p.y, p.z, v.x, v.y, v.z, rand(0.5, 1.3), rand(0.05, 0.12),
         spark0, scaleArr(pal.primary, 1.4), { drag: 1.6, grav: pal.sparkGravity });
     }
-    for (let i = 0; i < 50 * scale; i++) {
+    for (let i = 0; i < (earth ? 0 : wind ? 25 : 50) * scale; i++) {   // 一团元素色的光雾（土用尘浪代替）
       const v = randDir().multiplyScalar(rand(1.2, 4.5));
       this.p.emit(p.x, p.y, p.z, v.x, v.y * 0.6 + 0.6, v.z, rand(0.7, 1.5), rand(0.5, 1.1),
         scaleArr(pal.primary, 0.8), scaleArr(pal.secondary, 0.3), { alpha: 0.16, drag: 1.8 });
     }
-    if (el === 'wind') {
-      // 风：一圈向外卷的气流
-      for (let i = 0; i < 160 * scale; i++) {
-        const a = Math.random() * Math.PI * 2, r = rand(0.3, R);
-        this.p.emit(p.x + Math.cos(a) * r, p.y + rand(0, 1.5), p.z + Math.sin(a) * r,
-          Math.cos(a) * 9 - Math.sin(a) * 6, rand(0.5, 2), Math.sin(a) * 9 + Math.cos(a) * 6,
-          rand(0.4, 0.8), rand(0.08, 0.16), scaleArr(pal.secondary, 1.6), scaleArr(pal.primary, 0.8), { drag: 2.2, alpha: 0.7 });
-      }
+    if (!wind && !earth) {   // 冲击波壳（风不要：青色的壳在漩涡外面像一个肥皂泡；土的壳把石块罩成一团金光，实测）
+      const shellK = fire ? 0.7 : ice ? 0.55 : 0;
+      const flash = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 18), glowShellMat(shellK ? col(pal.primary, shellK) : col(pal.secondary, 1.2)));
+      flash.material.uniforms.uFill.value = 0.04;      // 只亮边缘，中间通透，像一层冲击波壳
+      flash.position.copy(p);
+      this.addTimed(flash, 0.4, (k) => {
+        flash.scale.setScalar(0.3 + easeOutCubic(k) * R * 0.8);
+        flash.material.uniforms.uAlpha.value = Math.pow(1 - k, 2.5);
+      });
     }
-    const flash = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 18), glowShellMat(fire || ice ? col(pal.primary, ice ? 0.55 : 0.7) : col(pal.secondary, 1.2)));
-    flash.material.uniforms.uFill.value = 0.04;      // 只亮边缘，中间通透，像一层冲击波壳
-    flash.position.copy(p);
-    this.addTimed(flash, 0.4, (k) => {
-      flash.scale.setScalar(0.3 + easeOutCubic(k) * R * 0.8);
-      flash.material.uniforms.uAlpha.value = Math.pow(1 - k, 2.5);
-    });
     for (const [delay, size, dur] of [[0, R * 3.2, 0.85], [0.08, R * 2.1, 1.1]]) {
       const ring = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), ringMat(delay ? S.clone() : P.clone()));
       ring.rotation.x = -Math.PI / 2;
@@ -325,7 +417,7 @@ export class SpellFx {
       });
     }
     if (scale >= 0.9) {
-      if (!fire && !ice) {   // 火用火柱代替光柱（fireBurst 里），冰的主角是冰棱，不要光柱
+      if (!fire && !ice && !wind && !earth) {   // 火用火柱代替光柱（fireBurst 里），冰的主角是冰棱、风是漩涡、土是石笋，不要光柱
         const pillar = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 10, 28, 1, true), glowShellMat(col(pal.primary, 1.6), 1));
         pillar.geometry.translate(0, 5, 0);
         pillar.position.set(p.x, p.y, p.z);
@@ -609,6 +701,204 @@ export class SpellFx {
       if (k >= 1) this.frostCount--;
     });
   }
+
+  /**
+   * 风炸开（特效风格 v2：青色发光笔触带卷成浪与漩涡）：几股笔触从中心往外、往上绕成漩涡，整团一边转一边胀开；
+   * 贴地几道浪往外推，末尾卷成小涡；地上扬起一圈灰、几片碎叶跟着转。
+   * @param {THREE.Vector3} p @param {number} R @param {number} scale
+   */
+  windBurst(p, R, scale) {
+    const big = scale >= 0.9, gy = this.groundAt(p.x, p.z), base = gy ?? p.y - 0.4;
+    // 笔触宽 0.2 米时远看是一根根霓虹细线，不像毛笔（实测）
+    const dur = big ? 1.1 : 0.75, w = big ? 0.32 : 0.18;
+    // 漩涡：螺旋线从里往外、从下往上（高过宽，像一股旋风，矮了看着是一摞光圈，实测）；外沿要罩住大半个爆炸范围，被吹的敌人在里面；
+    // 整团顺着笔触走的方向转（笔触的角度往 +z 增，等于绕 y 轴转负角）
+    const vortex = new THREE.Group();
+    vortex.position.set(p.x, base + 0.05, p.z);
+    const nS = big ? 6 : 3, ph = Math.random() * 6.28;
+    const strands = Array.from({ length: nS }, (_, j) => {
+      const m = stroke(helix(ph + (j / nS) * Math.PI * 2, rand(1.2, 1.6), R * 0.15, R * rand(0.8, 1.0), R * rand(1.0, 1.35), 56), w * rand(0.7, 1.3));
+      vortex.add(m);
+      return { mat: /** @type {THREE.ShaderMaterial} */ (m.material), delay: j * 0.03 };
+    });
+    const spin = big ? 5.5 : 7;
+    this.addTimed(vortex, dur + 0.2, (k, t) => {
+      vortex.rotation.y = -spin * t;
+      vortex.scale.setScalar(0.6 + 0.5 * easeOutCubic(Math.min(1, t / dur)));
+      for (const s of strands) sweepAt(s.mat, t - s.delay, dur);
+    });
+    // 浪：贴地往外推的弧，末尾往里卷
+    const waves = new THREE.Group();
+    waves.position.set(p.x, base + 0.08, p.z);
+    const nW = big ? 5 : 3;
+    const arcs = Array.from({ length: nW }, (_, j) => {
+      const m = stroke(scroll(ph + (j / nW) * Math.PI * 2 + rand(-0.2, 0.2), rand(0.9, 1.3), rand(0.16, 0.24)), w * 0.9);
+      waves.add(m);
+      return { mat: /** @type {THREE.ShaderMaterial} */ (m.material), delay: 0.05 + j * 0.02 };
+    });
+    this.addTimed(waves, dur + 0.25, (k, t) => {
+      waves.rotation.y = -spin * 0.35 * t;
+      waves.scale.setScalar(R * (0.45 + 0.75 * easeOutCubic(Math.min(1, t / dur))));
+      for (const a of arcs) sweepAt(a.mat, t - a.delay, dur);
+    });
+    // 青色亮点顺着漩涡甩出去
+    for (let i = Math.round(40 * scale); i > 0; i--) {
+      const a = Math.random() * Math.PI * 2, r = rand(0.3, 1) * R, sp = rand(5, 9) * Math.sqrt(scale);
+      this.p.emit(p.x + Math.cos(a) * r, base + rand(0.1, 1.2), p.z + Math.sin(a) * r,
+        -Math.sin(a) * sp + Math.cos(a) * 2, rand(1, 3), Math.cos(a) * sp + Math.sin(a) * 2,
+        rand(0.4, 0.8), rand(0.04, 0.08), [0.6, 1.8, 1.3], [0.1, 0.6, 0.45], { drag: 2, alpha: 0.85 });
+    }
+    if (!this.ink) return;
+    for (let i = Math.round(12 * scale * this.inkK); i > 0; i--) {   // 地上扬起一圈灰（暖灰、普通混合，白石头上看得出）
+      const a = Math.random() * Math.PI * 2, r = R * rand(0.25, 0.45);
+      this.ink.emit(p.x + Math.cos(a) * r, base + rand(0.05, 0.4), p.z + Math.sin(a) * r,
+        Math.cos(a) * rand(2, 3.5) - Math.sin(a) * 2.5, rand(0.2, 0.8), Math.sin(a) * rand(2, 3.5) + Math.cos(a) * 2.5,
+        rand(1, 1.6), rand(0.5, 1) * Math.sqrt(scale), [0.52, 0.49, 0.44], [0.74, 0.71, 0.66], { drag: 1.6, alpha: 0.28, grow: 2.2 });
+    }
+    for (let i = Math.round(16 * scale); i > 0; i--) {   // 碎叶：小、深绿，跟着转、往上卷
+      const a = Math.random() * Math.PI * 2, r = R * rand(0.2, 0.7), sp = rand(3, 6);
+      this.ink.emit(p.x + Math.cos(a) * r, base + rand(0.1, 0.6), p.z + Math.sin(a) * r,
+        -Math.sin(a) * sp, rand(2, 5), Math.cos(a) * sp, rand(0.9, 1.5), rand(0.05, 0.09), [0.1, 0.22, 0.09], [0.16, 0.3, 0.12],
+        { drag: 1.2, grav: -4, alpha: 0.85, grow: 0.9 });
+    }
+  }
+
+  /**
+   * 土炸开（特效风格 v2：金色熔纹加黑色墨裂的石块 + 碎石尘浪）：碎石四溅、落地弹跳；大的还有一圈石笋斜着拱出地面，
+   * 撑一下就碎成碎石；贴地推出一圈土黄的尘浪；几颗金火星；地上留裂纹。
+   * @param {THREE.Vector3} p @param {number} R @param {number} scale
+   */
+  earthBurst(p, R, scale) {
+    const big = scale >= 0.9, gy = this.groundAt(p.x, p.z), base = gy ?? p.y - 0.4, k = Math.sqrt(scale);
+    this.rockDebris([new THREE.Vector3(p.x, base + 0.25, p.z)], Math.round(14 + 46 * scale), { speed: 7.5 * k, spread: R * 0.2, size: 0.16 * k, life: 1.9 });
+    if (big && gy !== null) this.rockSpikes(p.x, base, p.z, R, scale);
+    for (let i = Math.round(22 * scale); i > 0; i--) {   // 金火星：从石缝里溅出来，很快掉下去
+      const d = randDir(); d.y = Math.abs(d.y) * 0.8 + 0.3;
+      const v = d.multiplyScalar(rand(3, 9) * k);
+      this.p.emit(p.x, base + 0.3, p.z, v.x, v.y, v.z, rand(0.4, 0.9), rand(0.04, 0.07), [2.4, 1.3, 0.35], [0.8, 0.3, 0.05], { drag: 1.2, grav: -14 });
+    }
+    this.dust(new THREE.Vector3(p.x, base, p.z), R, scale);
+    this.crack(p, R * (big ? 0.95 : 0.6));
+  }
+
+  /**
+   * 尘浪：贴地往外推的一圈土黄色尘（墨池普通混合），中间再往上冒一股。
+   * @param {THREE.Vector3} at 地面上的中心 @param {number} R @param {number} scale
+   */
+  dust(at, R, scale) {
+    if (!this.ink) return;
+    for (let i = Math.round(26 * scale * this.inkK); i > 0; i--) {
+      const a = Math.random() * Math.PI * 2, r = R * rand(0.15, 0.35), sp = rand(3.5, 7) * Math.sqrt(scale);
+      this.ink.emit(at.x + Math.cos(a) * r, at.y + rand(0.05, 0.35), at.z + Math.sin(a) * r, Math.cos(a) * sp, rand(0.3, 1.2), Math.sin(a) * sp,
+        // 淡到 0.62 时在白石地上看着是一团白里带蓝的雾，认不出是土（实测）
+        rand(1.1, 1.8), rand(0.7, 1.3) * Math.sqrt(scale), [0.32, 0.25, 0.17], [0.5, 0.42, 0.31], { drag: 2.2, alpha: 0.5, grow: 2.5 });
+    }
+    for (let i = Math.round(7 * scale * this.inkK); i > 0; i--) {
+      this.ink.emit(at.x + rand(-0.4, 0.4), at.y + rand(0.3, 1), at.z + rand(-0.4, 0.4), rand(-0.6, 0.6), rand(1.2, 2.6), rand(-0.6, 0.6),
+        rand(1.3, 2), rand(0.6, 1.1) * Math.sqrt(scale), [0.36, 0.29, 0.2], [0.54, 0.46, 0.35], { drag: 1.4, alpha: 0.38, grow: 2.4 });
+    }
+  }
+
+  /**
+   * 一把碎石（石块材质，实例化一次画完）：从几个起点四溅，受重力，落地弹一下、慢慢停下；熔纹渐渐冷成黑缝，最后缩没。
+   * @param {THREE.Vector3[]} from 起点（碎石轮流从这几个点出发）@param {number} n
+   * @param {{ speed: number, size: number, spread?: number, life?: number, heat?: number, up?: number }} o up：往上溅的比例
+   */
+  rockDebris(from, n, o) {
+    // 纹路疏一点：一块碎石上缠三四道金纹，一地都像金块（实测），一块一两道就够
+    const life = o.life ?? 1.8, mat = rockMat({ heat: o.heat ?? 1, veinK: 1.2 }), heat = mat.userData.heat, h0 = heat.value, sp = o.spread ?? 0;
+    const mesh = new THREE.InstancedMesh(chunkGeo(), mat, n);
+    mesh.frustumCulled = false;
+    mesh.castShadow = true;
+    const st = Array.from({ length: n }, (_, i) => {
+      const d = randDir(); d.y = Math.abs(d.y) * (o.up ?? 0.9) + 0.3;
+      return { p: from[i % from.length].clone().add(new THREE.Vector3(rand(-sp, sp), rand(0, sp * 0.5), rand(-sp, sp))),
+        v: d.normalize().multiplyScalar(o.speed * rand(0.45, 1.1)), q: new THREE.Quaternion().setFromEuler(new THREE.Euler(rand(0, 6), rand(0, 6), rand(0, 6))),
+        axis: randDir(), spin: rand(3, 11), s: new THREE.Vector3(rand(0.7, 1.3), rand(0.6, 1.1), rand(0.7, 1.3)).multiplyScalar(o.size * rand(0.5, 1.4)) };
+    });
+    const m4 = new THREE.Matrix4(), sc = new THREE.Vector3(), dq = new THREE.Quaternion();
+    let last = 0;
+    this.addTimed(mesh, life, (k, t) => {
+      const dt = t - last; last = t;
+      heat.value = h0 * Math.max(0, 1 - t / (life * 0.6));
+      const shrink = Math.max(0.001, k > 0.72 ? 1 - (k - 0.72) / 0.28 : 1);
+      for (let i = 0; i < n; i++) {
+        const c = st[i];
+        c.v.y -= 18 * dt; c.v.multiplyScalar(Math.exp(-0.5 * dt));
+        c.p.addScaledVector(c.v, dt);
+        const fl = this.groundAt(c.p.x, c.p.z), r = c.s.y * 0.8;
+        if (fl !== null && c.p.y < fl + r && c.p.y > fl - 0.5) { c.p.y = fl + r; c.v.y *= -0.28; c.v.x *= 0.55; c.v.z *= 0.55; c.spin *= 0.55; }   // 落地弹一下
+        c.q.multiply(dq.setFromAxisAngle(c.axis, c.spin * dt));
+        mesh.setMatrixAt(i, m4.compose(c.p, c.q, sc.copy(c.s).multiplyScalar(shrink)));
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+    });
+  }
+
+  /**
+   * 石笋：落点周围一圈石块从地里往外斜着拱出来（熔纹亮着），撑半秒就碎成一把碎石、扬一股尘。
+   * @param {number} x @param {number} y 地面高 @param {number} z @param {number} R @param {number} scale
+   */
+  rockSpikes(x, y, z, R, scale) {
+    const n = Math.round(6 + 3 * Math.min(scale, 2)), k = Math.min(1.5, Math.sqrt(scale));
+    const mat = rockMat({ heat: 1.3, veinK: 1.6 });
+    const mesh = new THREE.InstancedMesh(chunkGeo(), mat, n);
+    mesh.frustumCulled = false;
+    mesh.castShadow = true;
+    const up = new THREE.Vector3(0, 1, 0), spinQ = new THREE.Quaternion();
+    const specs = Array.from({ length: n }, (_, i) => {
+      const a = (i / n) * Math.PI * 2 + rand(-0.25, 0.25), r = rand(0.25, 0.65) * R, tilt = rand(0.25, 0.6);   // 往外歪
+      const dir = new THREE.Vector3(Math.cos(a) * Math.sin(tilt), Math.cos(tilt), Math.sin(a) * Math.sin(tilt));
+      // 一米来高时从默认机位看只是落点上一圈小疙瘩（实测），加到一人多高
+      return { p: new THREE.Vector3(x + Math.cos(a) * r, y, z + Math.sin(a) * r), dir, w: rand(0.38, 0.62) * k, h: rand(1.0, 1.8) * k,
+        q: new THREE.Quaternion().setFromUnitVectors(up, dir).multiply(spinQ.setFromAxisAngle(up, rand(0, 6.28))), delay: rand(0, 0.08), top: new THREE.Vector3() };
+    });
+    const m4 = new THREE.Matrix4(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+    const HOLD = 0.5;
+    let crumbled = false;
+    this.addTimed(mesh, HOLD + 0.14, (kk, t) => {
+      const gone = t < HOLD ? 1 : Math.max(0.001, 1 - (t - HOLD) / 0.12);
+      specs.forEach((s, i) => {
+        const g = easeOutBack(clamp01((t - s.delay) / 0.14));
+        v.copy(s.p).addScaledVector(s.dir, (-0.9 + 1.25 * g) * s.h);   // 从地下拱上来，露出大半截
+        s.top.copy(v).addScaledVector(s.dir, s.h * 0.5);
+        mesh.setMatrixAt(i, m4.compose(v, s.q, sc.set(s.w * gone, s.h * gone, s.w * gone)));
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      if (!crumbled && t >= HOLD) {
+        crumbled = true;
+        this.rockDebris(specs.map((s) => s.top), n * 3, { speed: 3.5 * k, size: 0.11 * k, life: 1.4, heat: 0.8, up: 0.6 });
+        this.dust(new THREE.Vector3(x, y, z), R * 1.2, scale * 0.6);
+        this.shake = Math.max(this.shake, 0.2 * scale);
+      }
+    });
+  }
+
+  /**
+   * 裂地：平地上一片放射状的裂纹，缝里先透金光（叠加），一两秒熄掉；黑缝留 6 秒多再淡掉。最多同时 14 块。
+   * @param {THREE.Vector3} p @param {number} r
+   */
+  crack(p, r) {
+    const gy = this.groundAt(p.x, p.z);
+    if (gy === null || Math.abs(gy) > 0.05 || p.y - gy > 2 || this.crackCount >= 14) return;
+    const tex = crackTextures();
+    const flat = { transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 };
+    const darkMat = new THREE.MeshBasicMaterial({ ...flat, map: tex.dark, opacity: 0 });
+    const glowMat = new THREE.MeshBasicMaterial({ ...flat, map: tex.glow, color: new THREE.Color(2.0, 1.0, 0.28), blending: THREE.AdditiveBlending, fog: false, opacity: 0 });
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(_plane, darkMat), new THREE.Mesh(_plane, glowMat));
+    g.rotation.set(-Math.PI / 2, 0, Math.random() * Math.PI * 2);
+    g.position.set(p.x, gy + 0.022, p.z);
+    this.crackCount++;
+    this.addTimed(g, 9, (k, t) => {
+      const grow = easeOutCubic(Math.min(1, t / 0.18));   // 一下子裂开
+      g.scale.setScalar(r * 2 * (0.5 + 0.5 * grow));
+      darkMat.opacity = grow * (t < 6.5 ? 1 : Math.max(0, 1 - (t - 6.5) / 2.5));
+      glowMat.opacity = Math.pow(Math.max(0, 1 - t / 1.6), 1.4) * 0.9;
+      if (k >= 1) this.crackCount--;
+    });
+  }
+
   /** 法则反噬：脚下法阵染红、碎裂成红色碎片 */
   backlash() {
     const red = [1.6, 0.15, 0.1];

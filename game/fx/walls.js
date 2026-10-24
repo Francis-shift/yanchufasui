@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { canvasTex, col, PALETTE, rand, scaleArr } from './common.js';
+import { rockMat, wallGeo } from './earth.js';
 
 /** 帘子的光幕：下实上虚的竖条渐变（白天只靠粒子看不出是一堵墙，10-19 截图实测） */
 let _curtainTex = null;
@@ -28,8 +29,12 @@ const SEG = { w: 1.0, h: 1.6, d: 0.6 };
 
 /**
  * @typedef {{ el: string, pts: { x: number, z: number }[], t: number, sec: number, hit: Set<string>,
- *             meshes: THREE.Mesh[], bodies: CANNON.Body[], yaw: number, payload: any }} Wall
+ *             meshes: THREE.Mesh[], bodies: CANNON.Body[], yaw: number, payload: any,
+ *             mat?: THREE.MeshStandardMaterial, crumbled?: boolean, acc?: number }} Wall
+ * mat：土墙这一堵的石块材质（熔纹各自冷却）；crumbled：土墙已经碎掉；acc：风墙往上卷的笔触攒的时间
  */
+/** 土墙最后多久碎掉（碎了以后石块消失，挡路还算到时间到） */
+const CRUMBLE = 0.35;
 
 export class Walls {
   /**
@@ -40,9 +45,10 @@ export class Walls {
     this.scene = scene; this.world = world; this.p = particles;
     /** @type {Wall[]} */
     this.list = [];
-    this.geo = new THREE.BoxGeometry(SEG.w, SEG.h, SEG.d);
-    this.stone = new THREE.MeshStandardMaterial({ color: 0x8a7a66, roughness: 0.95 });
+    this.geo = wallGeo(SEG.w, SEG.h, SEG.d);
     this.shape = new CANNON.Box(new CANNON.Vec3(SEG.w / 2, SEG.h / 2, SEG.d / 2));
+    /** 法术画面（主循环接上）：土墙碎成碎石、风墙往上卷的笔触要用；没接上时土墙照旧沉回地下 @type {import('./spells.js').SpellFx | null} */
+    this.fx = null;
   }
 
   /**
@@ -58,9 +64,10 @@ export class Walls {
     /** @type {Wall} */
     const w = { el, pts, t: 0, sec, hit: new Set(), meshes: [], bodies: [], yaw, payload };
     if (el === 'earth') {
+      w.mat = rockMat({ heat: 1.4, veinK: 2.6, veinW: 0.03 });   // 升起时熔纹亮着，一两秒冷下去，留一点余温
       for (const p of pts) {
         const y = groundHeightAt(p.x, p.z) ?? 0;
-        const m = new THREE.Mesh(this.geo, this.stone);
+        const m = new THREE.Mesh(this.geo, w.mat);
         m.position.set(p.x, y - SEG.h / 2, p.z);
         m.rotation.y = yaw + rand(-0.06, 0.06);
         m.castShadow = true; m.receiveShadow = true;
@@ -109,15 +116,25 @@ export class Walls {
       const w = this.list[i];
       w.t += dt;
       if (w.el === 'earth') {
-        // 0.25 秒升起，最后 0.6 秒沉回地下
-        const up = Math.min(1, w.t / 0.25), down = Math.max(0, (w.t - (w.sec - 0.6)) / 0.6);
+        // 0.25 秒升起；到时间前碎成一把碎石（没接上法术画面就最后 0.6 秒沉回地下）
+        const up = Math.min(1, w.t / 0.25), down = this.fx ? 0 : Math.max(0, (w.t - (w.sec - 0.6)) / 0.6);
         const k = up * (1 - down);
         w.meshes.forEach((m, j) => { m.position.y = (groundHeightAt(w.pts[j].x, w.pts[j].z) ?? 0) - SEG.h / 2 + k * SEG.h; });
+        if (w.mat) w.mat.userData.heat.value = 0.12 + 1.3 * Math.exp(-w.t * 2.2);
+        if (this.fx && !w.crumbled && w.t >= w.sec - CRUMBLE) {
+          w.crumbled = true;
+          for (const m of w.meshes) m.visible = false;   // 碎石的余温跟墙一样低：0.5 时塌下来的碎石比墙还亮（实测）
+          this.fx.rockDebris(w.meshes.map((m) => m.position.clone()), w.meshes.length * 7, { speed: 3, spread: 0.45, size: 0.17, life: 1.3, heat: 0.2, up: 0.5 });
+          const a = w.pts[0], b = w.pts[w.pts.length - 1];
+          this.fx.dust(new THREE.Vector3((a.x + b.x) / 2, groundHeightAt((a.x + b.x) / 2, (a.z + b.z) / 2) ?? 0, (a.z + b.z) / 2), 2.4, 0.6);
+          this.fx.shake = Math.max(this.fx.shake, 0.12);
+        }
       } else {
         this.curtain(w, dt);
       }
       if (w.t >= w.sec) {
         for (const m of w.meshes) { this.scene.remove(m); if (w.el !== 'earth') { m.geometry.dispose(); /** @type {THREE.Material} */ (m.material).dispose(); } }
+        if (w.mat) w.mat.dispose();
         for (const b of w.bodies) this.world.removeBody(b);
         if (w.el === 'earth') changed = true;
         this.list.splice(i, 1);
@@ -133,6 +150,13 @@ export class Walls {
     const sheet = w.meshes[0];
     if (sheet) /** @type {THREE.MeshBasicMaterial} */ (sheet.material).opacity = fade * (0.55 + 0.1 * Math.sin(w.t * 9));
     const a = w.pts[0], b = w.pts[w.pts.length - 1];
+    if (w.el === 'wind' && this.fx) {   // 风墙：沿墙线一笔笔往上卷的青色笔触（风格卡：笔触带卷成漩涡）
+      w.acc = (w.acc || 0) + dt * fade;
+      for (; w.acc > 0.07; w.acc -= 0.07) {
+        const k = Math.random(), x = a.x + (b.x - a.x) * k, z = a.z + (b.z - a.z) * k;
+        this.fx.windRise(x, groundHeightAt(x, z) ?? 0, z);
+      }
+    }
     const n = Math.round(260 * dt * fade);
     for (let i = 0; i < n; i++) {
       const k = Math.random(), x = a.x + (b.x - a.x) * k, z = a.z + (b.z - a.z) * k;
@@ -153,6 +177,7 @@ export class Walls {
   clear() {
     for (const w of this.list) {
       for (const m of w.meshes) { this.scene.remove(m); if (w.el !== 'earth') { m.geometry.dispose(); /** @type {THREE.Material} */ (m.material).dispose(); } }
+      if (w.mat) w.mat.dispose();
       for (const b of w.bodies) this.world.removeBody(b);
     }
     const had = this.list.some((w) => w.el === 'earth');
@@ -160,7 +185,7 @@ export class Walls {
     return had;
   }
 
-  dispose() { this.clear(); this.geo.dispose(); this.stone.dispose(); }
+  dispose() { this.clear(); }   // 墙段的几何体是共用的（earth.js 里缓存），不释放
 }
 
 /**
