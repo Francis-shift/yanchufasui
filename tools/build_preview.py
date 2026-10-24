@@ -34,6 +34,7 @@ ENTRIES = {
     "three/addons/postprocessing/UnrealBloomPass.js": f"{THREE}/examples/jsm/postprocessing/UnrealBloomPass.js",
     "three/addons/postprocessing/OutputPass.js": f"{THREE}/examples/jsm/postprocessing/OutputPass.js",
     "three/addons/postprocessing/ShaderPass.js": f"{THREE}/examples/jsm/postprocessing/ShaderPass.js",
+    "three/addons/objects/Reflector.js": f"{THREE}/examples/jsm/objects/Reflector.js",
 }
 REL_IMPORT = re.compile(r"""((?:import|export)\b[^'"]*?\bfrom\s*|import\s*\(?\s*)(['"])(\.{1,2}/[^'"]+)\2""")
 

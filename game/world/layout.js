@@ -189,7 +189,10 @@ export const PATHS = [
   [[PEAK.c.x, PEAK.c.y], [BRIDGE.b.x, BRIDGE.b.y], [BRIDGE.a.x, BRIDGE.a.y], [-3, 2], [-1.1, CORE_POS.z - 2.2]],
 ].map((pts) => pts.map(([x, z]) => new THREE.Vector3(x, groundHeightAt(x, z) ?? 0, z)));
 
-/** @param {THREE.Scene} scene @param {{ tex?: number }} [opts] tex：台面贴图边长（电影档 2048、流畅档 1024） */
+/**
+ * @param {THREE.Scene} scene
+ * @param {{ tex?: number, reflect?: number }} [opts] tex：台面贴图边长（电影档 2048、流畅档 1024）；reflect：水洼平面反射图的宽（电影档 1024，不给只照出天）
+ */
 export function buildLayout(scene, opts = {}) {
   const stone = new THREE.MeshStandardMaterial({ color: 0xbdb6a8, roughness: 0.9 });
   const darkStone = new THREE.MeshStandardMaterial({ color: 0x8c8578, roughness: 0.95 });
@@ -207,8 +210,12 @@ export function buildLayout(scene, opts = {}) {
       ...LANTERNS.map((l) => foot(l.x, l.z, 0.32)),
       ...Array.from({ length: 8 }, (_, k) => foot(CORE_POS.x + Math.cos((k / 8) * Math.PI * 2) * 2.7, CORE_POS.z + Math.sin((k / 8) * Math.PI * 2) * 2.7, 0.28)),
     ],
+    // 雨后积水：从游戏机位看，倒影里要有东西——最大一片在两只石兽之间（照出牌坊和镇山石，石阶上来的敌人从水里走过），
+    // 右边一片照华表，左边一片在桥头那条路上；台边几处小的
+    pools: [[0.6, -5.0, 1.5, 0.9], [5.6, -0.8, 0.9, 0.7], [-4.6, -1.2, 0.8, 0.6], [2.6, 3.4, 0.8, 0.6], [-3.6, 7.2, 0.6, 0.45],
+      [-6.8, 4.6, 0.55, 0.45], [8.3, -4.6, 0.5, 0.4], [-2.2, -9.4, 0.5, 0.35]],
   };
-  const plaza = buildPlaza(scene, { R: PLAZA_R, stairs: STAIRS, tex: opts.tex ?? 2048, wear });
+  const plaza = buildPlaza(scene, { R: PLAZA_R, stairs: STAIRS, tex: opts.tex ?? 2048, wear, reflect: opts.reflect });
 
   // 山门牌坊（占位：两组白石柱 + 横梁 + 蓝屋顶，尺寸同模型；模型加载出来就藏起来）
   const marble = new THREE.MeshStandardMaterial({ color: 0xd9d4ca, roughness: 0.6 });
@@ -285,7 +292,7 @@ export function buildLayout(scene, opts = {}) {
   peak.position.set(PEAK.c.x, -11, PEAK.c.y);
   scene.add(peak);
   buildLanding(scene, { x: PEAK.c.x, z: PEAK.c.y, R: PEAK.r + 0.15, tex: (opts.tex ?? 2048) / 2,
-    wear: { walks: [{ pts: [[0, 0], [-BRIDGE_DIR.x * PEAK.r, -BRIDGE_DIR.y * PEAK.r]], w: 1.6 }] } });   // 傀儡从正中走向桥头
+    wear: { walks: [{ pts: [[0, 0], [-BRIDGE_DIR.x * PEAK.r, -BRIDGE_DIR.y * PEAK.r]], w: 1.6 }], pools: [[1.3, 1.1, 0.6, 0.45]] } });   // 傀儡从正中走向桥头
 
   // 阵眼：地上一圈发光阵盘 + 悬浮水晶 + 八根石桩
   const coreColor = col(PALETTE.arcane.secondary, 1.6);   // 我方金色（风格卡敌我配色）

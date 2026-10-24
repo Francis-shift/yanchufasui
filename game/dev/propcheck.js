@@ -62,7 +62,7 @@ export function startPropCheck(root, assets) {
   composer.addPass(grade);
   const env = buildEnvironment(scene, renderer);
   env.setShadowMap(q.shadowMap);
-  const layout = buildLayout(scene, { tex: 1024 });   // 广场、索桥、邻峰都在（台底、邻峰的山石换得对不对要放在一起看）
+  const layout = buildLayout(scene, { tex: 1024, reflect: q.reflect });   // 广场、索桥、邻峰都在（台底、邻峰的山石换得对不对要放在一起看）；水洼带倒影
   const ready = loadProps(scene, layout, 'smooth', (f) => assets[f] || `missing:${f}`, renderer, env);
 
   let w = 960, h = 540, view = 'lion';
@@ -76,7 +76,7 @@ export function startPropCheck(root, assets) {
     composer.render();
   };
   const pc = {
-    ready, spots: PROP_SPOTS, scene, renderer, env,
+    ready, spots: PROP_SPOTS, scene, renderer, env, layout,
     /** @param {keyof typeof VIEWS} v */
     view: (v) => { view = v; render(); return v; },
     /** 随手摆一个机位（看台面细节、找夕阳的反光） @param {number[]} p 镜头位置 @param {number[]} t 看的点 */

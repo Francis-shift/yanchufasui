@@ -14,6 +14,16 @@ test('?q= 强制某一档；不认识的值不理', () => {
   assert.equal(pickQuality('?q=ultra', true).name, 'smooth');
 });
 
+test('水洼平面反射只给电影档；?refl=0 关掉，别的不变', () => {
+  assert.ok(pickQuality('', false).reflect > 0);
+  assert.equal(pickQuality('', true).reflect, 0);
+  const off = pickQuality('?refl=0', false);
+  assert.equal(off.reflect, 0);
+  assert.equal(off.name, 'cinema');
+  assert.equal(off.particles, TIERS.cinema.particles);
+  assert.equal(TIERS.cinema.reflect, 1024, '关掉的是副本，档位表本身不动');
+});
+
 test('电影档比流畅档给得多，流畅档不开冲击模糊与前景层', () => {
   const c = TIERS.cinema, s = TIERS.smooth;
   assert.ok(c.particles > s.particles && c.ink > s.ink && c.shadowMap > s.shadowMap && c.inkK > s.inkK);

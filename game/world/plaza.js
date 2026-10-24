@@ -11,6 +11,7 @@
  * 画布坐标按米画：原点在广场中心，x 向右、y 向下对应世界的 x、z（贴图翻转后正好对上圆面的贴图坐标）。
  */
 import * as THREE from 'three';
+import { Reflector } from 'three/addons/objects/Reflector.js';
 import { rng } from '../fx/common.js';
 
 /**
@@ -175,16 +176,29 @@ function floorTextures(S, R, rings = RINGS, engrave = true) {
 }
 
 /**
- * 生活痕迹（R 走得多、磨光了的地方，G 积灰，B 留给雨后积水）：按米画，跟台面贴图同一套坐标。
+ * 生活痕迹（R 走得多、磨光了的地方，G 积灰，B 雨后积水）：按米画，跟台面贴图同一套坐标。
  * 叠加着画（'lighter'），三个通道互不干扰
  * @param {number} S @param {number} R @param {Wear} wear
- * @typedef {{ walks?: { pts: number[][], w: number }[], grime?: number[][] }} Wear walks：常走的路（折线 [x, z]、宽）；grime：东西脚下 [x, z, 横半径, 纵半径]
+ * @typedef {{ walks?: { pts: number[][], w: number }[], grime?: number[][], pools?: number[][] }} Wear
+ *   walks：常走的路（折线 [x, z]、宽）；grime：东西脚下 [x, z, 横半径, 纵半径]；pools：水洼 [x, z, 横半径, 纵半径]
  */
 function wearTexture(S, R, wear) {
   return paint(S, S, (g) => {
     g.fillStyle = '#000'; g.fillRect(0, 0, S, S);
     const k = S / (2 * R); g.setTransform(k, 0, 0, k, S / 2, S / 2);
     g.globalCompositeOperation = 'lighter';
+    // 水洼：一大六小几团软边叠起来，着色器按 0.5 取水边（实拍贴图到了再按石面明暗抖一抖；没到也不是光溜溜的椭圆），水边外一圈是湿的
+    const pr = rng(53);
+    for (const [x, z, rx, rz] of wear.pools ?? []) {
+      for (let i = 0; i < 7; i++) {
+        const a = pr() * Math.PI * 2, d = i ? 0.3 + pr() * 0.6 : 0, s = i ? 0.3 + pr() * 0.35 : 0.85;
+        g.save(); g.translate(x + Math.cos(a) * d * rx, z + Math.sin(a) * d * rz); g.scale(rx * s, rz * s);
+        const gr = g.createRadialGradient(0, 0, 0, 0, 0, 1.6);   // 单独一团水边在 0.8 倍半径
+        gr.addColorStop(0, 'rgba(0, 0, 255, 1)'); gr.addColorStop(1, 'rgba(0, 0, 255, 0)');
+        g.fillStyle = gr; g.beginPath(); g.arc(0, 0, 1.6, 0, Math.PI * 2); g.fill();
+        g.restore();
+      }
+    }
     g.lineCap = 'round'; g.lineJoin = 'round';
     // 路：宽窄不同的几层淡笔叠起来，中间磨得最光、往两边渐淡
     for (const { pts, w } of wear.walks ?? []) {
@@ -224,18 +238,32 @@ export function useStoneMaps(n, d, m) {
 }
 
 /**
- * 台面材质：代码画的石板（颜色、凹凸、粗糙度、编号）叠上实拍石材和生活痕迹。
- * 细节贴图大理石那张的平均色（线性）是 (0.63, 0.55, 0.43)，除掉它只留明暗起伏；细节的 AO 均值 0.48、粗糙度均值 0.83，同样只取起伏
+ * 两块台面共用：时间（水洼里的涟漪）、入侵程度（倒影染紫）、平面反射（电影档才有，见 buildPlaza 的 reflect；
+ * 流畅档 uReflOn = 0，水洼只照出环境贴图里的天）。meshes：反射那一遍要先藏起来的台面（它们自己要读这张图）
+ */
+const FLOOR = { time: { value: 0 }, inv: { value: 0 }, refl: { value: flat(0, 0, 0) }, reflMat: { value: new THREE.Matrix4() }, reflOn: { value: 0 },
+  /** @type {THREE.Object3D[]} */ meshes: [] };
+
+/**
+ * 台面材质：代码画的石板（颜色、凹凸、粗糙度、编号）叠上实拍石材、生活痕迹和雨后积水。
+ * 细节贴图大理石那张的平均色（线性）是 (0.63, 0.55, 0.43)，除掉它只留明暗起伏；细节的 AO 均值 0.48、粗糙度均值 0.83，同样只取起伏。
+ * 积水（生活痕迹图 B）：过 0.5 是水，按石面明暗抖出不规则的水边；水边外一圈湿的（发暗、光一点）；水面是平的，
+ * 偶尔一滴水落下荡开一圈涟漪；倒影：电影档用平面反射换掉环境反射，菲涅耳比真水夸张（游戏机位俯看约 25°，真水只反 5%～10%，
+ * 照出来的天跟晒亮的石面差不多亮，从游戏机位几乎看不出水洼）；流畅档水面的环境反射也按这个量
  * @param {{ color: THREE.Texture, aux: THREE.Texture }} floor @param {THREE.Texture} wear @param {number} R
  * @param {{ uniforms: Record<string, { value: any }>, decl: string, color: string, rough: string, emissive: string }} [extra] 广场的入侵损伤
  */
 function stoneFloor(floor, wear, R, extra) {
   const mat = new THREE.MeshStandardMaterial({ map: floor.color, roughnessMap: floor.aux, bumpMap: floor.aux, bumpScale: 1.2, roughness: 1 });
   mat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, { uStoneN: STONE.n, uStoneD: STONE.d, uStoneM: STONE.m, uStone: STONE.on, uWear: { value: wear }, uR: { value: R } }, extra?.uniforms);
+    Object.assign(sh.uniforms, { uStoneN: STONE.n, uStoneD: STONE.d, uStoneM: STONE.m, uStone: STONE.on, uWear: { value: wear }, uR: { value: R },
+      uFloorTime: FLOOR.time, uFloorInv: FLOOR.inv, uRefl: FLOOR.refl, uReflMat: FLOOR.reflMat, uReflOn: FLOOR.reflOn }, extra?.uniforms);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform mat4 uReflMat; varying vec4 vRefl;')
+      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvRefl = uReflMat * modelMatrix * vec4(transformed, 1.0);');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-        uniform sampler2D uStoneN, uStoneD, uStoneM, uWear; uniform float uStone, uR;${extra?.decl ?? ''}`)
+        uniform sampler2D uStoneN, uStoneD, uStoneM, uWear, uRefl; uniform float uStone, uR, uFloorTime, uFloorInv, uReflOn; varying vec4 vRefl;${extra?.decl ?? ''}`)
       .replace('#include <map_fragment>', `#include <map_fragment>
         vec2 sp = (vMapUv * 2. - 1.) * uR;                     // 台面上的位置（米）
         float sId = texture2D(roughnessMap, vMapUv).b;
@@ -247,17 +275,44 @@ function stoneFloor(floor, wear, R, extra) {
         diffuseColor.rgb *= mix(vec3(1.), clamp(sMarble, 0.4, 1.3), 0.9 * sOn);
         diffuseColor.rgb *= 1. + uStone * (0.06 * clamp((sDet.r - 0.48) / 0.06, -2.5, 1.5) + 0.04 * (sDet.b - 0.5) / 0.157) + 0.05 * sWear.r;
         diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.72, 0.66, 0.58), sWear.g);
+        float sWet = sWear.b + uStone * (0.5 * texture2D(uStoneD, sp / 0.9 + 0.37).b + 0.4 * texture2D(uStoneD, sp / 3.1 + 0.71).b - 0.45);   // 两层石面明暗把水边抖得不规则（约 ±0.25 米）
+        float pool = smoothstep(0.5, 0.53, sWet), damp = smoothstep(0.3, 0.5, sWet);   // 水；水边外一圈湿的
+        diffuseColor.rgb *= 1. - 0.25 * damp - 0.2 * pool;   // 湿石头发深；水底再深一点，倒影才托得出来
         ${extra?.color ?? ''}`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
         roughnessFactor *= 1. + uStone * 0.3 * clamp((sDet.g - 0.832) / 0.06, -2., 2.);
         roughnessFactor = max(roughnessFactor * (1. - 0.35 * sWear.r), 0.24);   // 走得多的地方磨光，夕阳下亮一条；再光就成镜子，朝太阳看白成一片
         roughnessFactor = mix(roughnessFactor, max(roughnessFactor, 0.8), sWear.g);
+        roughnessFactor = mix(mix(roughnessFactor, roughnessFactor * 0.6, damp), 0.04, pool);
         ${extra?.rough ?? ''}`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        vec3 sTx = normalize((viewMatrix * vec4(1., 0., 0., 0.)).xyz), sTz = normalize((viewMatrix * vec4(0., 0., 1., 0.)).xyz);
         vec3 sN = texture2D(uStoneN, sp / 1.6).xyz * 2. - 1.;  // 贴图右 = +x、上 = +z（贴图不翻转）
-        normal = normalize(normal + uStone * 1.5 * (sN.x * normalize((viewMatrix * vec4(1., 0., 0., 0.)).xyz) + sN.y * normalize((viewMatrix * vec4(0., 0., 1., 0.)).xyz)));`)
+        normal = normalize(normal + uStone * 1.5 * (sN.x * sTx + sN.y * sTz));
+        vec2 rip = vec2(0.);
+        if (pool > 0.) {   // 涟漪：0.45 米一格，约三成的格子每 3 秒落一滴，荡开一圈（sp 的 y 朝 -z）
+          vec2 rp = sp * 2.2, cell = floor(rp);
+          for (int i = -1; i <= 1; i++) for (int j = -1; j <= 1; j++) {
+            vec2 c = cell + vec2(i, j);
+            float h = fract(sin(dot(c, vec2(127.1, 311.7))) * 43758.5453);
+            if (h > 0.3) continue;
+            float t = fract(uFloorTime * 0.33 + h * 7.);
+            vec2 d = rp - (c + 0.25 + 0.5 * fract(vec2(h * 17.3, h * 31.7)));
+            float r = length(d), w = (r - t * 1.1) * 40.;
+            rip += d / max(r, 1e-3) * sin(w) * step(abs(w), 6.2832) * (1. - t) * (1. - t);
+          }
+        }
+        normal = normalize(mix(normal, normalize((viewMatrix * vec4(0., 1., 0., 0.)).xyz), pool) + pool * 0.2 * (rip.x * sTx - rip.y * sTz));`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-        ${extra?.emissive ?? ''}`);
+        ${extra?.emissive ?? ''}`)
+      .replace('#include <aomap_fragment>', `#include <aomap_fragment>
+        if (pool > 0.) {
+          float nv = saturate(dot(normal, geometryViewDir)), F = 0.06 + 0.94 * pow(1. - nv, 2.5);   // 俯看 25° 约 0.3（真水约 0.08）
+          vec3 refl = mix(reflectedLight.indirectSpecular * F / (0.04 + 0.96 * pow(1. - nv, 5.)),   // 流畅档：环境反射按同样的量放大
+            texture2DProj(uRefl, vRefl + vec4(rip * 0.03 * vRefl.w, 0., 0.)).rgb * F, uReflOn);
+          vec3 tint = mix(vec3(1.), vec3(0.72, 0.5, 1.35), (0.7 - 0.35 * uReflOn) * uFloorInv);   // 入侵：倒影染紫（环境贴图开局烤好，不会跟着天变）
+          reflectedLight.indirectSpecular = mix(reflectedLight.indirectSpecular, refl * tint, pool);
+        }`);
   };
   return mat;
 }
@@ -453,18 +508,18 @@ export function rockColumn(rTop, rBottom, h, seed) {
 // ---------------------------------------------------------------- 组装
 /**
  * @param {THREE.Scene} scene
- * @param {{ R: number, stairs: { halfW: number, zTop: number, zBottom: number, yBottom: number }, tex: number, wear: Wear }} o
- *   tex：台面贴图边长（电影档 2048、流畅档 1024）；wear：常走的路、东西脚下（layout.js 按摆放给）
+ * @param {{ R: number, stairs: { halfW: number, zTop: number, zBottom: number, yBottom: number }, tex: number, wear: Wear, reflect?: number }} o
+ *   tex：台面贴图边长（电影档 2048、流畅档 1024）；wear：常走的路、东西脚下、水洼（layout.js 按摆放给）；
+ *   reflect：水洼平面反射那张图的宽（电影档给；不给就只照出天）
  */
 export function buildPlaza(scene, o) {
   const { R, stairs: ST } = o;
   const shadowy = (m) => { m.castShadow = true; m.receiveShadow = true; return m; };
-  const inv = { value: 0 }, time = { value: 0 };
 
   // 台面
   const floor = floorTextures(o.tex, R), damage = damageTexture(Math.min(1024, o.tex), R);
   const floorMat = stoneFloor(floor, wearTexture(Math.min(1024, o.tex), R, o.wear), R, {
-    uniforms: { uDamage: { value: damage }, uInv: inv, uTime: time },
+    uniforms: { uDamage: { value: damage }, uInv: FLOOR.inv, uTime: FLOOR.time },
     decl: '\nuniform sampler2D uDamage; uniform float uInv; uniform float uTime;',
     color: `vec2 dmg = texture2D(uDamage, vMapUv).rg;
         float crack = smoothstep(dmg.r - 0.02, dmg.r + 0.02, uInv) * step(dmg.r, 0.99);
@@ -478,6 +533,27 @@ export function buildPlaza(scene, o) {
   top.rotation.x = -Math.PI / 2;
   top.receiveShadow = true;
   scene.add(top);
+  FLOOR.meshes.push(top);
+  // 水洼的倒影（电影档）：一块看不见的镜面（不写颜色、不写深度），每帧最先画，画之前把场景按地面翻过来渲一遍到它的图里；
+  // 广场和落脚台都在 y = 0，共用这一张。那一遍先藏起台面（它们自己在读这张图），阴影不重算
+  if (o.reflect) {
+    const mirror = new Reflector(new THREE.PlaneGeometry(90, 90), { textureWidth: o.reflect, textureHeight: Math.round((o.reflect * 9) / 16), clipBias: 0.003, multisample: 0 });
+    mirror.rotation.x = -Math.PI / 2;
+    mirror.renderOrder = -100;
+    const mm = /** @type {THREE.ShaderMaterial} */ (mirror.material);
+    mm.colorWrite = false; mm.depthWrite = false;
+    mirror.updateMatrixWorld();
+    const tm = mm.uniforms.textureMatrix.value, toLocal = mirror.matrixWorld.clone().invert(), draw = mirror.onBeforeRender;
+    mirror.onBeforeRender = (...a) => {
+      for (const m of FLOOR.meshes) m.visible = false;
+      draw.apply(mirror, a);
+      for (const m of FLOOR.meshes) m.visible = true;
+      FLOOR.reflMat.value.multiplyMatrices(tm, toLocal);   // 镜面自带的矩阵从它自己的局部坐标算起，台面给的是世界坐标
+    };
+    FLOOR.refl.value = mirror.getRenderTarget().texture;
+    FLOOR.reflOn.value = 1;
+    scene.add(mirror);
+  }
 
   // 台沿：石阶口断开（圆柱的角度从 +z 起算，-z 方向是 π）
   const RR = R + 0.12, H = 1.25, gap = Math.asin((ST.halfW + 0.35) / RR), t0 = Math.PI + gap, tl = Math.PI * 2 - 2 * gap;
@@ -532,9 +608,9 @@ export function buildPlaza(scene, o) {
     /** 台底山石（props.js 换成模型以后藏起来） */
     base: cliff,
     /** 入侵程度（world/invasion.js）：台面裂缝、焦痕跟着长 @param {number} k */
-    setInvasion(k) { inv.value = k; ROCK_INV.value = k; },
+    setInvasion(k) { FLOOR.inv.value = k; ROCK_INV.value = k; },
     /** @param {number} dt 游戏时间 */
-    update(dt) { time.value += dt; },
+    update(dt) { FLOOR.time.value += dt; },
   };
 }
 
@@ -564,6 +640,7 @@ export function buildLanding(scene, o) {
   const foot = new THREE.Mesh(new THREE.CylinderGeometry(RR + 0.04, RR - 0.18, 0.26, 96, 1, true), marble);
   foot.position.y = -H - 0.17;
   for (const m of [top, band, lip, lipTop, foot]) { m.castShadow = m !== top && m !== lipTop; m.receiveShadow = true; g.add(m); }
+  FLOOR.meshes.push(top);
   g.position.set(o.x, 0, o.z);
   scene.add(g);
   return g;
