@@ -163,7 +163,7 @@ export function buildEnvironment(scene, renderer) {
   scene.add(sun, sun.target);
 
   const clouds = buildCloudSea(scene, U);
-  const { smoke, useRocks } = buildFarLayer(scene, U);
+  const { smoke, useRocks, usePavilion, usePines } = buildFarLayer(scene, U);
   const bands = buildFogBank(scene, U);
   const bolt = buildBolt(scene);
 
@@ -221,7 +221,7 @@ export function buildEnvironment(scene, renderer) {
   };
   /** 中景山石的材质（props.js 用），跟远山同一套，根部融进云的那段短一些 @param {THREE.Texture} map @param {number} haze */
   const rockMaterial = (map, haze) => farRockMat(U, map, haze, -3);
-  return { sun, hemi, clouds, setDim, setInvasion, setShadowMap, aim, update, flash: strike, look: LOOK, useRocks, rockMaterial };
+  return { sun, hemi, clouds, setDim, setInvasion, setShadowMap, aim, update, flash: strike, look: LOOK, useRocks, usePavilion, usePines, rockMaterial };
 }
 
 /** 云海：两层流动的噪声当起伏；朝太阳挪一点再取一次，差值大于零就是迎光坡，镀金边；远处融进天边色。
@@ -349,28 +349,28 @@ const ROCK_USE = { 'rock-a': { sink: 0.2 }, 'rock-b': { sink: 0.5 } };
 function buildFarLayer(scene, U) {
   const R = rng(41);
   const rock = [], rockAo = [];
-  /** @type {{ x: number, z: number, h: number, r: number, rot: number }[]} 每根石峰：底面中心、露出云海多高、半径、转角 */
+  /** @type {{ x: number, z: number, h: number, r: number, rot: number, main: boolean }[]} 每根石峰：底面中心、露出云海多高、半径、转角，是不是 PEAKS 里的主峰 */
   const slots = [];
   /** @type {{ slot: typeof slots[0], at: THREE.Vector3, w: number, parts: THREE.BufferGeometry[], rots: number[], seed: number }[]} 楼阁 */
   const pavs = [];
   const sunAz = Math.atan2(SUN_DIR.z, SUN_DIR.x);
   const angDiff = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
-  const specs = PEAKS.map((p) => ({ ...p, a: VIEW_AZ + p.da }));
+  const specs = PEAKS.map((p) => ({ ...p, a: VIEW_AZ + p.da, main: true }));
   for (let i = 0; i < 16; i++) {   // 远处一层小石峰
     const a = VIEW_AZ - 1.25 + (i + 0.5) / 16 * 2.5 + (R() - 0.5) * 0.1, far = angDiff(a, sunAz) < 0.3;
-    specs.push({ a, da: a - VIEW_AZ, d: 230 + R() * 130, h: (12 + R() * 26) * (far ? 0.4 : 1), r: 6 + R() * 6, sats: Math.floor(R() * 2), pav: false });
+    specs.push({ a, da: a - VIEW_AZ, d: 230 + R() * 130, h: (12 + R() * 26) * (far ? 0.4 : 1), r: 6 + R() * 6, sats: Math.floor(R() * 2), pav: false, main: false });
   }
   for (const p of specs) {
     const x = Math.cos(p.a) * p.d, z = Math.sin(p.a) * p.d, base = SEA_Y - 8, rot = R() * 6.28;
     const pg = pillarGeo(R, p.r, p.h + 8), c = Math.cos(rot), s = Math.sin(rot);
     pushGeo(rock, pg.g, x, base + (p.h + 8) / 2, z, rot, { ao: rockAo });
-    const slot = { x, z, h: p.h, r: p.r, rot };
+    const slot = { x, z, h: p.h, r: p.r, rot, main: p.main };
     slots.push(slot);
     for (let k = 0; k < p.sats; k++) {   // 旁边一两根矮一点的（随机数的取法和顺序不变，摆出来跟原来一样）
       const sa = R() * 6.28, sd = p.r * (1.1 + R() * 0.7), sh = (p.h + 8) * (0.45 + R() * 0.4), sr = p.r * (0.4 + R() * 0.3);
       const g = pillarGeo(R, sr, sh).g, srot = R() * 6.28, sx = x + Math.cos(sa) * sd, sz = z + Math.sin(sa) * sd;
       pushGeo(rock, g, sx, base + sh / 2, sz, srot, { ao: rockAo });
-      if (sh - 8 > 2) slots.push({ x: sx, z: sz, h: sh - 8, r: sr, rot: srot });
+      if (sh - 8 > 2) slots.push({ x: sx, z: sz, h: sh - 8, r: sr, rot: srot, main: false });
     }
     if (!p.pav) continue;
     // 楼阁先放在代码石柱歪出去的顶面中心
@@ -387,8 +387,20 @@ function buildFarLayer(scene, U) {
   const hallMesh = new THREE.Mesh(new THREE.BufferGeometry(), farMat(U, true));
   scene.add(hallMesh);
   const smoke = buildSmoke(scene, U, pavs.map((h) => ({ x: h.at.x, y: h.at.y + h.w * 0.3, z: h.at.z, seed: h.seed })));
-  /** 楼阁摆到 at（合成一个网格一次画完），黑烟跟着挪 */
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), sc = new THREE.Vector3(), pv = new THREE.Vector3();
+  /** @type {{ mesh: THREE.InstancedMesh, W: number } | null} 楼阁模型到了以后：一个实例化网格，W 是模型的宽 */
+  let pavModel = null;
+  /** 楼阁摆到 at（代码楼阁合成一个网格一次画完；模型是实例化的，正面朝广场、偏一点），黑烟跟着挪 */
   const placeHalls = () => {
+    if (pavModel) {
+      const { mesh, W } = pavModel;
+      pavs.forEach((h, i) => {
+        const face = Math.atan2(-h.at.x, -h.at.z) + (h.rots[0] / 6.28 - 0.5) * 0.8;
+        mesh.setMatrixAt(i, m4.compose(h.at, q.setFromAxisAngle(up, face), sc.setScalar(h.w / W)));
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
+    }
     const pos = [], dir = [], seed = [], base = [];
     for (const h of pavs) {
       const d = new THREE.Vector3(h.at.x, 0, h.at.z).normalize();
@@ -416,14 +428,13 @@ function buildFarLayer(scene, U) {
    * 实例化：一种模型一次画完。不镜像（实例化的镜像会把正反面弄反）。
    * @param {Record<string, { geo: THREE.BufferGeometry, map: THREE.Texture, top: { H: number, W: number, x: number, y: number, z: number } }>} models
    */
+  /** @type {Map<typeof slots[0], { name: string, m: THREE.Matrix4 }>} 换成模型以后每根石峰用的哪种、摆在哪（种松树用） */
+  const placed = new Map();
   const useRocks = (models) => {
     if (!models['rock-a']) return;
     const names = Object.keys(models).filter((n) => n in ROCK_USE);
     /** @param {typeof slots[0]} s */
     const pick = (s) => (s.h / (2 * s.r) < 1.1 && models['rock-b'] ? 'rock-b' : 'rock-a');
-    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), sc = new THREE.Vector3(), pv = new THREE.Vector3();
-    /** @type {Map<typeof slots[0], THREE.Matrix4>} */
-    const mats = new Map();
     for (const name of names) {
       const { geo, map, top } = models[name], mine = slots.filter((s) => pick(s) === name);
       if (!mine.length) continue;
@@ -433,19 +444,75 @@ function buildFarLayer(scene, U) {
         const sxz = THREE.MathUtils.clamp((2 * s.r) / top.W, sy * 0.6, sy * 1.7);
         m4.compose(pv.set(s.x, SEA_Y - ROCK_USE[name].sink * modelH, s.z), q.setFromAxisAngle(up, s.rot), sc.set(sxz, sy, sxz));
         mesh.setMatrixAt(i, m4);
-        mats.set(s, m4.clone());
+        placed.set(s, { name, m: m4.clone() });
       });
       mesh.computeBoundingSphere();
       scene.add(mesh);
       for (const h of pavs) {   // 楼阁挪到模型的顶面（往下压一点，顶面高低不平）
-        const mm = mats.get(h.slot);
-        if (mm && pick(h.slot) === name) h.at.set(top.x, top.y, top.z).applyMatrix4(mm).y -= 0.3;
+        const pl = placed.get(h.slot);
+        if (pl && pl.name === name) h.at.set(top.x, top.y, top.z).applyMatrix4(pl.m).y -= 0.3;
       }
     }
     rockMesh.visible = false;
     placeHalls();
   };
-  return { smoke, useRocks };
+
+  /**
+   * 换成楼阁模型（props.js 下载到了调）：几座都用一个模型，按代码楼阁的宽缩放、正面朝广场。
+   * 入侵时照旧：被黑雾盖住的那几座烧黑、墙根火光闪动（材质按实例的位置算，跟代码楼阁一样）。
+   * @param {{ geo: THREE.BufferGeometry, map: THREE.Texture }} model
+   */
+  const usePavilion = ({ geo, map }) => {
+    geo.computeBoundingBox();
+    const bb = /** @type {THREE.Box3} */ (geo.boundingBox);
+    const mesh = new THREE.InstancedMesh(geo, farRockMat(U, map, 0.003, 2, true), pavs.length);
+    scene.add(mesh);
+    pavModel = { mesh, W: bb.max.x - bb.min.x };
+    hallMesh.visible = false;
+    placeHalls();
+  };
+
+  /**
+   * 主峰顶上种松树（PEAKS 那 11 根；远处那层小石峰远得只剩几个像素，不种）。松树和山石模型都到了 props.js 再调。
+   * 每根按顶上能种树的地方（flatSpots，先中间后边上）摆 per 棵：第一棵挺拔的在中间，往后挺拔的、黄山松轮着来，
+   * 黄山松在边上、树冠朝外伸；立着楼阁的那根让开楼阁。大小按位置算的伪随机数取（不动远山那串随机数，摆出来跟原来一样）。
+   * @param {{ geo: THREE.BufferGeometry, map: THREE.Texture, root: THREE.Vector3 }[]} kinds [挺拔的, 黄山松]
+   * @param {Record<string, THREE.Vector3[]>} spots 每种山石模型顶上能种树的点（模型坐标）
+   * @param {number} per 每根几棵（流畅档少种）
+   */
+  const usePines = (kinds, spots, per) => {
+    /** @type {THREE.Matrix4[][]} */
+    const lists = kinds.map(() => []);
+    const p = new THREE.Vector3(), c = new THREE.Vector3(), off = new THREE.Vector3();
+    const rnd = (/** @type {number} */ x, /** @type {number} */ z) => { const t = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453; return t - Math.floor(t); };
+    for (const s of slots) {
+      const pl = placed.get(s), sp = pl && spots[pl.name];
+      if (!s.main || !pl || !sp?.length) continue;
+      const pav = pavs.find((h) => h.slot === s);
+      c.copy(sp[0]).applyMatrix4(pl.m);
+      let k = 0;
+      for (const spot of sp) {
+        if (k >= per) break;
+        p.copy(spot).applyMatrix4(pl.m);
+        if (pav && Math.hypot(p.x - pav.at.x, p.z - pav.at.z) < pav.w * 0.6 + 1.5) continue;
+        const kind = k % 2, r = rnd(p.x, p.z), size = 0.5 + 0.3 * r;
+        // 黄山松的树冠沿模型 +x 伸：转到朝外（离顶面中心的方向）；挺拔的随便转
+        const rot = kind ? -Math.atan2(p.z - c.z, p.x - c.x) : r * 6.28;
+        q.setFromAxisAngle(up, rot);
+        off.copy(kinds[kind].root).multiplyScalar(size).applyQuaternion(q);
+        lists[kind].push(new THREE.Matrix4().compose(pv.set(p.x - off.x, p.y - 0.2 * size, p.z - off.z), q, sc.setScalar(size)));
+        k++;
+      }
+    }
+    kinds.forEach((kd, i) => {
+      if (!lists[i].length) return;
+      const mesh = new THREE.InstancedMesh(kd.geo, farRockMat(U, kd.map), lists[i].length);
+      lists[i].forEach((mm, j) => mesh.setMatrixAt(j, mm));
+      mesh.computeBoundingSphere();
+      scene.add(mesh);
+    });
+  };
+  return { smoke, useRocks, usePavilion, usePines };
 }
 
 /**
@@ -455,12 +522,18 @@ function buildFarLayer(scene, U) {
  * @param {THREE.Texture} map @param {number} [haze] 按距离平方的雾，远山 0.003，中景厚一点
  * @param {number} [rootTop] 根部从云面（y = -9）往上融进天边色融到多高。中景离得近、占画面大，这一段要短，
  *   不然背光一侧下半截整片发金光
+ * @param {boolean} [fire] 楼阁用：被黑雾盖住的烧黑、墙根火光闪动（跟代码楼阁的 farMat 一样，方向、底面高按实例的位置算）
  */
-function farRockMat(U, map, haze = 0.003, rootTop = 2) {
+function farRockMat(U, map, haze = 0.003, rootTop = 2, fire = false) {
   return new THREE.ShaderMaterial({
     fog: false,
+    defines: fire ? { FIRE: '' } : {},
     uniforms: { ...U, uMap: { value: map }, uAmb: { value: ROCK_AMB }, uSunK: ROCK_SUN, uHaze: { value: haze }, uRootTop: { value: rootTop } },
     vertexShader: `varying vec3 vW; varying vec3 vN; varying vec2 vUv;
+      #ifdef FIRE
+      ${COMMON_GLSL}
+      varying float vBurn; varying float vSeed; varying float vBase;
+      #endif
       void main(){
         mat4 m = modelMatrix;
       #ifdef USE_INSTANCING
@@ -469,9 +542,17 @@ function farRockMat(U, map, haze = 0.003, rootTop = 2) {
         vec4 w = m * vec4(position, 1.); vW = w.xyz;
         vN = inverse(transpose(mat3(m))) * normal;   // 各方向缩放不一样，法线要用逆转置
         vUv = uv;
+      #ifdef FIRE
+        vec3 at = (m * vec4(0., 0., 0., 1.)).xyz;
+        vBurn = smoothstep(0.4, 0.8, invMask(normalize(vec3(at.x, 0., at.z)), 0.)) * smoothstep(0.28, 0.38, uInv);
+        vSeed = fract(at.x * 0.137 + at.z * 0.071) * 10.; vBase = at.y;
+      #endif
         gl_Position = projectionMatrix * viewMatrix * w; }`,
     fragmentShader: `varying vec3 vW; varying vec3 vN; varying vec2 vUv; uniform sampler2D uMap; uniform vec3 uAmb; uniform float uSunK; uniform float uHaze; uniform float uRootTop;
       ${COMMON_GLSL}
+      #ifdef FIRE
+      varying float vBurn; varying float vSeed; varying float vBase;
+      #endif
       void main(){
         vec3 v = normalize(vW - cameraPosition);
         vec3 N = normalize(vN);
@@ -484,7 +565,14 @@ function farRockMat(U, map, haze = 0.003, rootTop = 2) {
         float hd = length(vW - cameraPosition) * uHaze;
         float f = 1. - exp(-hd * hd);
         f = max(f, (1. - smoothstep(-9., uRootTop, vW.y)) * 0.75);   // 根部没进云里
+      #ifdef FIRE
+        float low = 1. - smoothstep(0., 2.6, vW.y - vBase);     // 墙根
+        float fl = (0.6 + 0.4 * sin(uTime * 11. + vSeed * 17. + vW.x) * sin(uTime * 6.3 + vSeed * 5. + vW.z)) * (0.5 + 0.5 * sin(vW.x * 2.1 + vW.z * 1.7 + vSeed));
+        c = mix(c, c * 0.3, vBurn);                                 // 烧黑
+        c = mix(c, horizonInv(v), f) + vec3(2.6, 0.8, 0.18) * vBurn * low * fl * (1. - 0.5 * f);   // 火光穿得过雾
+      #else
         c = mix(c, horizonInv(v), f);
+      #endif
         c += uInvGlow * flashAt(v) * m * 0.3;
         gl_FragColor = vec4(dimColor(c, uDim), 1.); }`,
   });

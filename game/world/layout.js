@@ -6,7 +6,8 @@
  *   - 石阶口进来是山门牌坊（10-21 换成模型：宽 13 米、高约 9.6 米，往广场里收了 2 米才放得下），
  *     门洞正中两根铁链吊着镇山石，牌坊前两只石兽；两侧香炉；华表立在牌坊到阵眼的路两旁；
  *   - 施法者站在阵眼前面，阵眼破了就输。
- * 模型（牌坊、石兽、镇山石、香炉、华表、栏杆、山石）由 props.js 加载后摆到这里给的位置；没加载出来时用这里的方块占位（栏杆没有占位）。
+ * 模型（牌坊、石兽、镇山石、香炉、华表、栏杆、石灯、山石、台底石壁上的松树）由 props.js 加载后摆到这里给的位置；
+ * 没加载出来时用这里的方块占位（栏杆、石灯、松树没有占位）。
  * 台面、台沿、台底山石、石阶在 plaza.js（10-23 照目标图重做）。
  */
 import * as THREE from 'three';
@@ -37,6 +38,15 @@ const STONE = { ringTop: GATE.openTop - 0.5, height: 1.95 };
 const HUABIAO_X = 4.2, HUABIAO_Z = -3.0;
 /** 香炉：广场两侧（目标图里在正中，但广场中间是敌人的路）。模型高 1.5、连龙耳宽 1.54、四足落地约 1.06 见方 */
 const CENSER_X = 7.2, CENSER_Z = 1.5;
+/**
+ * 石灯（模型高 1.2、底座约 0.4 见方）：栏杆里侧一圈（离台边 0.8 米），正面朝广场中心；桥头两旁各一盏。
+ * 石阶口两旁是牌坊柱子和石兽，正前方是阵眼，都不放。角度从 +x 往 +z 量
+ */
+const LANTERN_R = PLAZA_R - 0.8, BRIDGE_AZ = Math.atan2(BRIDGE.a.y, BRIDGE.a.x);
+export const LANTERNS = [...[-25, 10, 40, 65, 115, 140, 170].map((d) => (d * Math.PI) / 180), BRIDGE_AZ - 0.235, BRIDGE_AZ + 0.235].map((a) => {
+  const x = Math.cos(a) * LANTERN_R, z = Math.sin(a) * LANTERN_R;
+  return { x, y: 0, z, rotY: Math.atan2(-x, -z), mirror: false };
+});
 
 /** 场景物件的位置（玩家可以点名的目标） */
 export const OBJECTS = {
@@ -46,12 +56,13 @@ export const OBJECTS = {
   pillar: { x: -HUABIAO_X, z: HUABIAO_Z },
 };
 
-/** 广场上的固定障碍（敌人寻路绕开）：华表、香炉、牌坊两组柱子、石兽 */
+/** 广场上的固定障碍（敌人寻路绕开）：华表、香炉、牌坊两组柱子、石兽、石灯 */
 export const OBSTACLES = [
   { x: -HUABIAO_X, z: HUABIAO_Z, r: 0.6 }, { x: HUABIAO_X, z: HUABIAO_Z, r: 0.6 },
   { x: -CENSER_X, z: CENSER_Z, r: 0.7 }, { x: CENSER_X, z: CENSER_Z, r: 0.7 },
   { x: -GATE.pillarX, z: GATE.z, r: 1.5 }, { x: GATE.pillarX, z: GATE.z, r: 1.5 },
   { x: -LION.x, z: LION.z, r: 1.0 }, { x: LION.x, z: LION.z, r: 1.0 },
+  ...LANTERNS.map((l) => ({ x: l.x, z: l.z, r: 0.35 })),
 ];
 
 /** @param {number} x0 @param {number} x1 @param {number} y0 @param {number} y1 @param {number} z0 @param {number} z1 */
@@ -94,6 +105,12 @@ export const PROP_SPOTS = {
    */
   peak: { model: 'rock-a', top: [PEAK.c.x, -0.9, PEAK.c.y], rotY: 0.8, scale: 1.5 },
   base: { model: 'rock-b', top: [0, -1.75, 0], rotY: 0, scale: 1 },
+  /**
+   * 台底石壁上长出来的黄山松：方位角（从 +x 往 +z 量）和根的高度。props.js 从外面水平往广场中心打一条线，碰到石壁的地方就是根，
+   * 树冠朝外探出云海。根压在台面下 6 米，树冠顶还在台面以下（高过台面的话从高机位看像几团深绿压在台边上）。
+   * 左右两侧各两棵（横屏镜头看得见），避开石阶、索桥和朝镜头那一侧（约 20°～130°，树冠会伸到镜头跟前成一大块黑影）
+   */
+  cliffPines: [-35, -5, 165, 188].map((d) => ({ az: (d * Math.PI) / 180, y: -6 })),
 };
 
 /**
@@ -121,7 +138,7 @@ function railLayout() {
     run(Array.from({ length: n + 1 }, (_, i) => { const f = f0 + ((f1 - f0) * i) / n; return new THREE.Vector3(Math.cos(f) * RAIL.r, 0, Math.sin(f) * RAIL.r); }));
   };
   const fs = -Math.PI / 2, gs = Math.asin((STAIRS.halfW + 0.6) / RAIL.r);                         // 石阶口
-  const fb = Math.atan2(BRIDGE.a.y, BRIDGE.a.x), gb = Math.asin((BRIDGE.halfW + 0.5) / RAIL.r);   // 桥头（让开两根拴铁链的石桩）
+  const fb = BRIDGE_AZ, gb = Math.asin((BRIDGE.halfW + 0.5) / RAIL.r);   // 桥头（让开两根拴铁链的石桩）
   arc(fb + gb, fs - gs);
   arc(fs + gs, fb - gb + Math.PI * 2);
   // 石阶两侧立在矮石边上（plaza.js 的 curb：中线在 halfW + 0.25，顶面比台阶的斜线高 0.616）；到云面（y = -9）附近为止。

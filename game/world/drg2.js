@@ -103,3 +103,42 @@ export function topOf(geo) {
   ys.sort((a, b) => a - b);
   return { H, W: (x1 - x0 + z1 - z0) / 2, x: (tx0 + tx1) / 2, z: (tz0 + tz1) / 2, y: ys[ys.length >> 1] ?? H };
 }
+
+/**
+ * 山石顶上能种树的地方（模型坐标）：朝上（三个顶点法线的平均 y > 0.8）、高过 0.85H 的三角形中心。
+ * 从离顶面中心最近的一个开始，每次挑离已挑的都最远的（尽量铺开），最多 n 个；所以排在前面的靠中间、后面的靠边。
+ * @param {THREE.BufferGeometry} geo 底面在 y = 0 @param {number} n
+ */
+export function flatSpots(geo, n) {
+  const p = geo.attributes.position, nm = geo.attributes.normal, idx = /** @type {THREE.BufferAttribute} */ (geo.index), top = topOf(geo);
+  /** @type {THREE.Vector3[]} */
+  const cand = [];
+  for (let i = 0; i < idx.count; i += 3) {
+    const [a, b, c] = [idx.getX(i), idx.getX(i + 1), idx.getX(i + 2)];
+    const y = (p.getY(a) + p.getY(b) + p.getY(c)) / 3;
+    if (y < top.H * 0.85 || (nm.getY(a) + nm.getY(b) + nm.getY(c)) / 3 < 0.8) continue;
+    cand.push(new THREE.Vector3((p.getX(a) + p.getX(b) + p.getX(c)) / 3, y, (p.getZ(a) + p.getZ(b) + p.getZ(c)) / 3));
+  }
+  if (!cand.length) return [];
+  const flat = (/** @type {THREE.Vector3} */ u, /** @type {THREE.Vector3} */ v) => Math.hypot(u.x - v.x, u.z - v.z);
+  const centre = new THREE.Vector3(top.x, 0, top.z);
+  const out = [cand.reduce((best, q) => (flat(q, centre) < flat(best, centre) ? q : best))];
+  const gap = cand.map((q) => flat(q, out[0]));
+  while (out.length < n) {
+    let k = 0;
+    for (let i = 1; i < cand.length; i++) if (gap[i] > gap[k]) k = i;
+    if (gap[k] < 1e-6) break;
+    out.push(cand[k]);
+    cand.forEach((q, i) => { gap[i] = Math.min(gap[i], flat(q, cand[k])); });
+  }
+  return out;
+}
+
+/** 树根在哪（模型坐标，底面一薄层顶点的平均）：黄山松的根在一头，摆的时候按根对位置 @param {THREE.BufferGeometry} geo */
+export function rootOf(geo) {
+  const p = geo.attributes.position;
+  let H = 0, x = 0, z = 0, k = 0;
+  for (let i = 0; i < p.count; i++) H = Math.max(H, p.getY(i));
+  for (let i = 0; i < p.count; i++) if (p.getY(i) < H * 0.04) { x += p.getX(i); z += p.getZ(i); k++; }
+  return new THREE.Vector3(x / Math.max(k, 1), 0, z / Math.max(k, 1));
+}
