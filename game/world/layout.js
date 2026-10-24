@@ -6,7 +6,7 @@
  *   - 石阶口进来是山门牌坊（10-21 换成模型：宽 13 米、高约 9.6 米，往广场里收了 2 米才放得下），
  *     门洞正中两根铁链吊着镇山石，牌坊前两只石兽；两侧香炉；华表立在牌坊到阵眼的路两旁；
  *   - 施法者站在阵眼前面，阵眼破了就输。
- * 模型（牌坊、石兽、镇山石）由 props.js 加载后摆到这里给的位置；没加载出来时用这里的方块占位。
+ * 模型（牌坊、石兽、镇山石、香炉、华表、栏杆、山石）由 props.js 加载后摆到这里给的位置；没加载出来时用这里的方块占位（栏杆没有占位）。
  * 台面、台沿、台底山石、石阶在 plaza.js（10-23 照目标图重做）。
  */
 import * as THREE from 'three';
@@ -30,21 +30,26 @@ export const GATE = { z: -8.6, height: 9.64, openTop: 6.46, pillarX: 3.58 };
 const LION = { x: 3.58, z: -6.4, turn: 0.3 };
 /** 镇山石：直径 1.8、连顶上铁环高 1.95；环顶比门洞顶低 0.5，石头底离地约 4 米，巨像（约 3.3 米）过得去 */
 const STONE = { ringTop: GATE.openTop - 0.5, height: 1.95 };
-/** 华表：从横屏机位看正好叠在两组柱子前面，不挡门洞 */
+/**
+ * 华表：从横屏机位看正好叠在两组柱子前面，不挡门洞。模型（10-24）高 4.6、云板横着伸出 1.62、八角底座宽约 1.1
+ * （尺寸取自打包后的模型）
+ */
 const HUABIAO_X = 4.2, HUABIAO_Z = -3.0;
+/** 香炉：广场两侧（目标图里在正中，但广场中间是敌人的路）。模型高 1.5、连龙耳宽 1.54、四足落地约 1.06 见方 */
+const CENSER_X = 7.2, CENSER_Z = 1.5;
 
 /** 场景物件的位置（玩家可以点名的目标） */
 export const OBJECTS = {
   rope: { x: 0, z: GATE.z },
-  censer: { x: -7.2, z: 1.5 },
+  censer: { x: -CENSER_X, z: CENSER_Z },
   bridge: { x: (BRIDGE.a.x + BRIDGE.b.x) / 2, z: (BRIDGE.a.y + BRIDGE.b.y) / 2 },
   pillar: { x: -HUABIAO_X, z: HUABIAO_Z },
 };
 
 /** 广场上的固定障碍（敌人寻路绕开）：华表、香炉、牌坊两组柱子、石兽 */
 export const OBSTACLES = [
-  { x: -HUABIAO_X, z: HUABIAO_Z, r: 0.45 }, { x: HUABIAO_X, z: HUABIAO_Z, r: 0.45 },
-  { x: -7.2, z: 1.5, r: 0.7 }, { x: 7.2, z: 1.5, r: 0.7 },
+  { x: -HUABIAO_X, z: HUABIAO_Z, r: 0.6 }, { x: HUABIAO_X, z: HUABIAO_Z, r: 0.6 },
+  { x: -CENSER_X, z: CENSER_Z, r: 0.7 }, { x: CENSER_X, z: CENSER_Z, r: 0.7 },
   { x: -GATE.pillarX, z: GATE.z, r: 1.5 }, { x: GATE.pillarX, z: GATE.z, r: 1.5 },
   { x: -LION.x, z: LION.z, r: 1.0 }, { x: LION.x, z: LION.z, r: 1.0 },
 ];
@@ -61,7 +66,7 @@ export const SOLIDS = [
   box(-6.5, 6.5, GATE.openTop, GATE.height, GATE.z - 1.39, GATE.z + 1.39),
   box(-0.9, 0.9, STONE_BOTTOM, STONE.ringTop, GATE.z - 0.9, GATE.z + 0.9),
   ...[-1, 1].map((s) => box(s * LION.x - 1.04, s * LION.x + 1.04, 0, 3, LION.z - 1.03, LION.z + 1.03)),
-  ...[-1, 1].map((s) => box(s * HUABIAO_X - 0.7, s * HUABIAO_X + 0.7, 0, 4.6, HUABIAO_Z - 0.4, HUABIAO_Z + 0.4)),
+  ...[-1, 1].map((s) => box(s * HUABIAO_X - 0.81, s * HUABIAO_X + 0.81, 0, 4.6, HUABIAO_Z - 0.57, HUABIAO_Z + 0.57)),
 ];
 
 /** 模型摆放的位置（props.js 用）：牌坊、两只石兽（右边那只镜像）、镇山石（模型原点在底面中心） */
@@ -69,6 +74,9 @@ export const PROP_SPOTS = {
   gate: { x: 0, y: 0, z: GATE.z, rotY: 0, mirror: false },
   lions: [{ x: -LION.x, y: 0, z: LION.z, rotY: LION.turn, mirror: false }, { x: LION.x, y: 0, z: LION.z, rotY: -LION.turn, mirror: true }],
   stone: { x: 0, y: STONE_BOTTOM, z: GATE.z, rotY: 0, mirror: false },
+  /** 香炉两只都朝镜头（两只龙耳左右伸开）；华表两根，右边那根镜像（两根的盘龙左右对称） */
+  censers: [-1, 1].map((s) => ({ x: s * CENSER_X, y: 0, z: CENSER_Z, rotY: 0, mirror: false })),
+  huabiao: [-1, 1].map((s) => ({ x: s * HUABIAO_X, y: 0, z: HUABIAO_Z, rotY: 0, mirror: s > 0 })),
   /**
    * 中景（离广场 35～65 米）：牌坊两边各两块，牌坊背后不放（会从门洞里露出来、跟石阶上来的敌人搅在一起）。
    * rock-a 是高石柱（打包成 30 米高），底下那截插进云海（云面 y = -9）；rock-b 是浮岛（20 米宽），悬在半空。scale 乘在打包尺寸上。
@@ -87,6 +95,45 @@ export const PROP_SPOTS = {
   peak: { model: 'rock-a', top: [PEAK.c.x, -0.9, PEAK.c.y], rotY: 0.8, scale: 1.5 },
   base: { model: 'rock-b', top: [0, -1.75, 0], rotY: 0, scale: 1 },
 };
+
+/**
+ * 栏杆（望柱 + 栏板两种模型，props.js 实例化一次画完）：台边一圈，石阶口、桥头断开；石阶两侧顺着矮石边往下，到云面为止。
+ * 望柱竖着立在每个接头上；栏板给两头底边的中点 a、b——台边上是平的弦，石阶上带着坡（props.js 把栏板错切成斜的，竖线仍竖着）。
+ * 尺寸取自打包后的模型：望柱 0.24 见方、高 1.15；栏板长 2.41、高 0.85。每段不到一块栏板长就压一压、多一点就拉一拉。
+ */
+const RAIL = { r: PLAZA_R - 0.05, postW: 0.24, seg: 2.65 };
+function railLayout() {
+  /** @type {{ x: number, y: number, z: number, rotY: number }[]} */
+  const posts = [];
+  /** @type {{ a: THREE.Vector3, b: THREE.Vector3 }[]} */
+  const panels = [];
+  /** 依次连起来的一串接头（底面中心）：每个接头一根望柱，相邻两根之间一块栏板（两头插进望柱一点） @param {THREE.Vector3[]} pts */
+  const run = (pts) => pts.forEach((p, i) => {
+    const o = pts[Math.max(i - 1, 0)], q = pts[Math.min(i + 1, pts.length - 1)];
+    posts.push({ x: p.x, y: p.y, z: p.z, rotY: Math.atan2(-(q.z - o.z), q.x - o.x) });   // 方柱的面顺着栏杆
+    if (i + 1 === pts.length) return;
+    const f = (RAIL.postW / 2 - 0.02) / Math.hypot(q.x - p.x, q.z - p.z);
+    panels.push({ a: p.clone().lerp(q, f), b: q.clone().lerp(p, f) });
+  });
+  /** 台边的一段圆弧（角度从 +x 往 +z 量） @param {number} f0 @param {number} f1 */
+  const arc = (f0, f1) => {
+    const n = Math.max(1, Math.round(((f1 - f0) * RAIL.r) / RAIL.seg));
+    run(Array.from({ length: n + 1 }, (_, i) => { const f = f0 + ((f1 - f0) * i) / n; return new THREE.Vector3(Math.cos(f) * RAIL.r, 0, Math.sin(f) * RAIL.r); }));
+  };
+  const fs = -Math.PI / 2, gs = Math.asin((STAIRS.halfW + 0.6) / RAIL.r);                         // 石阶口
+  const fb = Math.atan2(BRIDGE.a.y, BRIDGE.a.x), gb = Math.asin((BRIDGE.halfW + 0.5) / RAIL.r);   // 桥头（让开两根拴铁链的石桩）
+  arc(fb + gb, fs - gs);
+  arc(fs + gs, fb - gb + Math.PI * 2);
+  // 石阶两侧立在矮石边上（plaza.js 的 curb：中线在 halfW + 0.25，顶面比台阶的斜线高 0.616）；到云面（y = -9）附近为止。
+  // 右边那串倒着排，两边栏板的正面都朝石阶
+  const k = -STAIRS.yBottom / (STAIRS.zTop - STAIRS.zBottom), z0 = -11, z1 = -24.6, n = Math.round((z0 - z1) / RAIL.seg);
+  for (const s of [-1, 1]) {
+    const pts = Array.from({ length: n + 1 }, (_, i) => { const z = z0 + ((z1 - z0) * i) / n; return new THREE.Vector3(s * (STAIRS.halfW + 0.25), k * (z - STAIRS.zTop) + 0.616, z); });
+    run(s > 0 ? pts.reverse() : pts);
+  }
+  return { posts, panels };
+}
+export const RAILS = railLayout();
 
 /**
  * 某处地面高度；脚下没有地面（悬崖外、云海上空）返回 null。
@@ -145,21 +192,23 @@ export function buildLayout(scene, opts = {}) {
   stoneBox.position.set(0, STONE.ringTop - STONE.height + 0.9, GATE.z);
   scene.add(stoneBox);
 
-  // 华表（牌坊到阵眼的路两旁）与香炉（广场两侧）
+  // 华表（牌坊到阵眼的路两旁）与香炉（广场两侧）：占位，模型到了藏起来
+  const huabiaoBox = new THREE.Group(), censerBox = new THREE.Group();
   for (const sx of [-HUABIAO_X, HUABIAO_X]) {
     const col_ = shadowy(new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.4, 4.6, 12), stone));
     col_.position.set(sx, 2.3, HUABIAO_Z);
     const cap = shadowy(new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.18, 0.4), stone));
     cap.position.set(sx, 3.9, HUABIAO_Z);
-    scene.add(col_, cap);
+    huabiaoBox.add(col_, cap);
   }
-  for (const sx of [-7.2, 7.2]) {
+  for (const sx of [-CENSER_X, CENSER_X]) {
     const bowl = shadowy(new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.5, 0.8, 16), bronze));
-    bowl.position.set(sx, 0.95, 1.5);
+    bowl.position.set(sx, 0.95, CENSER_Z);
     const foot = shadowy(new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.45, 0.6, 10), bronze));
-    foot.position.set(sx, 0.3, 1.5);
-    scene.add(bowl, foot);
+    foot.position.set(sx, 0.3, CENSER_Z);
+    censerBox.add(bowl, foot);
   }
+  scene.add(huabiaoBox, censerBox);
 
   // 索桥 + 邻峰
   const len = BRIDGE.a.distanceTo(BRIDGE.b), nPlank = Math.round(len / 0.48);
@@ -225,7 +274,7 @@ export function buildLayout(scene, opts = {}) {
   caster.position.copy(CASTER_POS);
   scene.add(caster);
 
-  return { coreSigil, crystal, caster, gateBox, stoneBox, peakRock: peak, plaza };
+  return { coreSigil, crystal, caster, gateBox, stoneBox, huabiaoBox, censerBox, peakRock: peak, plaza };
 }
 
 /**
