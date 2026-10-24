@@ -7,9 +7,11 @@
  *     门洞正中两根铁链吊着镇山石，牌坊前两只石兽；两侧香炉；华表立在牌坊到阵眼的路两旁；
  *   - 施法者站在阵眼前面，阵眼破了就输。
  * 模型（牌坊、石兽、镇山石）由 props.js 加载后摆到这里给的位置；没加载出来时用这里的方块占位。
+ * 台面、台沿、台底山石、石阶在 plaza.js（10-23 照目标图重做）。
  */
 import * as THREE from 'three';
-import { canvasTex, col, PALETTE, rng, sigilMat, sigilTex } from '../fx/common.js';
+import { col, PALETTE, sigilMat, sigilTex } from '../fx/common.js';
+import { buildPlaza, rockColumn } from './plaza.js';
 
 export const PLAZA_R = 11;
 export const CORE_POS = new THREE.Vector3(0, 0, 8.6);
@@ -91,64 +93,16 @@ export const PATHS = [
   [[PEAK.c.x, PEAK.c.y], [BRIDGE.b.x, BRIDGE.b.y], [BRIDGE.a.x, BRIDGE.a.y], [-3, 2], [-1.1, CORE_POS.z - 2.2]],
 ].map((pts) => pts.map(([x, z]) => new THREE.Vector3(x, groundHeightAt(x, z) ?? 0, z)));
 
-/** @param {THREE.Scene} scene */
-export function buildLayout(scene) {
-  const R = rng(5);
+/** @param {THREE.Scene} scene @param {{ tex?: number }} [opts] tex：台面贴图边长（电影档 2048、流畅档 1024） */
+export function buildLayout(scene, opts = {}) {
   const stone = new THREE.MeshStandardMaterial({ color: 0xbdb6a8, roughness: 0.9 });
   const darkStone = new THREE.MeshStandardMaterial({ color: 0x8c8578, roughness: 0.95 });
-  const cliffMat = new THREE.MeshStandardMaterial({ color: 0x7d776c, roughness: 1, flatShading: true });
   const wood = new THREE.MeshStandardMaterial({ color: 0x7a5636, roughness: 0.85 });
   const bronze = new THREE.MeshStandardMaterial({ color: 0x6b5a3a, roughness: 0.45, metalness: 0.7 });
   const shadowy = (m) => { m.castShadow = true; m.receiveShadow = true; return m; };
 
-  // 广场地面：浅色石板
-  const tiles = canvasTex(1024, (g, S) => {
-    g.fillStyle = '#9b958a'; g.fillRect(0, 0, S, S);
-    const n = 8, cell = S / n;
-    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-      const l = 66 + R() * 10;
-      g.fillStyle = `hsl(38, 8%, ${l}%)`;
-      g.fillRect(x * cell + 3, y * cell + 3, cell - 6, cell - 6);
-    }
-    for (let i = 0; i < 9000; i++) { g.fillStyle = `rgba(60,50,40,${R() * 0.05})`; g.fillRect(R() * S, R() * S, 2, 2); }
-  });
-  tiles.wrapS = tiles.wrapT = THREE.RepeatWrapping;
-  tiles.repeat.set(5, 5);
-  const top = shadowy(new THREE.Mesh(new THREE.CircleGeometry(PLAZA_R, 72),
-    new THREE.MeshStandardMaterial({ map: tiles, roughness: 0.92 })));
-  top.rotation.x = -Math.PI / 2;
-  scene.add(top);
-  const rim = shadowy(new THREE.Mesh(new THREE.CylinderGeometry(PLAZA_R + 0.05, PLAZA_R + 0.05, 0.7, 72, 1, true), darkStone));
-  rim.position.y = -0.35;
-  scene.add(rim);
-
-  // 广场下面的山体：往下收窄、表面起伏，插进云海
-  const cliffGeo = new THREE.CylinderGeometry(PLAZA_R, 6, 20, 40, 6);
-  const cp = cliffGeo.attributes.position;
-  for (let i = 0; i < cp.count; i++) {
-    const y = cp.getY(i);
-    if (y < 9.9) { const k = 0.82 + R() * 0.3; cp.setX(i, cp.getX(i) * k); cp.setZ(i, cp.getZ(i) * k); }
-  }
-  cliffGeo.computeVertexNormals();
-  const cliff = shadowy(new THREE.Mesh(cliffGeo, cliffMat));
-  cliff.position.y = -10.7;
-  scene.add(cliff);
-
-  // 石阶：16 级，从云海里升到广场边缘
-  const N = 16, depth = (STAIRS.zTop - STAIRS.zBottom) / N, rise = -STAIRS.yBottom / N;
-  const stepGeo = new THREE.BoxGeometry(STAIRS.halfW * 2, rise, depth);
-  const steps = new THREE.InstancedMesh(stepGeo, stone, N);
-  const m4 = new THREE.Matrix4();
-  for (let i = 0; i < N; i++) {
-    m4.makeTranslation(0, -rise * (i + 0.5), STAIRS.zTop - depth * (i + 0.5));
-    steps.setMatrixAt(i, m4);
-  }
-  steps.castShadow = steps.receiveShadow = true;
-  scene.add(steps);
-  const ramp = shadowy(new THREE.Mesh(new THREE.BoxGeometry(STAIRS.halfW * 2 + 0.6, 4, STAIRS.zTop - STAIRS.zBottom + 1), darkStone));
-  ramp.position.set(0, STAIRS.yBottom / 2 - 2.1, (STAIRS.zTop + STAIRS.zBottom) / 2);
-  ramp.rotation.x = -Math.atan2(-STAIRS.yBottom, STAIRS.zTop - STAIRS.zBottom);   // 靠广场（+z）那头高
-  scene.add(ramp);
+  // 广场本体：汉白玉台面（刻阵纹）、台沿浮雕、台底山石、石阶（plaza.js）
+  const plaza = buildPlaza(scene, { R: PLAZA_R, stairs: STAIRS, tex: opts.tex ?? 2048 });
 
   // 山门牌坊（占位：两组白石柱 + 横梁 + 蓝屋顶，尺寸同模型；模型加载出来就藏起来）
   const marble = new THREE.MeshStandardMaterial({ color: 0xd9d4ca, roughness: 0.6 });
@@ -193,7 +147,7 @@ export function buildLayout(scene) {
   // 索桥 + 邻峰
   const len = BRIDGE.a.distanceTo(BRIDGE.b), nPlank = Math.round(len / 0.48);
   const planks = new THREE.InstancedMesh(new THREE.BoxGeometry(BRIDGE.halfW * 2, 0.1, 0.38), wood, nPlank);
-  const yaw = Math.atan2(BRIDGE_DIR.x, BRIDGE_DIR.y);
+  const yaw = Math.atan2(BRIDGE_DIR.x, BRIDGE_DIR.y), m4 = new THREE.Matrix4();
   const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
   for (let i = 0; i < nPlank; i++) {
     const p = BRIDGE.a.clone().addScaledVector(BRIDGE_DIR, (i + 0.5) * (len / nPlank));
@@ -212,15 +166,12 @@ export function buildLayout(scene) {
       }));
     scene.add(new THREE.Line(ropeGeo, new THREE.LineBasicMaterial({ color: 0x4a3626 })));
   }
-  const peakGeo = new THREE.CylinderGeometry(PEAK.r, 2.2, 22, 18, 4);
-  const pp = peakGeo.attributes.position;
-  for (let i = 0; i < pp.count; i++) {
-    if (pp.getY(i) < 10.9) { const k = 0.8 + R() * 0.35; pp.setX(i, pp.getX(i) * k); pp.setZ(i, pp.getZ(i) * k); }
-  }
-  peakGeo.computeVertexNormals();
-  const peak = shadowy(new THREE.Mesh(peakGeo, cliffMat));
+  // 邻峰：索桥那头的山石，顶上一块平台
+  const peak = rockColumn(PEAK.r, 2.2, 22, 11);
   peak.position.set(PEAK.c.x, -11, PEAK.c.y);
-  scene.add(peak);
+  const landing = shadowy(new THREE.Mesh(new THREE.CylinderGeometry(PEAK.r + 0.15, PEAK.r, 0.3, 40), darkStone));
+  landing.position.set(PEAK.c.x, -0.15, PEAK.c.y);
+  scene.add(peak, landing);
 
   // 阵眼：地上一圈发光阵盘 + 悬浮水晶 + 八根石桩
   const coreColor = col(PALETTE.arcane.secondary, 1.6);
@@ -251,7 +202,7 @@ export function buildLayout(scene) {
   caster.position.copy(CASTER_POS);
   scene.add(caster);
 
-  return { coreSigil, crystal, caster, gateBox, stoneBox };
+  return { coreSigil, crystal, caster, gateBox, stoneBox, plaza };
 }
 
 /**

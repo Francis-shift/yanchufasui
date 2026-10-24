@@ -116,7 +116,7 @@ export function start(root, opts = {}) {
 
   const env = buildEnvironment(scene, renderer);
   env.setShadowMap(quality.shadowMap);
-  const layout = buildLayout(scene);
+  const layout = buildLayout(scene, { tex: quality.name === 'cinema' ? 2048 : 1024 });
   if (opts.models) loadProps(scene, layout, quality.name, opts.models, renderer);   // 牌坊、石兽、镇山石的模型，到了替换方块占位
   const particles = new Particles(scene, quality.particles);
   particles.floorAt = (x, z) => (groundHeightAt(x, z) ?? -60) + 0.03;
@@ -900,6 +900,8 @@ export function start(root, opts = {}) {
     const invT = invasionTarget({ phase: S.phase, wave: S.wave, waves: WAVES.length, progress: S.spawned / Math.max(1, S.spawned + S.queue.length) });
     S.inv = lab.inv >= 0 ? lab.inv : stepInvasion(S.inv, invT, S.phase, dt);
     env.setInvasion(S.inv);
+    layout.plaza.setInvasion(S.inv);   // 台面裂缝、焦痕
+    layout.plaza.update(dt);
     layout.coreSigil.rotation.z += dt * 0.2;
     layout.crystal.rotation.y += dt * 0.8;
     layout.crystal.position.y = 1.7 + Math.sin(idleT * 1.6) * 0.12;
