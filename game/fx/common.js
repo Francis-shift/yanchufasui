@@ -14,7 +14,7 @@ export const PALETTE = {
   earth:  { primary: [0.85, 0.55, 0.25], secondary: [1.0, 0.8, 0.5],  core: [1.0, 0.92, 0.8],  sparkGravity: -12, emberGravity: -2, ink: 1.25 },
   arcane: { primary: [1.0, 0.7, 0.26], secondary: [1.0, 0.88, 0.55], core: [1.0, 0.97, 0.88], sparkGravity: -6, emberGravity: 0.4, ink: 0.6 },
   enemy:  { primary: [0.62, 0.32, 1.0], secondary: [0.8, 0.55, 1.0],  core: [0.95, 0.9, 1.0],  sparkGravity: -6, emberGravity: 0.4, ink: 0.6 },
-  thunder: { primary: [0.55, 0.45, 1.0], secondary: [0.95, 0.92, 0.55], core: [0.95, 0.95, 1.0], sparkGravity: -3, emberGravity: 0, ink: 1.0 },
+  thunder: { primary: [1.0, 0.7, 0.18], secondary: [1.0, 0.92, 0.55], core: [1.0, 0.88, 0.55], sparkGravity: -3, emberGravity: 0, ink: 1.0 },   // 金雷（10-21 定）；芯带金，泛光出来的外辉才是暖金色
 };
 
 /** 墨色：接近黑、带一点元素的色相（墨里透出颜色）。a 是刚溅出时，b 是化开以后 @param {number[]} primary */

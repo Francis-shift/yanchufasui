@@ -414,7 +414,8 @@ export class Hud {
 
 /** @param {string} el */
 function elColor(el) {
-  return { fire: '#e8611c', ice: '#2f8de8', wind: '#2fbf86', earth: '#c08a3e', thunder: '#8a5cf0' }[el] || '#5b5bd6';
+  // 雷是金雷（我方用金、紫色只给敌人，10-21 定）；认不出的元素也用金
+  return { fire: '#e8611c', ice: '#2f8de8', wind: '#2fbf86', earth: '#b07a3a', thunder: '#e0a816' }[el] || '#c9a03a';
 }
 
 /** 每一栏来源词旁边注明变成了什么 */

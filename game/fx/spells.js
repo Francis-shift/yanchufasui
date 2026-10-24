@@ -395,51 +395,77 @@ export class SpellFx {
   }
 
   /**
-   * 一道闪电：从 a 到 b 的一条折线（中段抖得最厉害），0.3 秒里闪两下就灭，沿线撒电火花、落点亮一下。
-   * 白天背景很亮，一像素的发光线叠上去就看不见：做成两层管子——白芯（泛光）+ 半透明的紫色外壳（在亮处也有对比）。
-   * @param {THREE.Vector3} a @param {THREE.Vector3} b @param {{ delay?: number, jitter?: number }} [o]
+   * 一道金雷（10-21 定：白芯金黄的细锯齿闪电 + 暖金外辉 + 墨点；紫色留给敌人）：从 a 到 b 的锯齿折线，中段抖得最厉害，
+   * 长的带一两根分叉；0.3 秒里闪两下就灭，亮着时每两帧换一次形状（风格卡"每两帧重画"）；沿线撒电火花、落点溅墨点。
+   * 白天背景是白石头和金色的天，金色叠上去没有对比：外壳用深一点的琥珀色、普通混合，在背景上压出一道边；
+   * 白芯大于 1，过泛光就是那圈暖金外辉。
+   * @param {THREE.Vector3} a @param {THREE.Vector3} b @param {{ delay?: number, jitter?: number, forks?: number }} [o]
    */
   arc(a, b, o = {}) {
     const pal = PALETTE.thunder;
     const len = a.distanceTo(b), n = Math.max(6, Math.round(len * 2.2));
     const jitter = o.jitter ?? Math.min(0.9, 0.12 + len * 0.05);
-    const dir = b.clone().sub(a);
-    const pts = [];
-    for (let i = 0; i <= n; i++) {
-      const q = a.clone().addScaledVector(dir, i / n);
-      if (i > 0 && i < n) q.add(randDir().multiplyScalar(jitter * Math.sin((Math.PI * i) / n) + 0.04));
-      pts.push(q);
-    }
-    const path = /** @type {THREE.CurvePath<THREE.Vector3>} */ (new THREE.CurvePath());
-    for (let i = 0; i < n; i++) path.add(new THREE.LineCurve3(pts[i], pts[i + 1]));
-    const coreGeo = new THREE.TubeGeometry(path, n * 2, 0.05, 5, false);
-    const shellGeo = new THREE.TubeGeometry(path, n * 2, 0.16, 6, false);
-    const coreMat = new THREE.MeshBasicMaterial({ color: col(pal.core, 3.2), transparent: true, opacity: 0, fog: false, depthWrite: false });
-    const mat = new THREE.MeshBasicMaterial({ color: col([0.42, 0.28, 1.0], 1.1), transparent: true, opacity: 0, fog: false, depthWrite: false });
+    const forks = o.forks ?? (len > 3 ? 1 + Math.floor(Math.random() * 2) : 0);
+    /** 一条锯齿折线：两头钉住，中段抖得最厉害 */
+    const zig = (from, to, segs, amp) => {
+      const d = to.clone().sub(from), pts = [];
+      for (let i = 0; i <= segs; i++) {
+        const q = from.clone().addScaledVector(d, i / segs);
+        if (i > 0 && i < segs) q.add(randDir().multiplyScalar(amp * Math.sin((Math.PI * i) / segs) + 0.04));
+        pts.push(q);
+      }
+      return pts;
+    };
+    const tube = (pts, r, radial) => {
+      const path = /** @type {THREE.CurvePath<THREE.Vector3>} */ (new THREE.CurvePath());
+      for (let i = 0; i < pts.length - 1; i++) path.add(new THREE.LineCurve3(pts[i], pts[i + 1]));
+      return new THREE.TubeGeometry(path, (pts.length - 1) * 2, r, radial, false);
+    };
+    // 白芯 2.2 倍：3 倍时在白石头上泛光糊成一大片白（风格卡禁止"命中整屏发白"，实测）
+    const coreMat = new THREE.MeshBasicMaterial({ color: col(pal.core, 2.2), transparent: true, opacity: 0, fog: false, depthWrite: false });
+    const shellMat = new THREE.MeshBasicMaterial({ color: col([0.8, 0.4, 0.05]), transparent: true, opacity: 0, fog: false, depthWrite: false });
     const line = new THREE.Group();
-    line.add(new THREE.Mesh(shellGeo, mat), new THREE.Mesh(coreGeo, coreMat));
     this.scene.add(line);
-    let t = -(o.delay || 0), lit = false;
+    let main = /** @type {THREE.Vector3[]} */ ([]);
+    const build = () => {
+      for (const m of /** @type {THREE.Mesh[]} */ (line.children)) m.geometry.dispose();
+      line.clear();
+      main = zig(a, b, n, jitter);
+      const paths = [[main, 1]];
+      for (let f = 0; f < forks; f++) {
+        const from = main[Math.floor(n * (0.25 + Math.random() * 0.5))];
+        const rest = b.clone().sub(from), fl = rest.length() * (0.25 + Math.random() * 0.25);
+        const to = from.clone().add(rest.normalize().add(randDir().multiplyScalar(0.9)).normalize().multiplyScalar(fl));
+        paths.push([zig(from, to, Math.max(3, Math.round(fl * 2.5)), jitter * 0.6), 0.55]);
+      }
+      for (const [pts, w] of /** @type {[THREE.Vector3[], number][]} */ (paths)) {
+        const shell = new THREE.Mesh(tube(pts, 0.13 * w, 6), shellMat), core = new THREE.Mesh(tube(pts, 0.045 * w, 5), coreMat);
+        core.renderOrder = 1;   // 白芯画在外壳上面
+        line.add(shell, core);
+      }
+    };
+    build();
+    let t = -(o.delay || 0), lit = false, since = 0;
     this.fx.push({
       update: (dt) => {
         t += dt;
         if (t < 0) return true;
         if (!lit) {
           lit = true;
-          for (const q of pts) {
-            for (let k = 0; k < 3; k++) {
-              this.p.emit(q.x, q.y, q.z, rand(-1, 1), rand(-1, 1), rand(-1, 1), rand(0.1, 0.22), rand(0.05, 0.11),
-                scaleArr(pal.core, 3), scaleArr(pal.primary, 1.6), { drag: 5, alpha: 0.9 });
+          for (const q of main) {   // 电火花：金黄（白的叠在白石头上看不见，还会糊成一片）
+            for (let k = 0; k < 2; k++) {
+              this.p.emit(q.x, q.y, q.z, rand(-1, 1), rand(-1, 1), rand(-1, 1), rand(0.1, 0.22), rand(0.05, 0.1),
+                scaleArr(pal.secondary, 1.8), scaleArr(pal.primary, 1.2), { drag: 5, alpha: 0.9 });
             }
           }
           for (let k = 0; k < 18; k++) {
             const v = randDir().multiplyScalar(rand(2, 7));
             this.p.emit(b.x, b.y, b.z, v.x, Math.abs(v.y), v.z, rand(0.2, 0.45), rand(0.04, 0.08),
-              scaleArr(pal.secondary, 3), scaleArr(pal.primary, 1.2), { drag: 2.5, grav: pal.sparkGravity });
+              scaleArr(pal.secondary, 2), scaleArr(pal.primary, 1.2), { drag: 2.5, grav: pal.sparkGravity });
           }
           this.blastLight.position.copy(b).setY(b.y + 0.8);
           this.blastLight.color.copy(col(pal.primary));
-          this.blastT = 0; this.blastBoost = 0.5;
+          this.blastT = 0; this.blastBoost = 0.15;   // 金光亮度高，照在白石头上一下就过泛光阈值，比紫雷时调低
           this.shake = Math.max(this.shake, 0.12);
           this.impact(b, 0.35);
           if (this.ink) {   // 落雷处溅起墨点（沧元图式：亮线配墨点）
@@ -450,13 +476,19 @@ export class SpellFx {
             }
           }
         }
+        since += dt;
+        if (since > 0.035) { since = 0; build(); }   // 约两帧换一次形状（游戏时间，慢放时也跟着慢）
         const k = t / 0.32;
         const a1 = k < 0.25 ? 1 : k < 0.4 ? 0.15 : k < 0.55 ? 0.95 : Math.max(0, 1 - k);   // 闪两下
         coreMat.opacity = a1;
-        mat.opacity = a1 * 0.6;
+        shellMat.opacity = a1 * 0.7;
         return k < 1;
       },
-      dispose: () => { this.scene.remove(line); coreGeo.dispose(); shellGeo.dispose(); coreMat.dispose(); mat.dispose(); },
+      dispose: () => {
+        this.scene.remove(line);
+        for (const m of /** @type {THREE.Mesh[]} */ (line.children)) m.geometry.dispose();
+        coreMat.dispose(); shellMat.dispose();
+      },
     });
   }
 
