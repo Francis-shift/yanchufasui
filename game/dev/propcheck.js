@@ -79,6 +79,8 @@ export function startPropCheck(root, assets) {
     ready, spots: PROP_SPOTS, scene, renderer, env,
     /** @param {keyof typeof VIEWS} v */
     view: (v) => { view = v; render(); return v; },
+    /** 随手摆一个机位（看台面细节、找夕阳的反光） @param {number[]} p 镜头位置 @param {number[]} t 看的点 */
+    cam: (p, t) => { VIEWS.model = [p, t]; view = 'model'; render(); },
     snap: (sw = 960, sh = 540) => { w = sw; h = sh; render(); return renderer.domElement.toDataURL('image/jpeg', 0.8); },
     /**
      * 单看一件还没摆进场景的模型：底面贴地放在广场上 (0, 0, 3)，转 rotY，镜头从正前方偏右看（看根在哪、往哪边伸）

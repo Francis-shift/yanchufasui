@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 import { decodeDRG2, fetchBytes, flatSpots, rootOf, rootRim, staticGeometry, topOf } from './drg2.js';
 import { LANTERNS, PROP_SPOTS, RAILS } from './layout.js';
-import { meltIntoClouds } from './plaza.js';
+import { meltIntoClouds, useStoneMaps } from './plaza.js';
 
 /**
  * 每个物件：颜色贴图在电影档 / 流畅档各用多大，材质贴图多大（文件名见打包脚本）。
@@ -217,6 +217,9 @@ export function loadProps(scene, layout, tier, src, renderer, env) {
   };
 
   return Promise.all([
+    // 台面的实拍石材（CC0，不是模型，跟模型放在同一个目录下载）：没到就一直是代码画的台面
+    Promise.all([tex(url('stone-normal.webp'), false), tex(url('stone-detail.webp'), false), tex(url('stone-marble.webp'), true)])
+      .then(([n, d, m]) => useStoneMaps(n, d, m)).catch(warn('stone-*')),
     load('gate').then((m) => { place(m, PROP_SPOTS.gate); layout.gateBox.visible = false; }).catch(warn('gate')),
     load('lion').then((m) => { for (const s of PROP_SPOTS.lions) place(m, s); }).catch(warn('lion')),
     load('stone').then((m) => { place(m, PROP_SPOTS.stone); layout.stoneBox.visible = false; }).catch(warn('stone')),

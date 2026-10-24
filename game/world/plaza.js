@@ -1,8 +1,10 @@
 // @ts-check
 /**
  * 广场本体（10-23 照目标图 素材/概念图/山门广场-傍晚.webp 重做）：汉白玉台面、台沿浮雕、台底山石、石阶。
- * 贴图全用代码在画布上画，不占下载：
+ * 贴图大多用代码在画布上画，不占下载：
  *   - 台面：一圈圈扇形石板，正中刻阵纹（同心槽、卷云、八卦、刻度），刻槽里描金；抛光，夕阳下有光泽；
+ *     缝口倒斜边、积灰，边角有崩口；常走的路磨光、东西脚下积灰（生活痕迹图）；
+ *     石面的细纹、凹坑和大理石纹叠一层实拍的 CC0 贴图（三张共约 160 KB，跟模型一起下载，见 useStoneMaps）；
  *   - 台沿：一圈浮雕石板（框 + 卷云），上下两道线脚，石阶口断开；
  *   - 台底：往下收窄的山石，竖向起棱，凹处暗，朝上的面长青苔；
  *   - 入侵（风格卡"入侵进程"）：台面的裂缝和焦痕从敌人来的那一侧长出来，越往后越多，裂缝里透紫光（紫色只给敌人）。
@@ -89,18 +91,31 @@ function engraving(line) {
 }
 
 /**
- * 台面两张贴图：颜色、辅助（R 高度，G 粗糙度）。石板的色调和缝在两张里一一对应
+ * 台面两张贴图：颜色、辅助（R 高度，G 粗糙度，B 石板编号：着色器按它给每块石板转一个角度叠石纹，缝里是 0）。
+ * 石板的色调和缝在两张里一一对应
  * @param {number} S @param {number} R @param {number[][]} [rings] 石板怎么铺（邻峰落脚台另给一套） @param {boolean} [engrave] 刻不刻阵纹
  */
 function floorTextures(S, R, rings = RINGS, engrave = true) {
-  const rnd = rng(23), slabs = [], dens = (R / 11) ** 2;   // 细纹、斑点按面积撒，小台子不会更脏
+  const rnd = rng(23), idr = rng(41), slabs = [], dens = (R / 11) ** 2;   // 斑点、崩口按面积撒，小台子不会更脏
   rings.forEach(([r0, r1, n], ri) => {
     const off = rnd() * Math.PI * 2, edge = ri === rings.length - 1;
     for (let k = 0; k < n; k++) {
       slabs.push({ r0, r1, a0: off + (k / n) * Math.PI * 2, a1: off + ((k + 1) / n) * Math.PI * 2, edge,
-        l: (edge ? 79 : 85) + rnd() * 5, s: 10 + rnd() * 6, rough: (edge ? 130 : 92) + rnd() * 26 });
+        l: (edge ? 79 : 85) + rnd() * 5, s: 10 + rnd() * 6, rough: (edge ? 130 : 92) + rnd() * 26, id: 16 + Math.floor(idr() * 240) });
     }
   });
+  // 崩口：石板边角上磕掉的小块（跨在缝上，露出新鲜的白茬）
+  const chips = [];
+  for (let i = 0; i < 70 * dens; i++) {
+    const s = slabs[Math.floor(idr() * slabs.length)];
+    if (!s.r0) continue;
+    const onArc = idr() < 0.5, a = onArc ? s.a0 + (s.a1 - s.a0) * (0.15 + idr() * 0.7) : s.a0, r = onArc ? s.r1 : s.r0 + (s.r1 - s.r0) * idr();
+    const size = 0.03 + idr() * 0.05, pts = [];
+    for (let j = 0; j < 6; j++) { const b = (j / 6) * Math.PI * 2, d = size * (0.5 + idr() * 0.6); pts.push([Math.cos(a) * r + Math.cos(b) * d, Math.sin(a) * r + Math.sin(b) * d]); }
+    chips.push(pts);
+  }
+  /** @param {CanvasRenderingContext2D} g */
+  const chipPaths = (g) => { g.beginPath(); for (const p of chips) { g.moveTo(p[0][0], p[0][1]); for (const q of p.slice(1)) g.lineTo(q[0], q[1]); g.closePath(); } };
   const sector = (g, s) => { g.beginPath(); if (s.r0 > 0) g.arc(0, 0, s.r0, s.a0, s.a1); else g.moveTo(0, 0); g.arc(0, 0, s.r1, s.a1, s.a0, true); g.closePath(); };
   const joints = (g) => {
     g.beginPath();
@@ -114,22 +129,18 @@ function floorTextures(S, R, rings = RINGS, engrave = true) {
     g.fillStyle = '#8f877a'; g.fillRect(0, 0, S, S);
     toMeters(g);
     for (const s of slabs) { sector(g, s); g.fillStyle = `hsl(40, ${s.s}%, ${s.l}%)`; g.fill(); }
-    // 汉白玉的细纹和斑点（同一个随机序列，每次打开都一样）
+    // 斑点（同一个随机序列，每次打开都一样）；石纹交给实拍的大理石贴图（着色器里叠）
     const vr = rng(71);
-    for (let i = 0; i < 320 * dens; i++) {
-      const a = vr() * Math.PI * 2, r = Math.sqrt(vr()) * R, x = Math.cos(a) * r, y = Math.sin(a) * r, d = 0.4 + vr() * 1.4, b = vr() * Math.PI * 2;
-      g.strokeStyle = `rgba(110, 100, 88, ${0.05 + vr() * 0.09})`; g.lineWidth = 0.006 + vr() * 0.016;
-      g.beginPath(); g.moveTo(x, y);
-      g.bezierCurveTo(x + Math.cos(b) * d * 0.4 + (vr() - 0.5) * 0.4, y + Math.sin(b) * d * 0.4 + (vr() - 0.5) * 0.4,
-        x + Math.cos(b) * d * 0.7 + (vr() - 0.5) * 0.4, y + Math.sin(b) * d * 0.7 + (vr() - 0.5) * 0.4, x + Math.cos(b) * d, y + Math.sin(b) * d);
-      g.stroke();
-    }
     for (let i = 0; i < 2600 * dens; i++) {
       const a = vr() * Math.PI * 2, r = Math.sqrt(vr()) * R;
       g.fillStyle = `rgba(90, 80, 70, ${0.04 + vr() * 0.08})`;
       const d = 0.01 + vr() * 0.025; g.fillRect(Math.cos(a) * r, Math.sin(a) * r, d, d);
     }
+    // 缝：两边斜口里积的灰，再一道深缝；崩口是新鲜的白茬，描一圈暗边
+    g.strokeStyle = 'rgba(96, 86, 74, 0.22)'; g.lineWidth = 0.085; joints(g);
     g.strokeStyle = 'rgba(96, 86, 74, 0.8)'; g.lineWidth = 0.028; joints(g);
+    chipPaths(g); g.fillStyle = 'rgba(238, 233, 222, 0.9)'; g.fill();
+    g.strokeStyle = 'rgba(84, 74, 62, 0.45)'; g.lineWidth = 0.006; g.stroke();
     // 刻槽里描金：先一道暗边当槽的阴影，再一道金
     if (engrave) engraving((w, path) => {
       g.beginPath(); path(g);
@@ -144,8 +155,16 @@ function floorTextures(S, R, rings = RINGS, engrave = true) {
   const aux = paint(S, S, (g) => {
     g.fillStyle = 'rgb(200, 110, 0)'; g.fillRect(0, 0, S, S);
     toMeters(g);
-    for (const s of slabs) { sector(g, s); g.fillStyle = `rgb(${s.edge ? 190 : 200}, ${Math.round(s.rough)}, 0)`; g.fill(); }
+    for (const s of slabs) { sector(g, s); g.fillStyle = `rgb(${s.edge ? 190 : 200}, ${Math.round(s.rough)}, ${s.id})`; g.fill(); }
+    // 缝口倒斜边：乘法只压低高度（R）、滤色只加粗糙（G），石板编号（B）不动；最里一道缝底编号清零
+    g.globalCompositeOperation = 'multiply';
+    g.strokeStyle = 'rgb(220, 255, 255)'; g.lineWidth = 0.08; joints(g);
+    g.strokeStyle = 'rgb(205, 255, 255)'; g.lineWidth = 0.05; joints(g);
+    g.globalCompositeOperation = 'screen';
+    g.strokeStyle = 'rgb(0, 70, 0)'; g.lineWidth = 0.07; joints(g);
+    g.globalCompositeOperation = 'source-over';
     g.strokeStyle = 'rgb(110, 225, 0)'; g.lineWidth = 0.03; joints(g);
+    chipPaths(g); g.fillStyle = 'rgb(160, 205, 0)'; g.fill();
     if (engrave) engraving((w, path) => {
       g.beginPath(); path(g);
       g.strokeStyle = 'rgb(150, 190, 0)'; g.lineWidth = w + 0.03; g.stroke();   // 槽口斜边
@@ -153,6 +172,94 @@ function floorTextures(S, R, rings = RINGS, engrave = true) {
     });
   }, false);
   return { color, aux };
+}
+
+/**
+ * 生活痕迹（R 走得多、磨光了的地方，G 积灰，B 留给雨后积水）：按米画，跟台面贴图同一套坐标。
+ * 叠加着画（'lighter'），三个通道互不干扰
+ * @param {number} S @param {number} R @param {Wear} wear
+ * @typedef {{ walks?: { pts: number[][], w: number }[], grime?: number[][] }} Wear walks：常走的路（折线 [x, z]、宽）；grime：东西脚下 [x, z, 横半径, 纵半径]
+ */
+function wearTexture(S, R, wear) {
+  return paint(S, S, (g) => {
+    g.fillStyle = '#000'; g.fillRect(0, 0, S, S);
+    const k = S / (2 * R); g.setTransform(k, 0, 0, k, S / 2, S / 2);
+    g.globalCompositeOperation = 'lighter';
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    // 路：宽窄不同的几层淡笔叠起来，中间磨得最光、往两边渐淡
+    for (const { pts, w } of wear.walks ?? []) {
+      for (let i = 0; i < 6; i++) {
+        g.strokeStyle = 'rgba(255, 0, 0, 0.13)'; g.lineWidth = w * (1.4 - i * 0.2);
+        g.beginPath(); pts.forEach(([x, z], j) => (j ? g.lineTo(x, z) : g.moveTo(x, z))); g.stroke();
+      }
+    }
+    // 东西脚下：椭圆的软边
+    for (const [x, z, rx, rz] of wear.grime ?? []) {
+      g.save(); g.translate(x, z); g.scale(rx, rz);
+      const gr = g.createRadialGradient(0, 0, 0.5, 0, 0, 1.35);
+      gr.addColorStop(0, 'rgba(0, 210, 0, 1)'); gr.addColorStop(1, 'rgba(0, 210, 0, 0)');
+      g.fillStyle = gr; g.beginPath(); g.arc(0, 0, 1.35, 0, Math.PI * 2); g.fill();
+      g.restore();
+    }
+    // 台边一圈（栏杆脚下，没人走）
+    const rim = g.createRadialGradient(0, 0, R - 1.8, 0, 0, R);
+    rim.addColorStop(0, 'rgba(0, 0, 0, 0)'); rim.addColorStop(1, 'rgba(0, 160, 0, 1)');
+    g.fillStyle = rim; g.beginPath(); g.arc(0, 0, R, 0, Math.PI * 2); g.fill();
+  }, false);
+}
+
+/**
+ * 实拍的石材细节（10-24 本人嫌台面"太塑料"：太平、太匀、反光一个样）。CC0 贴图，props.js 跟模型一起下载，到了交给 useStoneMaps；
+ * 没到之前 uStone = 0，台面只有代码画的那层：
+ *   - 法线、细节（R 凹坑的 AO、G 粗糙度、B 明暗）取自 Poly Haven 的 plaster_grey_04（风化的灰白石面），1.6 米铺一块；
+ *   - 颜色取自 ambientCG 的 Marble014（米白大理石带浅褐纹），每块石板按编号转个角度、错开一段，石纹不跨缝。
+ * 下载后怎么压成三张小图见 docs/设计文档.md 的素材来源
+ */
+const flat = (/** @type {number[]} */ ...c) => { const t = new THREE.DataTexture(new Uint8Array([...c, 255]), 1, 1); t.needsUpdate = true; return /** @type {THREE.Texture} */ (t); };
+const STONE = { n: { value: flat(128, 128, 255) }, d: { value: flat(122, 212, 128) }, m: { value: flat(209, 196, 177) }, on: { value: 0 } };
+/** @param {THREE.Texture} n 法线 @param {THREE.Texture} d 细节 @param {THREE.Texture} m 大理石颜色（sRGB） */
+export function useStoneMaps(n, d, m) {
+  for (const t of [n, d, m]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.needsUpdate = true; }
+  STONE.n.value = n; STONE.d.value = d; STONE.m.value = m; STONE.on.value = 1;
+}
+
+/**
+ * 台面材质：代码画的石板（颜色、凹凸、粗糙度、编号）叠上实拍石材和生活痕迹。
+ * 细节贴图大理石那张的平均色（线性）是 (0.63, 0.55, 0.43)，除掉它只留明暗起伏；细节的 AO 均值 0.48、粗糙度均值 0.83，同样只取起伏
+ * @param {{ color: THREE.Texture, aux: THREE.Texture }} floor @param {THREE.Texture} wear @param {number} R
+ * @param {{ uniforms: Record<string, { value: any }>, decl: string, color: string, rough: string, emissive: string }} [extra] 广场的入侵损伤
+ */
+function stoneFloor(floor, wear, R, extra) {
+  const mat = new THREE.MeshStandardMaterial({ map: floor.color, roughnessMap: floor.aux, bumpMap: floor.aux, bumpScale: 1.2, roughness: 1 });
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, { uStoneN: STONE.n, uStoneD: STONE.d, uStoneM: STONE.m, uStone: STONE.on, uWear: { value: wear }, uR: { value: R } }, extra?.uniforms);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform sampler2D uStoneN, uStoneD, uStoneM, uWear; uniform float uStone, uR;${extra?.decl ?? ''}`)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+        vec2 sp = (vMapUv * 2. - 1.) * uR;                     // 台面上的位置（米）
+        float sId = texture2D(roughnessMap, vMapUv).b;
+        vec3 sDet = texture2D(uStoneD, sp / 1.6).rgb, sWear = texture2D(uWear, vMapUv).rgb;
+        float sOn = uStone * smoothstep(0.03, 0.06, sId), sa = sId * 97.;   // 缝底、刻槽里编号是 0，不叠石纹
+        mat2 sRot = mat2(cos(sa), sin(sa), -sin(sa), cos(sa));
+        vec2 mp = sRot * sp / 2.6 + fract(vec2(sId * 13.7, sId * 7.3)) * 4.;
+        vec3 sMarble = textureGrad(uStoneM, mp, sRot * dFdx(sp) / 2.6, sRot * dFdy(sp) / 2.6).rgb / vec3(0.63, 0.55, 0.43);
+        diffuseColor.rgb *= mix(vec3(1.), clamp(sMarble, 0.4, 1.3), 0.9 * sOn);
+        diffuseColor.rgb *= 1. + uStone * (0.06 * clamp((sDet.r - 0.48) / 0.06, -2.5, 1.5) + 0.04 * (sDet.b - 0.5) / 0.157) + 0.05 * sWear.r;
+        diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.72, 0.66, 0.58), sWear.g);
+        ${extra?.color ?? ''}`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor *= 1. + uStone * 0.3 * clamp((sDet.g - 0.832) / 0.06, -2., 2.);
+        roughnessFactor = max(roughnessFactor * (1. - 0.35 * sWear.r), 0.24);   // 走得多的地方磨光，夕阳下亮一条；再光就成镜子，朝太阳看白成一片
+        roughnessFactor = mix(roughnessFactor, max(roughnessFactor, 0.8), sWear.g);
+        ${extra?.rough ?? ''}`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        vec3 sN = texture2D(uStoneN, sp / 1.6).xyz * 2. - 1.;  // 贴图右 = +x、上 = +z（贴图不翻转）
+        normal = normalize(normal + uStone * 1.5 * (sN.x * normalize((viewMatrix * vec4(1., 0., 0., 0.)).xyz) + sN.y * normalize((viewMatrix * vec4(0., 0., 1., 0.)).xyz)));`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        ${extra?.emissive ?? ''}`);
+  };
+  return mat;
 }
 
 /**
@@ -346,7 +453,8 @@ export function rockColumn(rTop, rBottom, h, seed) {
 // ---------------------------------------------------------------- 组装
 /**
  * @param {THREE.Scene} scene
- * @param {{ R: number, stairs: { halfW: number, zTop: number, zBottom: number, yBottom: number }, tex: number }} o tex：台面贴图边长（电影档 2048、流畅档 1024）
+ * @param {{ R: number, stairs: { halfW: number, zTop: number, zBottom: number, yBottom: number }, tex: number, wear: Wear }} o
+ *   tex：台面贴图边长（电影档 2048、流畅档 1024）；wear：常走的路、东西脚下（layout.js 按摆放给）
  */
 export function buildPlaza(scene, o) {
   const { R, stairs: ST } = o;
@@ -355,22 +463,17 @@ export function buildPlaza(scene, o) {
 
   // 台面
   const floor = floorTextures(o.tex, R), damage = damageTexture(Math.min(1024, o.tex), R);
-  const floorMat = new THREE.MeshStandardMaterial({ map: floor.color, roughnessMap: floor.aux, bumpMap: floor.aux, bumpScale: 1.2, roughness: 1 });
-  floorMat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, { uDamage: { value: damage }, uInv: inv, uTime: time });
-    sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform sampler2D uDamage; uniform float uInv; uniform float uTime;')
-      .replace('#include <map_fragment>', `#include <map_fragment>
-        vec2 dmg = texture2D(uDamage, vMapUv).rg;
+  const floorMat = stoneFloor(floor, wearTexture(Math.min(1024, o.tex), R, o.wear), R, {
+    uniforms: { uDamage: { value: damage }, uInv: inv, uTime: time },
+    decl: '\nuniform sampler2D uDamage; uniform float uInv; uniform float uTime;',
+    color: `vec2 dmg = texture2D(uDamage, vMapUv).rg;
         float crack = smoothstep(dmg.r - 0.02, dmg.r + 0.02, uInv) * step(dmg.r, 0.99);
         float scorch = clamp((uInv - dmg.g) / 0.2, 0., 1.) * step(dmg.g, 0.99);   // 软边：阈值比当前程度低得越多越黑（硬边实测像地上的洞）
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.13, 0.09, 0.07), scorch * scorch * 0.6);
-        diffuseColor.rgb *= 1. - 0.85 * crack;`)
-      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-        roughnessFactor = max(roughnessFactor, max(crack, scorch * 0.9));`)
-      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-        totalEmissiveRadiance += vec3(0.55, 0.18, 1.0) * crack * smoothstep(0.35, 0.8, uInv) * (0.5 + 0.3 * sin(uTime * 2.3 + vMapUv.x * 40.));`);
-  };
+        diffuseColor.rgb *= 1. - 0.85 * crack;`,
+    rough: 'roughnessFactor = max(roughnessFactor, max(crack, scorch * 0.9));',
+    emissive: 'totalEmissiveRadiance += vec3(0.55, 0.18, 1.0) * crack * smoothstep(0.35, 0.8, uInv) * (0.5 + 0.3 * sin(uTime * 2.3 + vMapUv.x * 40.));',
+  });
   const top = new THREE.Mesh(new THREE.CircleGeometry(R, 96), floorMat);
   top.rotation.x = -Math.PI / 2;
   top.receiveShadow = true;
@@ -438,13 +541,12 @@ export function buildPlaza(scene, o) {
 /**
  * 邻峰的落脚台：跟广场同一套汉白玉台面（不刻阵纹）、浮雕台沿和线脚，小一号。
  * 原来是一块纯色圆盘，悬在山石模型的顶面上面，看不出是什么地面（10-24 本人看出来的）；台沿往下压到山石顶面以下，底下不露缝。
- * @param {THREE.Scene} scene @param {{ x: number, z: number, R: number, tex: number }} o 中心、半径、台面贴图边长
+ * @param {THREE.Scene} scene @param {{ x: number, z: number, R: number, tex: number, wear: Wear }} o 中心、半径、台面贴图边长、生活痕迹（相对中心）
  */
 export function buildLanding(scene, o) {
   const { R } = o, g = new THREE.Group();
   const floor = floorTextures(o.tex, R, [[0, 0.9, 1], [0.9, 2.1, 8], [2.1, 3.4, 14], [3.4, R - 0.7, 20], [R - 0.7, R, 32]], false);
-  const top = new THREE.Mesh(new THREE.CircleGeometry(R, 64),
-    new THREE.MeshStandardMaterial({ map: floor.color, roughnessMap: floor.aux, bumpMap: floor.aux, bumpScale: 1.2, roughness: 1 }));
+  const top = new THREE.Mesh(new THREE.CircleGeometry(R, 64), stoneFloor(floor, wearTexture(256, R, o.wear), R));
   top.rotation.x = -Math.PI / 2;
   top.receiveShadow = true;
   const RR = R + 0.12, H = 1.25;

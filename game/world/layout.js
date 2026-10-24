@@ -197,8 +197,18 @@ export function buildLayout(scene, opts = {}) {
   const bronze = new THREE.MeshStandardMaterial({ color: 0x6b5a3a, roughness: 0.45, metalness: 0.7 });
   const shadowy = (m) => { m.castShadow = true; m.receiveShadow = true; return m; };
 
-  // 广场本体：汉白玉台面（刻阵纹）、台沿浮雕、台底山石、石阶（plaza.js）
-  const plaza = buildPlaza(scene, { R: PLAZA_R, stairs: STAIRS, tex: opts.tex ?? 2048 });
+  // 广场本体：汉白玉台面（刻阵纹）、台沿浮雕、台底山石、石阶（plaza.js）。
+  // 生活痕迹：敌人和弟子常走的两条路磨光（石阶口经牌坊到阵眼、桥头到阵眼），牌坊柱脚、石兽、华表、香炉、石灯、阵眼石桩脚下积灰
+  const foot = (/** @type {number} */ x, /** @type {number} */ z, /** @type {number} */ rx, rz = rx) => [x, z, rx, rz];
+  const wear = {
+    walks: [{ pts: [[0, STAIRS.zTop], [0, CORE_POS.z]], w: 3.4 }, { pts: [[BRIDGE.a.x, BRIDGE.a.y], [-3, 2], [-1.1, CORE_POS.z - 2.2]], w: 1.9 }],
+    grime: [
+      ...[-1, 1].flatMap((s) => [foot(s * GATE.pillarX, GATE.z, 1.55, 1.0), foot(s * LION.x, LION.z, 1.15), foot(s * HUABIAO_X, HUABIAO_Z, 0.7), foot(s * CENSER_X, CENSER_Z, 0.7)]),
+      ...LANTERNS.map((l) => foot(l.x, l.z, 0.32)),
+      ...Array.from({ length: 8 }, (_, k) => foot(CORE_POS.x + Math.cos((k / 8) * Math.PI * 2) * 2.7, CORE_POS.z + Math.sin((k / 8) * Math.PI * 2) * 2.7, 0.28)),
+    ],
+  };
+  const plaza = buildPlaza(scene, { R: PLAZA_R, stairs: STAIRS, tex: opts.tex ?? 2048, wear });
 
   // 山门牌坊（占位：两组白石柱 + 横梁 + 蓝屋顶，尺寸同模型；模型加载出来就藏起来）
   const marble = new THREE.MeshStandardMaterial({ color: 0xd9d4ca, roughness: 0.6 });
@@ -274,7 +284,8 @@ export function buildLayout(scene, opts = {}) {
   const peak = rockColumn(PEAK.r, 2.2, 22, 11);
   peak.position.set(PEAK.c.x, -11, PEAK.c.y);
   scene.add(peak);
-  buildLanding(scene, { x: PEAK.c.x, z: PEAK.c.y, R: PEAK.r + 0.15, tex: (opts.tex ?? 2048) / 2 });
+  buildLanding(scene, { x: PEAK.c.x, z: PEAK.c.y, R: PEAK.r + 0.15, tex: (opts.tex ?? 2048) / 2,
+    wear: { walks: [{ pts: [[0, 0], [-BRIDGE_DIR.x * PEAK.r, -BRIDGE_DIR.y * PEAK.r]], w: 1.6 }] } });   // 傀儡从正中走向桥头
 
   // 阵眼：地上一圈发光阵盘 + 悬浮水晶 + 八根石桩
   const coreColor = col(PALETTE.arcane.secondary, 1.6);   // 我方金色（风格卡敌我配色）
