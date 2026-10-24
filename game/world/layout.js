@@ -123,7 +123,7 @@ export function buildLayout(scene, opts = {}) {
   // 镇山石：两根铁链从门洞顶斜吊到石头顶上的铁环（铁链一直用代码画；石头先用多面体占位）
   const iron = new THREE.MeshStandardMaterial({ color: 0x3a3632, roughness: 0.45, metalness: 0.85 });
   const ring = new THREE.Vector3(0, STONE.ringTop, GATE.z);
-  for (const sx of [-0.9, 0.9]) scene.add(chain(new THREE.Vector3(sx, GATE.openTop, GATE.z), ring, iron));
+  scene.add(chains([-0.9, 0.9].map((sx) => [new THREE.Vector3(sx, GATE.openTop, GATE.z), ring]), iron));
   const stoneBox = shadowy(new THREE.Mesh(new THREE.IcosahedronGeometry(0.9, 1), darkStone));
   stoneBox.position.set(0, STONE.ringTop - STONE.height + 0.9, GATE.z);
   scene.add(stoneBox);
@@ -156,16 +156,22 @@ export function buildLayout(scene, opts = {}) {
   }
   planks.castShadow = planks.receiveShadow = true;
   scene.add(planks);
+  // 铁索（10-23 由麻绳改铁链，目标图是铁索桥）：两侧扶手各一根往下垂的铁链、桥面两边各一根贴着木板，
+  // 中间几根竖链把扶手吊在桥面上；两头各立一对石桩拴住。全部铁链一次画完
+  const lines = [];
   for (const side of [-1, 1]) {
     const off = new THREE.Vector2(-BRIDGE_DIR.y, BRIDGE_DIR.x).multiplyScalar(side * (BRIDGE.halfW + 0.05));
     const a = BRIDGE.a.clone().add(off), b = BRIDGE.b.clone().add(off);
-    const ropeGeo = new THREE.BufferGeometry().setFromPoints(
-      Array.from({ length: 17 }, (_, i) => {
-        const t = i / 16, p = a.clone().lerp(b, t);
-        return new THREE.Vector3(p.x, 0.95 - Math.sin(Math.PI * t) * 0.25, p.y);
-      }));
-    scene.add(new THREE.Line(ropeGeo, new THREE.LineBasicMaterial({ color: 0x4a3626 })));
+    const at = (t, y0, dip) => { const p = a.clone().lerp(b, t); return new THREE.Vector3(p.x, y0 - Math.sin(Math.PI * t) * dip, p.y); };
+    lines.push(Array.from({ length: 17 }, (_, i) => at(i / 16, 1.05, 0.3)), [at(0, 0.02, 0), at(1, 0.02, 0)]);
+    for (const t of [0.2, 0.4, 0.6, 0.8]) lines.push([at(t, 0.02, 0), at(t, 1.05, 0.3)]);
+    for (const end of [a, b]) {
+      const post = shadowy(new THREE.Mesh(new THREE.BoxGeometry(0.32, 1.35, 0.32), stone));
+      post.position.set(end.x, 0.6, end.y);
+      scene.add(post);
+    }
   }
+  scene.add(chains(lines, iron));
   // 邻峰：索桥那头的山石，顶上一块平台
   const peak = rockColumn(PEAK.r, 2.2, 22, 11);
   peak.position.set(PEAK.c.x, -11, PEAK.c.y);
@@ -206,21 +212,26 @@ export function buildLayout(scene, opts = {}) {
 }
 
 /**
- * 一根铁链：从 a 到 b 一节节扁环，相邻两节转 90°。一次画完（实例化）。
- * @param {THREE.Vector3} a @param {THREE.Vector3} b @param {THREE.Material} mat
+ * 几根铁链：每根是一条折线，沿线一节节扁环，相邻两节转 90°。所有链子合成一个实例化网格，一次画完。
+ * @param {THREE.Vector3[][]} lines @param {THREE.Material} mat
  */
-function chain(a, b, mat) {
-  const LINK = 0.16, dir = b.clone().sub(a), n = Math.max(2, Math.round(dir.length() / LINK));
+function chains(lines, mat) {
+  const LINK = 0.16, UP = new THREE.Vector3(0, 1, 0), placed = [];
+  for (const pts of lines) {
+    for (let s = 0; s < pts.length - 1; s++) {
+      const a = pts[s], dir = pts[s + 1].clone().sub(a), n = Math.max(2, Math.round(dir.length() / LINK));
+      const align = new THREE.Quaternion().setFromUnitVectors(UP, dir.clone().normalize());
+      for (let i = 0; i < n; i++) placed.push({ p: a.clone().addScaledVector(dir, (i + 0.5) / n), align });
+    }
+  }
   const geo = new THREE.TorusGeometry(0.07, 0.022, 6, 10);
   geo.scale(1, 1.45, 1);                                   // 拉成长圆环，长边顺着链子
-  const links = new THREE.InstancedMesh(geo, mat, n);
-  const align = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+  const links = new THREE.InstancedMesh(geo, mat, placed.length);
   const twist = new THREE.Quaternion(), q = new THREE.Quaternion(), m = new THREE.Matrix4(), one = new THREE.Vector3(1, 1, 1);
-  for (let i = 0; i < n; i++) {
-    twist.setFromAxisAngle(new THREE.Vector3(0, 1, 0), (i % 2) * Math.PI / 2);
-    q.copy(align).multiply(twist);
-    links.setMatrixAt(i, m.compose(a.clone().lerp(b, (i + 0.5) / n), q, one));
-  }
+  placed.forEach((L, i) => {
+    twist.setFromAxisAngle(UP, (i % 2) * Math.PI / 2);
+    links.setMatrixAt(i, m.compose(L.p, q.copy(L.align).multiply(twist), one));
+  });
   links.castShadow = true;
   return links;
 }
