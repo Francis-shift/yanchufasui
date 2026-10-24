@@ -9,6 +9,9 @@ import {
   PALETTE, arcsTex, clamp01, col, easeOutBack, easeOutCubic, glowShellMat, glowTex, inkColors, perSec, rand, randDir, ringMat,
   scaleArr, sigilMat, sigilTex,
 } from './common.js';
+import { fireball, scorchTextures } from './fire.js';
+
+const _plane = new THREE.PlaneGeometry(1, 1);
 
 export class SpellFx {
   /**
@@ -32,6 +35,9 @@ export class SpellFx {
     this.fx = [];
     this.shake = 0;
     this.hitStop = 0;
+    /** 某处地面高度（主循环接上 layout 的 groundHeightAt；null 是悬空）：焦痕只落在平地上 @type {(x: number, z: number) => number | null} */
+    this.groundAt = () => 0;
+    this.scorchCount = 0;
     this.orbLight = new THREE.PointLight(0xffffff, 0, 0, 2);
     this.blastLight = new THREE.PointLight(0xffffff, 0, 0, 2);
     scene.add(this.orbLight, this.blastLight);
@@ -137,6 +143,13 @@ export class SpellFx {
       blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, fog: false }));
     halo.scale.setScalar(o.big ? 2 : 1.4);
     orb.add(core, halo);
+    // 火：外面裹一团翻卷的火（里白外红、往后拖彗尾），白芯缩小藏在里面
+    const fire = o.el === 'fire', fb = fire ? fireball() : null;
+    if (fb) {
+      fb.scale.setScalar(o.big ? 0.42 : 0.3); orb.add(fb); core.visible = false; halo.material.color.copy(col(pal.primary, 0.55));
+      fb.material.uniforms.uHeat.value = 1.5;   // 飞着的火团比炸开时更热：正中白黄、边上橙红（1 的话整团是哑光的橙，实测）
+      fb.material.uniforms.uAmp.value = 0.45;
+    }
     orb.visible = false;
     this.scene.add(orb);
     const start = this.origin.clone();
@@ -176,14 +189,31 @@ export class SpellFx {
         this.orbLight.intensity = 26;
         const seg = pos.clone().sub(prev);
         const steps = Math.min(60, Math.ceil(seg.length() * 22));   // 按飞过的距离撒粒子，慢动作下密度不变
-        for (let i = 0; i < steps; i++) {
-          const q = prev.clone().addScaledVector(seg, i / steps);
-          this.p.emit(q.x + rand(-0.05, 0.05), q.y + rand(-0.05, 0.05), q.z + rand(-0.05, 0.05),
-            rand(-0.6, 0.6), rand(-0.3, 0.9), rand(-0.6, 0.6), rand(0.3, 0.55), rand(0.1, 0.2),
-            scaleArr(pal.secondary, 1.8), scaleArr(pal.primary, 1.1), { drag: 2.5, grav: pal.emberGravity * 0.5, alpha: 0.85 });
+        if (fb) {
+          const u = fb.material.uniforms;
+          u.uTime.value += dt;
+          if (seg.lengthSq() > 1e-6) u.uDir.value.copy(seg).normalize();
+          u.uStretch.value = 2.8;   // 模型里的长度：乘上缩放约 0.9 米
+          // 火苗（大、短命、往上飘，白黄 → 暗红）和火星（小、亮、飘得久）
+          for (let i = Math.ceil(steps * 0.6); i > 0; i--) {
+            const q = prev.clone().addScaledVector(seg, Math.random());
+            this.p.emit(q.x + rand(-0.08, 0.08), q.y + rand(-0.08, 0.08), q.z + rand(-0.08, 0.08), rand(-0.5, 0.5), rand(0.2, 1.4), rand(-0.5, 0.5),
+              rand(0.18, 0.34), rand(0.22, 0.4) * (o.big ? 1.3 : 1), [1.3, 0.5, 0.1], [0.32, 0.03, 0.005], { drag: 3, grav: 2.5, alpha: 0.4, grow: 0.3 });
+            if (Math.random() < 0.35) {
+              this.p.emit(q.x, q.y, q.z, rand(-1.5, 1.5), rand(0.5, 2), rand(-1.5, 1.5), rand(0.5, 1.1), rand(0.04, 0.07),
+                [3, 1.9, 0.7], [1.2, 0.22, 0.02], { drag: 1.4, grav: 1.2, alpha: 0.95 });
+            }
+          }
+        } else {
+          for (let i = 0; i < steps; i++) {
+            const q = prev.clone().addScaledVector(seg, i / steps);
+            this.p.emit(q.x + rand(-0.05, 0.05), q.y + rand(-0.05, 0.05), q.z + rand(-0.05, 0.05),
+              rand(-0.6, 0.6), rand(-0.3, 0.9), rand(-0.6, 0.6), rand(0.3, 0.55), rand(0.1, 0.2),
+              scaleArr(pal.secondary, 1.8), scaleArr(pal.primary, 1.1), { drag: 2.5, grav: pal.emberGravity * 0.5, alpha: 0.85 });
+          }
         }
-        // 墨重的元素（火的黑烟、土、雷）沿路留一点墨迹
-        if (this.ink && (pal.ink ?? 0) >= 0.75 && Math.random() < steps * 0.04 * this.inkK) {
+        // 墨重的元素（火的黑烟、土、雷）沿路留一点墨迹；火的烟多一些
+        if (this.ink && (pal.ink ?? 0) >= 0.75 && Math.random() < steps * (fire ? 0.07 : 0.04) * this.inkK) {
           const ic = inkColors(pal.primary);
           this.ink.emit(pos.x, pos.y, pos.z, rand(-0.4, 0.4), rand(-0.1, 0.5), rand(-0.4, 0.4), rand(0.5, 0.9), rand(0.12, 0.28),
             ic.a, ic.b, { drag: 2, alpha: 0.45, grow: 1.8 });
@@ -192,7 +222,7 @@ export class SpellFx {
         if (k >= 1 && !done) { done = true; this.orbLight.intensity = 0; o.onHit(pos.clone()); return false; }
         return true;
       },
-      dispose: () => { this.scene.remove(orb); core.material.dispose(); halo.material.dispose(); },
+      dispose: () => { this.scene.remove(orb); core.material.dispose(); halo.material.dispose(); if (fb) fb.material.dispose(); },
     });
   }
 
@@ -224,12 +254,16 @@ export class SpellFx {
     if (scale >= 0.9) this.pulseDim(Math.min(0.75, 0.32 + 0.3 * (scale - 0.9)), 0.25 + 0.2 * scale);
     this.inkSplash(p, el, R, scale);
     this.foregroundBokeh(p, el, scale);
-    const n = Math.round(420 * scale);
+    const fire = el === 'fire';
+    if (fire) this.fireBurst(p, R, scale);
+    const n = Math.round((fire ? 160 : 420) * scale);   // 火的大头是火团和火星，四溅的火花少一些
+    // 火花刚溅出时的颜色：火用橙黄（白热的火花挤在中间，叠加起来是一团白，看不出火团，实测）
+    const spark0 = fire ? [1.9, 1.0, 0.25] : scaleArr(pal.core, 2.6);
     for (let i = 0; i < n; i++) {
       const d = randDir(); d.y = Math.abs(d.y) * 0.9 + 0.1;
       const v = d.multiplyScalar(rand(3, 15) * Math.sqrt(scale));
       this.p.emit(p.x, p.y, p.z, v.x, v.y, v.z, rand(0.5, 1.3), rand(0.05, 0.12),
-        scaleArr(pal.core, 2.6), scaleArr(pal.primary, 1.4), { drag: 1.6, grav: pal.sparkGravity });
+        spark0, scaleArr(pal.primary, 1.4), { drag: 1.6, grav: pal.sparkGravity });
     }
     for (let i = 0; i < 50 * scale; i++) {
       const v = randDir().multiplyScalar(rand(1.2, 4.5));
@@ -245,7 +279,7 @@ export class SpellFx {
           rand(0.4, 0.8), rand(0.08, 0.16), scaleArr(pal.secondary, 1.6), scaleArr(pal.primary, 0.8), { drag: 2.2, alpha: 0.7 });
       }
     }
-    const flash = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 18), glowShellMat(col(pal.secondary, 1.2)));
+    const flash = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 18), glowShellMat(fire ? col(pal.primary, 0.7) : col(pal.secondary, 1.2)));
     flash.material.uniforms.uFill.value = 0.04;      // 只亮边缘，中间通透，像一层冲击波壳
     flash.position.copy(p);
     this.addTimed(flash, 0.4, (k) => {
@@ -264,14 +298,16 @@ export class SpellFx {
       });
     }
     if (scale >= 0.9) {
-      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 10, 28, 1, true), glowShellMat(col(pal.primary, 1.6), 1));
-      pillar.geometry.translate(0, 5, 0);
-      pillar.position.set(p.x, p.y, p.z);
-      this.addTimed(pillar, 0.9, (k) => {
-        const w = 0.3 + easeOutCubic(k) * 1.2;
-        pillar.scale.set(w, 0.4 + easeOutCubic(Math.min(k * 3, 1)) * 0.8, w);
-        pillar.material.uniforms.uAlpha.value = Math.pow(1 - k, 2) * 0.9;
-      });
+      if (!fire) {   // 火用火柱代替光柱（fireBurst 里）
+        const pillar = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 10, 28, 1, true), glowShellMat(col(pal.primary, 1.6), 1));
+        pillar.geometry.translate(0, 5, 0);
+        pillar.position.set(p.x, p.y, p.z);
+        this.addTimed(pillar, 0.9, (k) => {
+          const w = 0.3 + easeOutCubic(k) * 1.2;
+          pillar.scale.set(w, 0.4 + easeOutCubic(Math.min(k * 3, 1)) * 0.8, w);
+          pillar.material.uniforms.uAlpha.value = Math.pow(1 - k, 2) * 0.9;
+        });
+      }
       const seal = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), sigilMat(sigilTex(), P.clone()));
       seal.rotation.x = -Math.PI / 2;
       seal.position.set(p.x, p.y + 0.04, p.z);
@@ -290,6 +326,72 @@ export class SpellFx {
         this.arc(end.clone().add(new THREE.Vector3(rand(-2, 2), 14, rand(-2, 2))), end, { delay: i * 0.06 });
       }
     }
+  }
+
+  /**
+   * 火炸开（特效风格 v2：白黄芯红边的火团 + 满场火星 + 墨烟）：火团胀开、往上浮、冷却变红、烧穿散掉；
+   * 大的再冲起一道火柱；火星往上飘 1～2.5 秒；一股黑烟往上冒；落在平地上留焦痕。
+   * @param {THREE.Vector3} p @param {number} R @param {number} scale
+   */
+  fireBurst(p, R, scale) {
+    const big = scale >= 0.9, rMax = R * (big ? 0.75 : 0.6), dur = 0.55 + 0.35 * Math.min(scale, 1.5);
+    const fb = fireball();
+    fb.position.copy(p);
+    fb.material.uniforms.uAmp.value = 0.7;
+    this.addTimed(fb, dur, (k, t) => {
+      const u = fb.material.uniforms;
+      u.uTime.value = t;
+      fb.scale.setScalar(rMax * (0.25 + 0.75 * easeOutCubic(Math.min(1, k * 2.2))));
+      fb.position.y = p.y + k * rMax * 0.6;            // 热气往上浮
+      u.uHeat.value = 1 - k;
+      u.uBurn.value = Math.max(0, (k - 0.35) / 0.65);
+    });
+    if (big) {   // 火柱：一股往上冲的火苗
+      for (let i = Math.round(90 * scale); i > 0; i--) {
+        const a = Math.random() * Math.PI * 2, r = rand(0, R * 0.3);
+        this.p.emit(p.x + Math.cos(a) * r, p.y, p.z + Math.sin(a) * r, rand(-1, 1), rand(5, 12), rand(-1, 1),
+          rand(0.35, 0.6), rand(0.35, 0.7), [1.4, 0.55, 0.1], [0.35, 0.03, 0.005], { drag: 2.2, grav: 2, alpha: 0.4, grow: 0.5 });
+      }
+    }
+    for (let i = Math.round(170 * scale); i > 0; i--) {   // 火星：往上飘得久，满场都是
+      const a = Math.random() * Math.PI * 2, r = rand(0, R * 0.7);
+      this.p.emit(p.x + Math.cos(a) * r, p.y + rand(0, 0.8), p.z + Math.sin(a) * r, Math.cos(a) * rand(0.5, 3), rand(1.5, 5), Math.sin(a) * rand(0.5, 3),
+        rand(1.2, 2.6), rand(0.035, 0.07), [3.2, 1.8, 0.5], [1.3, 0.18, 0.02], { drag: 0.9, grav: 1.1, grow: 0.6 });
+    }
+    if (this.ink) {   // 黑烟往上冒、越胀越大（墨池普通混合，压在亮色后面）
+      const ic = inkColors(PALETTE.fire.primary);
+      for (let i = Math.round(7 * scale * this.inkK); i > 0; i--) {
+        this.ink.emit(p.x + rand(-0.4, 0.4) * R, p.y + rand(0.3, 1.2), p.z + rand(-0.4, 0.4) * R, rand(-0.4, 0.4), rand(1.2, 2.6), rand(-0.4, 0.4),
+          rand(1.6, 2.6), rand(0.7, 1.3) * Math.sqrt(scale), ic.a, ic.b, { drag: 1.1, grav: 0.6, alpha: 0.5, grow: 2.6 });
+      }
+    }
+    this.scorch(p, R * (big ? 0.85 : 0.6));
+  }
+
+  /**
+   * 焦痕：贴在平地上（广场、索桥、邻峰顶；石阶是斜的不贴）。先透着暗红的余烬（叠加发光），两秒内熄掉；
+   * 焦黑留 6 秒多再淡掉。最多同时 14 块，多了就不留新的。
+   * @param {THREE.Vector3} p @param {number} r
+   */
+  scorch(p, r) {
+    const gy = this.groundAt(p.x, p.z);
+    if (gy === null || Math.abs(gy) > 0.05 || p.y - gy > 2 || this.scorchCount >= 14) return;
+    const tex = scorchTextures();
+    const flat = { transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 };
+    const darkMat = new THREE.MeshBasicMaterial({ ...flat, map: tex.dark, opacity: 0 });
+    const glowMat = new THREE.MeshBasicMaterial({ ...flat, map: tex.glow, color: new THREE.Color(2.2, 0.55, 0.1), blending: THREE.AdditiveBlending, fog: false });
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(_plane, darkMat), new THREE.Mesh(_plane, glowMat));
+    g.rotation.set(-Math.PI / 2, 0, Math.random() * Math.PI * 2);
+    g.position.set(p.x, gy + 0.02, p.z);
+    g.scale.setScalar(r * 2);
+    this.scorchCount++;
+    const LIFE = 9;
+    this.addTimed(g, LIFE, (k, t) => {
+      darkMat.opacity = Math.min(1, t / 0.3) * (t < 6.5 ? 1 : Math.max(0, 1 - (t - 6.5) / 2.5));
+      glowMat.opacity = Math.pow(Math.max(0, 1 - t / 2), 1.5) * (0.75 + 0.25 * Math.sin(t * 23 + r * 7));
+      if (k >= 1) this.scorchCount--;
+    });
   }
 
   /**

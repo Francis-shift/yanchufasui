@@ -126,6 +126,7 @@ export function start(root, opts = {}) {
   ink.floorAt = particles.floorAt;
   const origin = CASTER_POS.clone().setY(1.5);
   const fx = new SpellFx(scene, particles, origin, { ink, quality });
+  fx.groundAt = groundHeightAt;   // 焦痕只落在平地上
   const locks = new Locks(scene);
 
   const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -18, 0) });
@@ -974,6 +975,9 @@ export function start(root, opts = {}) {
     summonBtn: () => pressSummon(),
     /** 单独劈一道闪电看样子：zap([x,y,z], [x,y,z]) */
     zap: (a, b) => fx.arc(new THREE.Vector3(...a), new THREE.Vector3(...b)),
+    /** 单独炸一下看样子：boom(元素, [x,y,z], 半径, 规模)；shot(元素, [x,y,z]) 从施法者打一发飞弹过去（不结算伤害） */
+    boom: (el = 'fire', at = [0, 0.4, -4], R = 2.5, scale = 1) => fx.burst(new THREE.Vector3(...at), el, R, scale),
+    shot: (el = 'fire', to = [0, 1, -5], big = true) => fx.bolt({ el, path: 'straight', big, target: () => new THREE.Vector3(...to), onHit: (p) => fx.burst(p, el, 1.3, 0.45) }),
     /** 入侵程度锁在 k（0～1），不给就回到跟着波次走；flash 在黑雾里劈一道闪电 */
     invade: (k = -1) => { lab.inv = k; },
     /** 光罩裂到几成（0～1），不给就回到跟着阵眼血量走 */
