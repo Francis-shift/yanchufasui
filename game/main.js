@@ -144,6 +144,7 @@ export function start(root, opts = {}) {
     onCoreHit: (dmg) => hitCore(dmg),
     onGone: () => {},
     pushed: (e) => fx.windTrail(e.group),   // 被风吹飞的身后拖两道笔触，推下悬崖那一下看得清
+    emerge: () => env.spawnPuff(),          // 索桥那一路从邻峰的黑雾里出来：雾鼓一下
     floatText: (p, text, color) => {
       _v.copy(p).project(camera);
       if (_v.z > 1) return;

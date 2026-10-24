@@ -88,11 +88,14 @@ function engraving(line) {
   });
 }
 
-/** 台面两张贴图：颜色、辅助（R 高度，G 粗糙度）。石板的色调和缝在两张里一一对应 @param {number} S @param {number} R */
-function floorTextures(S, R) {
-  const rnd = rng(23), slabs = [];
-  RINGS.forEach(([r0, r1, n], ri) => {
-    const off = rnd() * Math.PI * 2, edge = ri === RINGS.length - 1;
+/**
+ * 台面两张贴图：颜色、辅助（R 高度，G 粗糙度）。石板的色调和缝在两张里一一对应
+ * @param {number} S @param {number} R @param {number[][]} [rings] 石板怎么铺（邻峰落脚台另给一套） @param {boolean} [engrave] 刻不刻阵纹
+ */
+function floorTextures(S, R, rings = RINGS, engrave = true) {
+  const rnd = rng(23), slabs = [], dens = (R / 11) ** 2;   // 细纹、斑点按面积撒，小台子不会更脏
+  rings.forEach(([r0, r1, n], ri) => {
+    const off = rnd() * Math.PI * 2, edge = ri === rings.length - 1;
     for (let k = 0; k < n; k++) {
       slabs.push({ r0, r1, a0: off + (k / n) * Math.PI * 2, a1: off + ((k + 1) / n) * Math.PI * 2, edge,
         l: (edge ? 79 : 85) + rnd() * 5, s: 10 + rnd() * 6, rough: (edge ? 130 : 92) + rnd() * 26 });
@@ -102,7 +105,7 @@ function floorTextures(S, R) {
   const joints = (g) => {
     g.beginPath();
     for (const s of slabs) { if (s.r0 > 0) { g.moveTo(Math.cos(s.a0) * s.r0, Math.sin(s.a0) * s.r0); g.lineTo(Math.cos(s.a0) * s.r1, Math.sin(s.a0) * s.r1); } }
-    for (const [r0] of RINGS) if (r0 > 0) { g.moveTo(r0, 0); g.arc(0, 0, r0, 0, Math.PI * 2); }
+    for (const [r0] of rings) if (r0 > 0) { g.moveTo(r0, 0); g.arc(0, 0, r0, 0, Math.PI * 2); }
     g.stroke();
   };
   const toMeters = (g) => { const k = S / (2 * R); g.setTransform(k, 0, 0, k, S / 2, S / 2); g.lineCap = 'round'; };
@@ -113,7 +116,7 @@ function floorTextures(S, R) {
     for (const s of slabs) { sector(g, s); g.fillStyle = `hsl(40, ${s.s}%, ${s.l}%)`; g.fill(); }
     // 汉白玉的细纹和斑点（同一个随机序列，每次打开都一样）
     const vr = rng(71);
-    for (let i = 0; i < 320; i++) {
+    for (let i = 0; i < 320 * dens; i++) {
       const a = vr() * Math.PI * 2, r = Math.sqrt(vr()) * R, x = Math.cos(a) * r, y = Math.sin(a) * r, d = 0.4 + vr() * 1.4, b = vr() * Math.PI * 2;
       g.strokeStyle = `rgba(110, 100, 88, ${0.05 + vr() * 0.09})`; g.lineWidth = 0.006 + vr() * 0.016;
       g.beginPath(); g.moveTo(x, y);
@@ -121,20 +124,20 @@ function floorTextures(S, R) {
         x + Math.cos(b) * d * 0.7 + (vr() - 0.5) * 0.4, y + Math.sin(b) * d * 0.7 + (vr() - 0.5) * 0.4, x + Math.cos(b) * d, y + Math.sin(b) * d);
       g.stroke();
     }
-    for (let i = 0; i < 2600; i++) {
+    for (let i = 0; i < 2600 * dens; i++) {
       const a = vr() * Math.PI * 2, r = Math.sqrt(vr()) * R;
       g.fillStyle = `rgba(90, 80, 70, ${0.04 + vr() * 0.08})`;
       const d = 0.01 + vr() * 0.025; g.fillRect(Math.cos(a) * r, Math.sin(a) * r, d, d);
     }
     g.strokeStyle = 'rgba(96, 86, 74, 0.8)'; g.lineWidth = 0.028; joints(g);
     // 刻槽里描金：先一道暗边当槽的阴影，再一道金
-    engraving((w, path) => {
+    if (engrave) engraving((w, path) => {
       g.beginPath(); path(g);
       g.strokeStyle = 'rgba(92, 72, 44, 0.55)'; g.lineWidth = w + 0.025; g.stroke();
       g.strokeStyle = 'rgba(176, 134, 66, 0.92)'; g.lineWidth = w; g.stroke();
     });
     // 越靠台边越旧：一圈淡淡的灰
-    const grad = g.createRadialGradient(0, 0, 8.6, 0, 0, R);
+    const grad = g.createRadialGradient(0, 0, R - 2.4, 0, 0, R);
     grad.addColorStop(0, 'rgba(70, 60, 50, 0)'); grad.addColorStop(1, 'rgba(70, 60, 50, 0.16)');
     g.fillStyle = grad; g.beginPath(); g.arc(0, 0, R, 0, Math.PI * 2); g.fill();
   });
@@ -143,7 +146,7 @@ function floorTextures(S, R) {
     toMeters(g);
     for (const s of slabs) { sector(g, s); g.fillStyle = `rgb(${s.edge ? 190 : 200}, ${Math.round(s.rough)}, 0)`; g.fill(); }
     g.strokeStyle = 'rgb(110, 225, 0)'; g.lineWidth = 0.03; joints(g);
-    engraving((w, path) => {
+    if (engrave) engraving((w, path) => {
       g.beginPath(); path(g);
       g.strokeStyle = 'rgb(150, 190, 0)'; g.lineWidth = w + 0.03; g.stroke();   // 槽口斜边
       g.strokeStyle = 'rgb(70, 140, 0)'; g.lineWidth = w; g.stroke();            // 槽底（描金的地方光一点）
@@ -430,4 +433,36 @@ export function buildPlaza(scene, o) {
     /** @param {number} dt 游戏时间 */
     update(dt) { time.value += dt; },
   };
+}
+
+/**
+ * 邻峰的落脚台：跟广场同一套汉白玉台面（不刻阵纹）、浮雕台沿和线脚，小一号。
+ * 原来是一块纯色圆盘，悬在山石模型的顶面上面，看不出是什么地面（10-24 本人看出来的）；台沿往下压到山石顶面以下，底下不露缝。
+ * @param {THREE.Scene} scene @param {{ x: number, z: number, R: number, tex: number }} o 中心、半径、台面贴图边长
+ */
+export function buildLanding(scene, o) {
+  const { R } = o, g = new THREE.Group();
+  const floor = floorTextures(o.tex, R, [[0, 0.9, 1], [0.9, 2.1, 8], [2.1, 3.4, 14], [3.4, R - 0.7, 20], [R - 0.7, R, 32]], false);
+  const top = new THREE.Mesh(new THREE.CircleGeometry(R, 64),
+    new THREE.MeshStandardMaterial({ map: floor.color, roughnessMap: floor.aux, bumpMap: floor.aux, bumpScale: 1.2, roughness: 1 }));
+  top.rotation.x = -Math.PI / 2;
+  top.receiveShadow = true;
+  const RR = R + 0.12, H = 1.25;
+  const rimTex = rimTextures(1024, 256);
+  for (const t of [rimTex.color, rimTex.aux]) { t.wrapS = THREE.RepeatWrapping; t.repeat.set(Math.round((RR * Math.PI * 2) / 4.6), 1); }
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(RR, RR, H, 96, 1, true),
+    new THREE.MeshStandardMaterial({ map: rimTex.color, bumpMap: rimTex.aux, bumpScale: 3, roughnessMap: rimTex.aux, roughness: 1 }));
+  band.position.y = -H / 2 - 0.04;
+  const marble = new THREE.MeshStandardMaterial({ color: 0xe2dbce, roughness: 0.5 });
+  const lip = new THREE.Mesh(new THREE.CylinderGeometry(RR + 0.1, RR + 0.1, 0.16, 96, 1, true), marble);
+  lip.position.y = -0.08;
+  const lipTop = new THREE.Mesh(new THREE.RingGeometry(R - 0.02, RR + 0.1, 96), marble);
+  lipTop.rotation.x = -Math.PI / 2;
+  lipTop.position.y = 0.002;
+  const foot = new THREE.Mesh(new THREE.CylinderGeometry(RR + 0.04, RR - 0.18, 0.26, 96, 1, true), marble);
+  foot.position.y = -H - 0.17;
+  for (const m of [top, band, lip, lipTop, foot]) { m.castShadow = m !== top && m !== lipTop; m.receiveShadow = true; g.add(m); }
+  g.position.set(o.x, 0, o.z);
+  scene.add(g);
+  return g;
 }

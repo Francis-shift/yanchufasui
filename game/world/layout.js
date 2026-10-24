@@ -12,7 +12,7 @@
  */
 import * as THREE from 'three';
 import { col, PALETTE, sigilMat, sigilTex } from '../fx/common.js';
-import { buildPlaza, rockColumn } from './plaza.js';
+import { buildLanding, buildPlaza, rockColumn } from './plaza.js';
 
 export const PLAZA_R = 11;
 export const CORE_POS = new THREE.Vector3(0, 0, 8.6);
@@ -91,12 +91,13 @@ export const PROP_SPOTS = {
   /**
    * 中景（离广场 35～65 米）：牌坊两边各两块，牌坊背后不放（会从门洞里露出来、跟石阶上来的敌人搅在一起）。
    * rock-a 是高石柱（打包成 30 米高），底下那截插进云海（云面 y = -9）；rock-b 是浮岛（20 米宽），悬在半空。scale 乘在打包尺寸上。
+   * wallPine：顶下石壁上那棵黄山松朝哪伸（方位角，度，从 +x 往 +z 量）：往画面外侧、稍朝镜头，树冠衬在天上看得见
    */
   rocks: [
-    { model: 'rock-a', x: -24, y: -17.5, z: -38, rotY: 0.6, scale: 0.95, mirror: false },
-    { model: 'rock-b', x: -34, y: -1.8, z: -30, rotY: 1.2, scale: 0.85, mirror: false },
-    { model: 'rock-a', x: 19, y: -14.5, z: -30, rotY: 2.1, scale: 0.75, mirror: true },
-    { model: 'rock-a', x: 26, y: -16, z: -58, rotY: 4.0, scale: 1, mirror: false },
+    { model: 'rock-a', x: -24, y: -17.5, z: -38, rotY: 0.6, scale: 0.95, mirror: false, wallPine: 150 },
+    { model: 'rock-b', x: -34, y: -1.8, z: -30, rotY: 1.2, scale: 0.85, mirror: false, wallPine: 140 },
+    { model: 'rock-a', x: 19, y: -14.5, z: -30, rotY: 2.1, scale: 0.75, mirror: true, wallPine: 5 },
+    { model: 'rock-a', x: 26, y: -16, z: -58, rotY: 4.0, scale: 1, mirror: false, wallPine: -10 },
   ],
   /**
    * 托东西的两块山石（替换代码合成的邻峰、广场台底，10-24 本人看出代码石头像塑料）：给的是顶面中心要放在哪（top），
@@ -106,12 +107,26 @@ export const PROP_SPOTS = {
   peak: { model: 'rock-a', top: [PEAK.c.x, -0.9, PEAK.c.y], rotY: 0.8, scale: 1.5 },
   base: { model: 'rock-b', top: [0, -1.75, 0], rotY: 0, scale: 1 },
   /**
-   * 台底石壁上长出来的黄山松：方位角（从 +x 往 +z 量）和根的高度。props.js 从外面水平往广场中心打一条线，碰到石壁的地方就是根，
-   * 树冠朝外探出云海。根压在台面下 6 米，树冠顶还在台面以下（高过台面的话从高机位看像几团深绿压在台边上）。
-   * 左右两侧各两棵（横屏镜头看得见），避开石阶、索桥和朝镜头那一侧（约 20°～130°，树冠会伸到镜头跟前成一大块黑影）
+   * 石壁上长出来的黄山松：长在哪块山石上、绕哪个中心的方位角（从 +x 往 +z 量）、根的高度、往外倾几度。
+   * props.js 沿根团外沿一圈水平打线量石壁，往里埋到根团刚好全进石头（只露树干），树冠朝外探出云海。
+   * 方位、高度、倾角是拿真模型扫出来的（tests/pines.test.mjs 的量法）：根团悬空不到 3%、树冠八成五以上在石头外面。
+   * 台底：那块浮岛上宽下窄，往上石壁凸出来，不往外倾树冠会扎进石头，所以倾 35°；树冠顶还在台面下 2 米
+   * （高过台面从高机位看像几团深绿压在台边上）。左右两侧各两棵，避开石阶、索桥和朝镜头那一侧
+   * （约 20°～130°，树冠会伸到镜头跟前成一大块黑影）；原来的 -35°、-5° 那里石壁不规整，根要埋得太深、树冠出不来，换了。
+   * 邻峰：落脚台底下两棵，避开索桥（约 31°）和背后黑雾上来的那一侧（约 211°），树冠顶比台面高一点、从台边探出来。顶上是石台，不种
    */
-  cliffPines: [-35, -5, 165, 188].map((d) => ({ az: (d * Math.PI) / 180, y: -6 })),
+  cliffPines: [
+    ...[-20, 5, 155, 175].map((d) => ({ on: 'base', c: [0, 0], az: (d * Math.PI) / 180, y: -5.5, tilt: 35 })),
+    ...[-25, 105].map((d) => ({ on: 'peak', c: [PEAK.c.x, PEAK.c.y], az: (d * Math.PI) / 180, y: -3.5, tilt: 20 })),
+  ],
 };
+
+/**
+ * 索桥那一路的敌人从哪来（10-24 本人指出原来是在落脚台正中凭空冒出来、没有交代）：邻峰背后从云海卷上来一道黑雾，
+ * 漫过落脚台，傀儡从雾里走出来——先只看得见两只眼睛，身子再从暗处显出来。跟入侵的黑雾同一来路（索桥那一侧）。
+ * environment.js 画雾，enemies.js 让这一路的敌人从暗处显出来。出生点还是落脚台正中（路线、节奏不变），away 是雾从哪边来（背对索桥）
+ */
+export const SPAWN_FOG = { path: 1, at: new THREE.Vector3(PEAK.c.x, 0, PEAK.c.y), away: new THREE.Vector3(BRIDGE_DIR.x, 0, BRIDGE_DIR.y), r: PEAK.r };
 
 /**
  * 栏杆（望柱 + 栏板两种模型，props.js 实例化一次画完）：台边一圈，石阶口、桥头断开；石阶两侧顺着矮石边往下，到云面为止。
@@ -255,12 +270,11 @@ export function buildLayout(scene, opts = {}) {
     }
   }
   scene.add(chains(lines, iron));
-  // 邻峰：索桥那头的山石，顶上一块平台（山石模型到了换掉，见 PROP_SPOTS.peak）
+  // 邻峰：索桥那头的山石（山石模型到了换掉，见 PROP_SPOTS.peak），顶上一座落脚台，跟广场同一套石作
   const peak = rockColumn(PEAK.r, 2.2, 22, 11);
   peak.position.set(PEAK.c.x, -11, PEAK.c.y);
-  const landing = shadowy(new THREE.Mesh(new THREE.CylinderGeometry(PEAK.r + 0.15, PEAK.r, 0.3, 40), darkStone));
-  landing.position.set(PEAK.c.x, -0.15, PEAK.c.y);
-  scene.add(peak, landing);
+  scene.add(peak);
+  buildLanding(scene, { x: PEAK.c.x, z: PEAK.c.y, R: PEAK.r + 0.15, tex: (opts.tex ?? 2048) / 2 });
 
   // 阵眼：地上一圈发光阵盘 + 悬浮水晶 + 八根石桩
   const coreColor = col(PALETTE.arcane.secondary, 1.6);   // 我方金色（风格卡敌我配色）

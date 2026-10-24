@@ -1,13 +1,13 @@
 // @ts-check
 /**
  * 场景物件模型（本人用 Tripo 生成，tools/pack_prop.py 打包）：牌坊、两只石兽、镇山石、两只香炉、两根华表，栏杆（望柱、栏板，沿台边和石阶），
- * 石灯，山石两种（石柱、浮岛：中景、邻峰、广场台底、远山都用它们），松树两种（挺拔的、黄山松：种在山石顶上和台底石壁上），远山顶上的楼阁。
+ * 石灯，山石两种（石柱、浮岛：中景、邻峰、广场台底、远山都用它们），松树两种（挺拔的、黄山松：种在中景和远山顶上、台底和邻峰的石壁上），远山顶上的楼阁。
  * 开局后台下载，到了就摆到 layout.js 给的位置、把占位藏起来；下载失败就一直用占位，不影响玩（中景、栏杆、石灯、松树没有占位，就是空着）。
  * 材质：Tripo 只给一张颜色贴图。打包时从颜色推出一张材质贴图（G 粗糙度、B 金属度），鎏金在夕阳和天空反射下才会发亮；
  * 同一张颜色贴图再当凹凸贴图，浮雕、瓦楞接得住低角度的阳光。
  */
 import * as THREE from 'three';
-import { decodeDRG2, fetchBytes, flatSpots, rootOf, staticGeometry, topOf } from './drg2.js';
+import { decodeDRG2, fetchBytes, flatSpots, rootOf, rootRim, staticGeometry, topOf } from './drg2.js';
 import { LANTERNS, PROP_SPOTS, RAILS } from './layout.js';
 import { meltIntoClouds } from './plaza.js';
 
@@ -34,6 +34,77 @@ const PROPS = {
 
 /** 石灯灯室中心离地多高（模型高 1.2）：里面放一点暖光，傍晚点着的灯 */
 const LANTERN_GLOW_Y = 0.74;
+
+/**
+ * 托东西的山石（邻峰、台底）摆在哪：模型顶面中心转过 rotY、乘上 scale 以后要落在 s.top
+ * @param {typeof PROP_SPOTS.peak} s @param {ReturnType<typeof topOf>} top
+ */
+export function perchPose(s, top) {
+  const c = Math.cos(s.rotY), sn = Math.sin(s.rotY);
+  return { x: s.top[0] - s.scale * (top.x * c + top.z * sn), y: s.top[1] - s.scale * top.y, z: s.top[2] - s.scale * (-top.x * sn + top.z * c), rotY: s.rotY, mirror: false };
+}
+
+/**
+ * 松树摆在哪（实例矩阵；tests/pines.test.mjs 拿真模型核根团露没露）。挺拔的种在中景石峰顶上，黄山松长在石壁上：
+ * 中景石峰顶下（朝 wallPine 伸）、台底、邻峰（PROP_SPOTS.cliffPines）。邻峰顶上是落脚台，不种。
+ * 根团不能悬在外面（10-24 本人看出边上那棵的树根整团露着）：
+ * 顶上的只种在底下整片托得住的地方（flatSpots），按量到的最低处落根、再往下埋近半个根团（根团高约 0.6 倍尺寸），露出来的只是贴地的根颈；
+ * 石壁上的沿根团外沿一圈（rootRim）每个点水平打线量石壁，往里埋到这一圈刚好都进了石头为止——埋得不多不少，树冠尽量伸出去。
+ * 石壁往上凸（台底那块浮岛上宽下窄）树冠会扎进石头，所以可以往外倾 tilt 度。
+ * 中石柱顶上能托住根团的只有中间一小块，所以顶上最多两棵，第二棵离第一棵 1.6 米以上、小一号。
+ * @param {{ mesh: THREE.Object3D, name: string, kind: 'mid' | 'peak' | 'base', wallAz?: number }[]} perches 摆好的山石
+ * @param {THREE.BufferGeometry[]} pines [挺拔的, 黄山松]
+ * @param {Record<string, THREE.Vector3[]>} spots 每种山石模型顶上能种树的点（flatSpots，模型坐标）
+ * @returns {THREE.Matrix4[][][]} [中景, 近处][挺拔的, 黄山松]
+ */
+export function pinePlacements(perches, pines, spots) {
+  /** @type {THREE.Matrix4[][][]} */
+  const lists = [[[], []], [[], []]];
+  const roots = pines.map(rootOf), rim = rootRim(pines[1]);
+  const q = new THREE.Quaternion(), qt = new THREE.Quaternion(), off = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), o = new THREE.Vector3();
+  const ray = new THREE.Raycaster();
+  /** 模型的根落在 at，转过 q */
+  const put = (/** @type {number} */ group, /** @type {number} */ kind, /** @type {THREE.Vector3} */ at, /** @type {number} */ size) => {
+    off.copy(roots[kind]).multiplyScalar(size).applyQuaternion(q);
+    lists[group][kind].push(new THREE.Matrix4().compose(at.clone().sub(off), q, new THREE.Vector3(size, size, size)));
+  };
+  /** 顶上一棵：根落在 at、往下埋 sink 倍尺寸，绕竖轴转 rot */
+  const top = (/** @type {number} */ group, /** @type {number} */ kind, /** @type {THREE.Vector3} */ at, /** @type {number} */ rot, /** @type {number} */ size, /** @type {number} */ sink) => {
+    q.setFromAxisAngle(up, rot);
+    put(group, kind, at.clone().setY(at.y - sink * size), size);
+  };
+  /**
+   * 石壁上一棵黄山松：根在 (cx, y, cz) 朝 az 方位那条线上，树冠朝 az 伸出去（模型 +x 转到 az）、往外倾 tilt 弧度。
+   * 根团外沿每个点：从 40 米外顺着 az 水平往回打线，量那个高度、那个横向位置上石壁在哪；根往外最多挪到每个点都还在石壁里 5 厘米
+   */
+  const wall = (/** @type {number} */ group, /** @type {THREE.Object3D} */ mesh, /** @type {number} */ cx, /** @type {number} */ cz, /** @type {number} */ az, /** @type {number} */ y, /** @type {number} */ size, /** @type {number} */ tilt) => {
+    const out = new THREE.Vector3(Math.cos(az), 0, Math.sin(az)), side = new THREE.Vector3(-out.z, 0, out.x), dir = out.clone().negate();
+    q.setFromAxisAngle(up, -az).premultiply(qt.setFromAxisAngle(side, -tilt));
+    let t = Infinity;
+    for (const r of rim) {
+      o.copy(r).multiplyScalar(size).applyQuaternion(q);
+      ray.set(new THREE.Vector3(cx, y + o.y, cz).addScaledVector(side, o.dot(side)).addScaledVector(out, 40), dir);
+      const hit = ray.intersectObject(mesh)[0];
+      if (!hit) return;                                           // 这一圈有个点那里没有石头：不种
+      t = Math.min(t, (hit.point.x - cx) * out.x + (hit.point.z - cz) * out.z - o.dot(out) - 0.05);
+    }
+    put(group, 1, new THREE.Vector3(cx, y, cz).addScaledVector(out, t), size);
+  };
+  for (const { mesh, name, kind, wallAz } of perches) {
+    mesh.updateMatrixWorld();
+    if (kind !== 'mid') {
+      for (const s of PROP_SPOTS.cliffPines) if (s.on === kind) wall(1, mesh, s.c[0], s.c[1], s.az, s.y, 0.8, (s.tilt * Math.PI) / 180);
+      continue;
+    }
+    const sp = (spots[name] ?? []).map((v) => v.clone().applyMatrix4(mesh.matrixWorld));
+    if (!sp.length) continue;
+    top(0, 0, sp[0], 0, 0.95, 0.4);
+    const second = sp.find((p) => Math.hypot(p.x - sp[0].x, p.z - sp[0].z) > 1.6);
+    if (second) top(0, 0, second, 2.1, 0.65, 0.4);
+    if (wallAz !== undefined) wall(0, mesh, sp[0].x, sp[0].z, wallAz, sp[0].y - 1.8, 0.85, 0);
+  }
+  return lists;
+}
 
 /**
  * @param {THREE.Scene} scene
@@ -98,7 +169,7 @@ export function loadProps(scene, layout, tier, src, renderer, env) {
   };
   const warn = (name) => (/** @type {any} */ e) => { console.warn(`场景模型 ${name} 加载失败，继续用方块占位：`, e); return null; };
 
-  /** @type {{ mesh: THREE.Mesh, name: string, kind: 'mid' | 'peak' | 'base' }[]} 摆好的山石（中景、邻峰、台底），种松树用 */
+  /** @type {Parameters<typeof pinePlacements>[0]} 摆好的山石（中景、邻峰、台底），种松树用 */
   const perches = [];
   // 山石：中景一个模型摆几处，大小、朝向各不相同，离得远，不投影也不接影子（阴影贴图只罩着广场，罩不到的地方接影子会出黑边）。
   // 中景跟远山用同一套材质（环境给）：原先用标准材质加一层雾，雾色固定取镜头正前方朝太阳那段天边的橙金色，
@@ -111,15 +182,12 @@ export function loadProps(scene, layout, tier, src, renderer, env) {
       const mesh = place(mid, s);
       mesh.scale.multiplyScalar(s.scale);
       mesh.castShadow = mesh.receiveShadow = false;
-      perches.push({ mesh, name, kind: 'mid' });
+      perches.push({ mesh, name, kind: 'mid', wallAz: (s.wallPine * Math.PI) / 180 });
     }
     const top = topOf(m.geo);
     for (const [s, old, kind] of /** @type {const} */ ([[PROP_SPOTS.peak, layout.peakRock, 'peak'], [PROP_SPOTS.base, layout.plaza?.base, 'base']])) {
       if (s.model !== name || !old) continue;
-      // 模型顶面中心转过 rotY、乘上 scale 以后要落在 s.top
-      const c = Math.cos(s.rotY), sn = Math.sin(s.rotY);
-      const x = s.top[0] - s.scale * (top.x * c + top.z * sn), z = s.top[2] - s.scale * (-top.x * sn + top.z * c);
-      const mesh = place(m, { x, y: s.top[1] - s.scale * top.y, z, rotY: s.rotY, mirror: false });
+      const mesh = place(m, perchPose(s, top));
       mesh.scale.setScalar(s.scale);
       old.visible = false;
       perches.push({ mesh, name, kind });
@@ -132,8 +200,7 @@ export function loadProps(scene, layout, tier, src, renderer, env) {
   });
 
   /**
-   * 种松树（山石和两种松树都到了）：远山主峰顶上交给环境；中景石峰、邻峰顶上挺拔的在中间、黄山松在边上树冠朝外；
-   * 台底石壁上长黄山松（从外面水平往广场中心打线找石壁）。邻峰顶是敌人出来的地方，只种在背对索桥的那半边、离中心 2.5 米外。
+   * 种松树（山石和两种松树都到了）：远山主峰顶上交给环境，其余见 pinePlacements。
    * 中景的跟中景石峰同一套材质、不投影；邻峰、台底的离得近，投影、接影子。
    * @param {Record<string, { geo: THREE.BufferGeometry }>} models
    * @param {{ geo: THREE.BufferGeometry, material: THREE.Material, map: THREE.Texture }[]} kinds [挺拔的, 黄山松]
@@ -142,37 +209,7 @@ export function loadProps(scene, layout, tier, src, renderer, env) {
     const spots = Object.fromEntries(Object.entries(models).map(([n, m]) => [n, flatSpots(m.geo, 8)]));
     const roots = kinds.map((k) => rootOf(k.geo));
     env?.usePines(kinds.map((k, i) => ({ geo: k.geo, map: k.map, root: roots[i] })), spots, tier === 'cinema' ? 3 : 1);
-    /** @type {THREE.Matrix4[][][]} [中景, 近处][挺拔的, 黄山松] */
-    const lists = [[[], []], [[], []]];
-    const q = new THREE.Quaternion(), off = new THREE.Vector3();
-    /** 根落在 at，树冠（黄山松沿模型 +x）朝 out 方向 @param {number} group @param {number} kind @param {THREE.Vector3} at @param {number} rot @param {number} size */
-    const add = (group, kind, at, rot, size) => {
-      q.setFromAxisAngle(up, rot);
-      off.copy(roots[kind]).multiplyScalar(size).applyQuaternion(q);
-      lists[group][kind].push(new THREE.Matrix4().compose(new THREE.Vector3(at.x - off.x, at.y - 0.15 * size, at.z - off.z), q, new THREE.Vector3(size, size, size)));
-    };
-    const outward = (/** @type {THREE.Vector3} */ p, /** @type {THREE.Vector3} */ c) => -Math.atan2(p.z - c.z, p.x - c.x);
-    for (const { mesh, name, kind } of perches) {
-      mesh.updateMatrixWorld();
-      if (kind === 'base') {
-        for (const s of PROP_SPOTS.cliffPines) {
-          const dir = new THREE.Vector3(-Math.cos(s.az), 0, -Math.sin(s.az));
-          const hit = new THREE.Raycaster(dir.clone().multiplyScalar(-40).setY(s.y), dir, 0, 40).intersectObject(mesh)[0];
-          if (hit) add(1, 1, hit.point.addScaledVector(dir, 0.3), -Math.atan2(-dir.z, -dir.x), 0.8);
-        }
-        continue;
-      }
-      const sp = (spots[name] ?? []).map((v) => v.clone().applyMatrix4(mesh.matrixWorld));
-      if (!sp.length) continue;
-      const c = sp[0].clone();
-      if (kind === 'mid') {
-        sp.slice(0, 3).forEach((p, k) => add(0, k === 1 ? 1 : 0, p, k === 1 ? outward(p, c) : k * 2.1, k === 2 ? 0.7 : 0.95));
-      } else {
-        const peakC = new THREE.Vector3(PROP_SPOTS.peak.top[0], 0, PROP_SPOTS.peak.top[2]), away = peakC.clone().normalize();
-        const ok = sp.filter((p) => Math.hypot(p.x - peakC.x, p.z - peakC.z) > 2.5 && p.clone().sub(peakC).setY(0).dot(away) > 0.5);
-        ok.slice(0, 3).forEach((p, k) => add(1, k === 1 ? 1 : 0, p, k === 1 ? outward(p, peakC) : k * 2.1, k === 1 ? 0.7 : 0.6 + 0.15 * k));
-      }
-    }
+    const lists = pinePlacements(perches, kinds.map((k) => k.geo), spots);
     kinds.forEach((k, i) => {
       if (lists[0][i].length) instanced(env ? { geo: k.geo, material: env.rockMaterial(k.map, 0.007) } : k, lists[0][i], false);
       if (lists[1][i].length) instanced(k, lists[1][i]);

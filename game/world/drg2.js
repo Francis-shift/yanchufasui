@@ -105,19 +105,67 @@ export function topOf(geo) {
 }
 
 /**
- * 山石顶上能种树的地方（模型坐标）：朝上（三个顶点法线的平均 y > 0.8）、高过 0.85H 的三角形中心。
- * 从离顶面中心最近的一个开始，每次挑离已挑的都最远的（尽量铺开），最多 n 个；所以排在前面的靠中间、后面的靠边。
- * @param {THREE.BufferGeometry} geo 底面在 y = 0 @param {number} n
+ * 模型某处 (x, z) 的地面有多高（模型坐标）：盖住这一点的三角形里最高的那个面；没有就是 -Infinity（悬空）。
+ * 只收高过 from 的三角形，按 1 米的格子分好桶，查一次只看一个格子
+ * @param {THREE.BufferGeometry} geo @param {number} from
  */
-export function flatSpots(geo, n) {
+export function heightField(geo, from) {
+  const p = geo.attributes.position, idx = /** @type {THREE.BufferAttribute} */ (geo.index);
+  /** @type {number[]} */
+  const T = [];
+  /** @type {Map<number, number[]>} */
+  const cells = new Map();
+  const key = (/** @type {number} */ i, /** @type {number} */ j) => (i + 2048) * 4096 + j + 2048;
+  for (let i = 0; i < idx.count; i += 3) {
+    const v = [idx.getX(i), idx.getX(i + 1), idx.getX(i + 2)];
+    if (Math.max(...v.map((k) => p.getY(k))) < from) continue;
+    const t = T.length;
+    for (const k of v) T.push(p.getX(k), p.getY(k), p.getZ(k));
+    const xs = v.map((k) => p.getX(k)), zs = v.map((k) => p.getZ(k));
+    for (let gx = Math.floor(Math.min(...xs)); gx <= Math.floor(Math.max(...xs)); gx++) {
+      for (let gz = Math.floor(Math.min(...zs)); gz <= Math.floor(Math.max(...zs)); gz++) {
+        const c = cells.get(key(gx, gz));
+        if (c) c.push(t); else cells.set(key(gx, gz), [t]);
+      }
+    }
+  }
+  return (/** @type {number} */ x, /** @type {number} */ z) => {
+    let h = -Infinity;
+    for (const t of cells.get(key(Math.floor(x), Math.floor(z))) ?? []) {
+      const [x0, y0, z0, x1, y1, z1, x2, y2, z2] = T.slice(t, t + 9);
+      const d = (z1 - z2) * (x0 - x2) + (x2 - x1) * (z0 - z2);
+      if (Math.abs(d) < 1e-9) continue;
+      const l0 = ((z1 - z2) * (x - x2) + (x2 - x1) * (z - z2)) / d, l1 = ((z2 - z0) * (x - x2) + (x0 - x2) * (z - z2)) / d;
+      if (l0 >= 0 && l1 >= 0 && l0 + l1 <= 1) h = Math.max(h, l0 * y0 + l1 * y1 + (1 - l0 - l1) * y2);
+    }
+    return h;
+  };
+}
+
+/**
+ * 山石顶上能种树的地方（模型坐标）：朝上（三个顶点法线的平均 y > 0.8）、高过 0.9H 的三角形中心，
+ * 而且根盘底下整片都托得住：在半径 clear 和一半的两圈上各量 12 处地面，没有一处比这里低过 0.35——离边够远、不在台阶边上，
+ * 根盘放下去不会一半悬空（10-24 本人看出原来种在边上的黄山松树根整团露在外面）。
+ * 给出的高度取量到的最低处，根按最低处落，高的那边只是埋得深一点。
+ * 从离顶面中心最近的一个开始，每次挑离已挑的都最远的（尽量铺开），最多 n 个；所以排在前面的靠中间、后面的靠外。
+ * @param {THREE.BufferGeometry} geo 底面在 y = 0 @param {number} n @param {number} [clear]
+ */
+export function flatSpots(geo, n, clear = 1.5) {
   const p = geo.attributes.position, nm = geo.attributes.normal, idx = /** @type {THREE.BufferAttribute} */ (geo.index), top = topOf(geo);
+  const ground = heightField(geo, top.H * 0.8);
   /** @type {THREE.Vector3[]} */
   const cand = [];
   for (let i = 0; i < idx.count; i += 3) {
     const [a, b, c] = [idx.getX(i), idx.getX(i + 1), idx.getX(i + 2)];
     const y = (p.getY(a) + p.getY(b) + p.getY(c)) / 3;
-    if (y < top.H * 0.85 || (nm.getY(a) + nm.getY(b) + nm.getY(c)) / 3 < 0.8) continue;
-    cand.push(new THREE.Vector3((p.getX(a) + p.getX(b) + p.getX(c)) / 3, y, (p.getZ(a) + p.getZ(b) + p.getZ(c)) / 3));
+    if (y < top.H * 0.9 || (nm.getY(a) + nm.getY(b) + nm.getY(c)) / 3 < 0.8) continue;
+    const x = (p.getX(a) + p.getX(b) + p.getX(c)) / 3, z = (p.getZ(a) + p.getZ(b) + p.getZ(c)) / 3;
+    let low = y;
+    for (let k = 0; k < 24 && low >= y - 0.35; k++) {
+      const ang = (k % 12) * (Math.PI / 6), r = k < 12 ? clear : clear / 2;
+      low = Math.min(low, ground(x + Math.cos(ang) * r, z + Math.sin(ang) * r));
+    }
+    if (low >= y - 0.35) cand.push(new THREE.Vector3(x, low, z));
   }
   if (!cand.length) return [];
   const flat = (/** @type {THREE.Vector3} */ u, /** @type {THREE.Vector3} */ v) => Math.hypot(u.x - v.x, u.z - v.z);
@@ -132,6 +180,26 @@ export function flatSpots(geo, n) {
     cand.forEach((q, i) => { gap[i] = Math.min(gap[i], flat(q, cand[k])); });
   }
   return out;
+}
+
+/**
+ * 根团的外沿（模型坐标，相对 rootOf 的根）：底下两层（0～0.15、0.15～0.45 米），每层每 30° 取离根最远的一个顶点。
+ * 树种进石壁时这一圈都要在石头里，根团才不露（props.js pinePlacements）
+ * @param {THREE.BufferGeometry} geo
+ */
+export function rootRim(geo) {
+  const p = geo.attributes.position, root = rootOf(geo);
+  /** @type {(THREE.Vector3 | null)[]} */
+  const best = new Array(24).fill(null);
+  const d = new Float32Array(24);
+  for (let i = 0; i < p.count; i++) {
+    const y = p.getY(i);
+    if (y >= 0.45) continue;
+    const dx = p.getX(i) - root.x, dz = p.getZ(i) - root.z, r = Math.hypot(dx, dz);
+    const k = (y < 0.15 ? 0 : 12) + (Math.floor((Math.atan2(dz, dx) + Math.PI) / (Math.PI / 6)) % 12);
+    if (r > d[k]) { d[k] = r; best[k] = new THREE.Vector3(dx, y, dz); }
+  }
+  return /** @type {THREE.Vector3[]} */ (best.filter(Boolean));
 }
 
 /** 树根在哪（模型坐标，底面一薄层顶点的平均）：黄山松的根在一头，摆的时候按根对位置 @param {THREE.BufferGeometry} geo */

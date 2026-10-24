@@ -1,17 +1,21 @@
 // @ts-check
 /**
- * 傀儡（方块版）：沿石阶或索桥一跳一跳地走向阵眼。
+ * 傀儡（方块版）：沿石阶或索桥一跳一跳地走向阵眼；索桥那一路从邻峰的黑雾里走出来。
  * 会被冻住（停步、发蓝）、点燃（持续掉血）、被风推走（脚下没地面就坠入云海）；
  * 死了就碎成方块由物理引擎炸开。碰到阵眼扣阵眼的血。
  */
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { ELEMENTS, ENEMIES } from '../rules/numbers.js';
-import { CASTER_POS, CORE_POS, groundHeightAt, OBSTACLES, PATHS, PLAZA_R } from '../world/layout.js';
+import { CASTER_POS, CORE_POS, groundHeightAt, OBSTACLES, PATHS, PLAZA_R, SPAWN_FOG } from '../world/layout.js';
 import { FlowField } from '../world/flowfield.js';
 import { col, PALETTE, rand } from '../fx/common.js';
 
 const CORE_FRONT = new THREE.Vector3(CORE_POS.x, 0, CORE_POS.z - 2.2);
+/** 索桥那一路从邻峰的黑雾里出来（layout.js SPAWN_FOG）：先只看得见两只眼睛，身子再从暗处慢慢显出来，要这么多秒 */
+const EMERGE_SEC = 1.2;
+const EMERGE_DARK = new THREE.Color(0.04, 0.03, 0.06);
+const { smoothstep } = THREE.MathUtils;
 /** 走进阵眼这么近就算撞上阵眼 */
 const CORE_REACH = 2.6;
 /** 广场上的固定障碍：场景物件（位置以 layout.js 为准）加上施法者本人 */
@@ -48,8 +52,8 @@ export class Enemies {
    * @param {CANNON.World} world
    * @param {import('../fx/particles.js').Particles} particles
    * @param {{ onCoreHit: (dmg: number) => void, onGone: (e: any, how: 'kill' | 'fall' | 'core') => void,
-   *           floatText: (p: THREE.Vector3, text: string, color: string) => void, pushed?: (e: any) => void }} hooks
-   *   pushed：被风吹飞的那一下（画面在身后拖笔触）
+   *           floatText: (p: THREE.Vector3, text: string, color: string) => void, pushed?: (e: any) => void, emerge?: (e: any) => void }} hooks
+   *   pushed：被风吹飞的那一下（画面在身后拖笔触）；emerge：一个敌人从邻峰的黑雾里出来（雾鼓一下）
    */
   constructor(scene, world, particles, hooks) {
     this.scene = scene; this.world = world; this.particles = particles; this.hooks = hooks;
@@ -76,6 +80,8 @@ export class Enemies {
   spawn(type, pathIndex) {
     const spec = ENEMIES[type];
     const mat = new THREE.MeshStandardMaterial({ color: type === 'shield' ? 0x6f6a62 : 0x8b7355, roughness: 0.8 });
+    const base = mat.color.clone(), fromFog = pathIndex % this.paths.length === SPAWN_FOG.path;
+    if (fromFog) { mat.transparent = true; mat.opacity = 0; mat.color.copy(EMERGE_DARK); }   // 眼睛是另一种材质，一开始就亮着
     const g = new THREE.Group();
     const part = (geo, x, y, z, m = /** @type {THREE.Material} */ (mat)) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; g.add(o); return o; };
     part(this.geo.torso, 0, 0.77, 0); part(this.geo.head, 0, 1.35, 0);
@@ -97,12 +103,14 @@ export class Enemies {
     this.scene.add(g, bar);
     const info = this.paths[pathIndex % this.paths.length];
     const e = {
-      id: `e${++seq}`, type, spec, hp: spec.hp, maxHp: spec.hp, group: g, mat, bar, fill, fillMat, scale,
+      id: `e${++seq}`, type, spec, hp: spec.hp, maxHp: spec.hp, group: g, mat, base, bar, fill, fillMat, scale,
       path: info, s: 0, lateral: rand(-0.7, 0.7), mode: 'walk', pos: new THREE.Vector3(), vel: new THREE.Vector3(),
       dir: new THREE.Vector3(0, 0, 1), frozen: 0, burn: 0, stun: 0, hop: rand(0, Math.PI * 2), lastHitEl: '', squash: 0,
+      emerge: fromFog ? 0 : 1,
     };
     pointAt(info, 0, e.pos, e.dir);
     this.list.push(e);
+    if (fromFog) this.hooks.emerge?.(e);
     return e;
   }
 
@@ -220,7 +228,7 @@ export class Enemies {
 
   /** 碎成同色方块，物理引擎炸开 */
   shatter(e, from) {
-    const c = e.mat.color.clone();
+    const c = e.base.clone();
     const away = this._d.copy(e.pos).sub(from).setY(0).normalize();
     for (let i = 0; i < 9; i++) {
       const dm = new THREE.MeshStandardMaterial({ color: c, roughness: 0.8 });
@@ -267,6 +275,12 @@ export class Enemies {
       const stunK = e.stun > 0 && !frozenK ? (Math.random() < 0.5 ? 1 : 0.3) : 0;
       e.mat.emissive.setRGB(0.15 * frozenK + 0.9 * burnK + 0.7 * stunK, 0.45 * frozenK + 0.3 * burnK + 0.55 * stunK, 1.0 * frozenK + 0.05 * burnK + 1.0 * stunK);
       e.mat.emissiveIntensity = frozenK ? 0.55 : stunK ? 0.9 : burnK ? 0.6 : 0;
+      if (e.emerge < 1) {
+        e.emerge = Math.min(1, e.emerge + dt / EMERGE_SEC);
+        e.mat.opacity = smoothstep(e.emerge, 0.3, 1);
+        e.mat.color.copy(EMERGE_DARK).lerp(e.base, smoothstep(e.emerge, 0.45, 1));
+        if (e.emerge === 1) { e.mat.transparent = false; e.mat.needsUpdate = true; }
+      }
 
       if (e.mode === 'walk') {
         if (!held) {

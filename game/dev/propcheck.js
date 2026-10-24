@@ -3,7 +3,7 @@
  * 物件材质检查页（只给本机预览面板用：python tools/build_preview.py props --asset ...）。
  * 面板里的页面不能超过 512 KB，整场游戏加牌坊模型放不下，所以单拎出来：同一套傍晚天光、调色、物件加载与材质，
  * 只摆内嵌进来的模型（石兽、镇山石、山石），看鎏金反不反光、浮雕接不接得住低角度的阳光、山石跟远山接不接得上。游戏本身不引用这个文件。
- * 调试接口 window.pc：view('lion' | 'stone' | 'game' | 'left' | 'right' | 'peak' | 'base' | 'far' | 'censer' | 'huabiao' | 'rim' | 'stairs' | 'lantern')、
+ * 调试接口 window.pc：view('lion' | 'stone' | 'game' | 'left' | 'right' | 'peak' | 'base' | 'far' | 'censer' | 'huabiao' | 'rim' | 'stairs' | 'lantern' | 'fog')、
  * snap(w, h) 返回 JPEG 地址、look(name, rotY) 单看一件还没摆进场景的模型。
  */
 import * as THREE from 'three';
@@ -28,6 +28,8 @@ const VIEWS = {
   right: [[6, 3, -10], [22, 0, -44]],
   // 邻峰（从广场上顺着索桥看）、台底（从广场外面看）、远山（拉远，左右都进画）
   peak: [[-6, 4, -2], [-27, -3, -16]],
+  // 落脚台和背后的黑雾（从索桥广场那头看过去；雾要鼓起来看 pc.env.spawnPuff()）
+  fog: [[-11.5, 3, -4.5], [-27, 0.8, -16]],
   base: [[18, 3, 22], [0, -5, 0]],
   far: [[5.6, 7.4, 16.8], [-10, 4, -120]],
   // 右边的香炉、华表；栏杆：台边（从广场里看向石阶口和桥头）、石阶两侧（从台边往下看）

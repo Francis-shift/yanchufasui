@@ -8,6 +8,7 @@
  */
 import * as THREE from 'three';
 import { clamp01, rng } from '../fx/common.js';
+import { SPAWN_FOG } from './layout.js';
 
 export const SUN_DIR = new THREE.Vector3(0.55, 0.242, -0.8).normalize();
 const ZENITH = new THREE.Color(0.16, 0.27, 0.5);
@@ -165,6 +166,7 @@ export function buildEnvironment(scene, renderer) {
   const clouds = buildCloudSea(scene, U);
   const { smoke, useRocks, usePavilion, usePines } = buildFarLayer(scene, U);
   const bands = buildFogBank(scene, U);
+  const spawnFog = buildSpawnFog(scene, U);
   const bolt = buildBolt(scene);
 
   const bg = /** @type {THREE.Color} */ (scene.background), fog = /** @type {THREE.FogExp2} */ (scene.fog);
@@ -214,6 +216,7 @@ export function buildEnvironment(scene, renderer) {
       if (nextBolt <= 0) { strike(); nextBolt = 1.2 + R() * (6 - 4 * invK); }
     }
     flashT += dt;
+    spawnFog.uPuff.value *= Math.exp(-dt * 0.8);
     // 一道闪电闪两下：亮、暗一下、再亮，然后很快熄掉
     const f = flashT < 0.07 ? 1 : flashT < 0.12 ? 0.25 : flashT < 0.2 ? 0.85 : 0.85 * Math.exp(-(flashT - 0.2) * 9);
     U.uFlash.value = f * (1 - dimK * 0.5);
@@ -221,7 +224,10 @@ export function buildEnvironment(scene, renderer) {
   };
   /** 中景山石的材质（props.js 用），跟远山同一套，根部融进云的那段短一些 @param {THREE.Texture} map @param {number} haze */
   const rockMaterial = (map, haze) => farRockMat(U, map, haze, -3);
-  return { sun, hemi, clouds, setDim, setInvasion, setShadowMap, aim, update, flash: strike, look: LOOK, useRocks, usePavilion, usePines, rockMaterial };
+  /** 邻峰的黑雾里出来一个敌人（enemies.js 的 emerge 钩子）：雾鼓起来一下，几秒内落回去 */
+  const spawnPuff = () => { spawnFog.uPuff.value = Math.min(1, spawnFog.uPuff.value + 0.7); };
+  return { sun, hemi, clouds, setDim, setInvasion, setShadowMap, aim, update, flash: strike, look: LOOK, useRocks, usePavilion, usePines, rockMaterial,
+    spawnPuff, spawnFog: spawnFog.mesh };
 }
 
 /** 云海：两层流动的噪声当起伏；朝太阳挪一点再取一次，差值大于零就是迎光坡，镀金边；远处融进天边色。
@@ -500,7 +506,7 @@ function buildFarLayer(scene, U) {
         const rot = kind ? -Math.atan2(p.z - c.z, p.x - c.x) : r * 6.28;
         q.setFromAxisAngle(up, rot);
         off.copy(kinds[kind].root).multiplyScalar(size).applyQuaternion(q);
-        lists[kind].push(new THREE.Matrix4().compose(pv.set(p.x - off.x, p.y - 0.2 * size, p.z - off.z), q, sc.setScalar(size)));
+        lists[kind].push(new THREE.Matrix4().compose(pv.set(p.x - off.x, p.y - 0.4 * size, p.z - off.z), q, sc.setScalar(size)));   // 根团埋进去（同 props.js）
         k++;
       }
     }
@@ -712,6 +718,75 @@ function buildFogBank(scene, U) {
     bands.push(band);
   }
   return bands;
+}
+
+/**
+ * 索桥那一路敌人的来路（layout.js SPAWN_FOG）：邻峰背后从云海卷上来一道黑雾，漫过落脚台，敌人从雾里走出来。
+ * 几张始终侧对镜头的竖片（同黑烟的写法）：背后三张高的从云海升起，台沿两张往台上漫，台上三张矮的盖住出生的地方、往索桥那边淡下去。
+ * 平时一层薄雾；每出来一个敌人鼓一下（uPuff，update 里慢慢落回去），入侵越深越浓。颜色同入侵的黑雾（紫色只给敌人）。
+ * 台面上那截贴地处按高度淡掉，不显出跟台面的交线；从云海里升起的那截同样淡进云里
+ */
+function buildSpawnFog(scene, U) {
+  const { at, away, r } = SPAWN_FOG, side = new THREE.Vector3(-away.z, 0, away.x);
+  /** 每片：沿 away 离邻峰中心多远、横向挪多少、底边高、宽、高、哪种（0 背后升起的高柱，1 台沿和台上）。远的在前（同一个网格里按顺序画） */
+  const PUFFS = [
+    [r + 3.6, 2.8, -10, 7, 17, 0], [r + 3.1, -2.6, -10, 8, 19, 0], [r + 2.6, 0.3, -10, 7.5, 21, 0],
+    [r - 0.4, -1.9, -2.2, 6, 4.6, 1], [r - 0.5, 1.9, -2.2, 6, 4.2, 1],
+    [1.9, -1.3, -0.3, 5.5, 2.3, 1], [1.3, 1.6, -0.3, 5, 2, 1], [-0.2, 0, -0.3, 4, 1.6, 1],
+  ];
+  const center = [], corner = [], size = [], seed = [], kind = [], index = [];
+  PUFFS.forEach(([d, s, y, w, h, k], i) => {
+    const c = away.clone().multiplyScalar(d).addScaledVector(side, s);
+    for (const [cx, cy] of [[-0.5, 0], [0.5, 0], [0.5, 1], [-0.5, 1]]) { center.push(c.x, y, c.z); corner.push(cx, cy); size.push(w, h); seed.push(i * 1.37 + 0.2); kind.push(k); }
+    index.push(i * 4, i * 4 + 1, i * 4 + 2, i * 4, i * 4 + 2, i * 4 + 3);
+  });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(center, 3));
+  g.setAttribute('aCorner', new THREE.Float32BufferAttribute(corner, 2));
+  g.setAttribute('aSize', new THREE.Float32BufferAttribute(size, 2));
+  g.setAttribute('aSeed', new THREE.Float32BufferAttribute(seed, 1));
+  g.setAttribute('aKind', new THREE.Float32BufferAttribute(kind, 1));
+  g.setIndex(index);
+  const uPuff = { value: 0 };
+  const mat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, fog: false, side: THREE.DoubleSide,
+    uniforms: { ...U, uPuff, uR: { value: r + 0.2 } },
+    vertexShader: `attribute vec2 aCorner; attribute vec2 aSize; attribute float aSeed; attribute float aKind;
+      varying vec2 vUv; varying float vSeed; varying float vKind; varying vec3 vL;
+      void main(){
+        vec3 base = (modelMatrix * vec4(position, 1.)).xyz;
+        vec3 toCam = cameraPosition - base; vec3 right = normalize(vec3(toCam.z, 0., -toCam.x));
+        vec3 p = base + right * aCorner.x * aSize.x + vec3(0., aCorner.y * aSize.y, 0.);
+        vUv = aCorner; vSeed = aSeed; vKind = aKind; vL = p - (modelMatrix * vec4(0., 0., 0., 1.)).xyz;
+        gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.); }`,
+    fragmentShader: `varying vec2 vUv; varying float vSeed; varying float vKind; varying vec3 vL;
+      uniform float uPuff; uniform float uR;
+      ${COMMON_GLSL}
+      void main(){
+        float x = vUv.x, y = vUv.y;
+        float sp = mix(0.3, 0.12, vKind) * (1. + uPuff);                          // 往上流；鼓起来时翻得快
+        vec2 q = vec2(x * 2.6, y * mix(3.2, 1.4, vKind)) + vSeed * 7.;
+        float n = fbm(q - vec2(uTime * 0.03, uTime * sp));
+        float n2 = fbm(q * 2.1 + n * 1.5 - vec2(0., uTime * sp * 1.6));
+        // 形状：中间厚两边薄；高柱越往上越细越散，台上的几片贴地、顶上参差
+        float w = mix(0.22 + 0.2 * y, 0.44, vKind);
+        float body = 1. - smoothstep(w * 0.45, w, abs(x) + (n - 0.5) * 0.25);
+        float top = 1. - smoothstep(0.35, 1., y + (n2 - 0.5) * 0.5);
+        float a = body * top * smoothstep(0.18, 0.5, n * 0.7 + n2 * 0.45 - 0.1 + 0.15 * uPuff);
+        a *= 0.8 + 0.2 * clamp(uPuff + uInv, 0., 1.);
+        a *= smoothstep(-9., -7., vL.y);                                          // 从云海里升起来
+        float inside = 1. - smoothstep(uR - 0.4, uR + 0.4, length(vL.xz));
+        a *= mix(1., smoothstep(0., 0.45, vL.y), inside);                         // 台面上贴地那截淡掉
+        if (a < 0.01) discard;
+        vec3 c = mix(uInvDeep, uInvLit * 1.5, smoothstep(0.35, 0.85, n2));
+        c += uInvGlow * a * (1. - a) * 4. * (0.03 + 0.1 * uPuff) * n2;            // 边上一丝紫光，鼓起来时亮一点（多了整团发紫，不像黑雾）
+        gl_FragColor = vec4(dimColor(c, uDim), a * 0.95); }`,
+  });
+  const mesh = new THREE.Mesh(g, mat);
+  mesh.position.copy(at);   // 透明物体按物体位置排先后：放在邻峰上，跟广场上的光罩、敌人排得对
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+  return { mesh, uPuff };
 }
 
 /** 雾里的紫色闪电：一条锯齿带子从高处劈进雾里，带一根分叉；亮度超过泛光阈值，会发光 */
