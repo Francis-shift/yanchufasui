@@ -79,6 +79,13 @@ export const PROP_SPOTS = {
     { model: 'rock-a', x: 19, y: -14.5, z: -30, rotY: 2.1, scale: 0.75, mirror: true },
     { model: 'rock-a', x: 26, y: -16, z: -58, rotY: 4.0, scale: 1, mirror: false },
   ],
+  /**
+   * 托东西的两块山石（替换代码合成的邻峰、广场台底，10-24 本人看出代码石头像塑料）：给的是顶面中心要放在哪（top），
+   * props.js 按模型的顶面反推摆放位置。邻峰用石柱，放大到顶面跟落脚台差不多大，往下变粗的那截藏在云里；
+   * 台底用浮岛，顶上那圈岩檐（半径约 11 米）正好托住广场，顶面压在台沿底下。
+   */
+  peak: { model: 'rock-a', top: [PEAK.c.x, -0.9, PEAK.c.y], rotY: 0.8, scale: 1.5 },
+  base: { model: 'rock-b', top: [0, -1.75, 0], rotY: 0, scale: 1 },
 };
 
 /**
@@ -182,7 +189,7 @@ export function buildLayout(scene, opts = {}) {
     }
   }
   scene.add(chains(lines, iron));
-  // 邻峰：索桥那头的山石，顶上一块平台
+  // 邻峰：索桥那头的山石，顶上一块平台（山石模型到了换掉，见 PROP_SPOTS.peak）
   const peak = rockColumn(PEAK.r, 2.2, 22, 11);
   peak.position.set(PEAK.c.x, -11, PEAK.c.y);
   const landing = shadowy(new THREE.Mesh(new THREE.CylinderGeometry(PEAK.r + 0.15, PEAK.r, 0.3, 40), darkStone));
@@ -218,7 +225,7 @@ export function buildLayout(scene, opts = {}) {
   caster.position.copy(CASTER_POS);
   scene.add(caster);
 
-  return { coreSigil, crystal, caster, gateBox, stoneBox, plaza };
+  return { coreSigil, crystal, caster, gateBox, stoneBox, peakRock: peak, plaza };
 }
 
 /**

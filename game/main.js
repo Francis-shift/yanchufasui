@@ -119,7 +119,7 @@ export function start(root, opts = {}) {
   env.setShadowMap(quality.shadowMap);
   const layout = buildLayout(scene, { tex: quality.name === 'cinema' ? 2048 : 1024 });
   const barrier = buildBarrier(scene, { tex: quality.name === 'cinema' ? 2048 : 1024 });   // 护山大阵的金色光罩，裂纹跟阵眼血量
-  if (opts.models) loadProps(scene, layout, quality.name, opts.models, renderer);   // 牌坊、石兽、镇山石的模型，到了替换方块占位
+  if (opts.models) loadProps(scene, layout, quality.name, opts.models, renderer, env);   // 牌坊、石兽、镇山石的模型，到了替换方块占位
   const particles = new Particles(scene, quality.particles);
   particles.floorAt = (x, z) => (groundHeightAt(x, z) ?? -60) + 0.03;
   const ink = new Particles(scene, quality.ink, { ink: true });   // 墨点、墨烟（特效风格 v2）

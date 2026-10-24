@@ -2,8 +2,8 @@
 /**
  * 物件材质检查页（只给本机预览面板用：python tools/build_preview.py props --asset ...）。
  * 面板里的页面不能超过 512 KB，整场游戏加牌坊模型放不下，所以单拎出来：同一套傍晚天光、调色、物件加载与材质，
- * 只摆内嵌进来的模型（石兽、镇山石），看鎏金反不反光、浮雕接不接得住低角度的阳光。游戏本身不引用这个文件。
- * 调试接口 window.pc：view('lion' | 'stone' | 'game' | 'left' | 'right')、snap(w, h) 返回 JPEG 地址。
+ * 只摆内嵌进来的模型（石兽、镇山石、山石），看鎏金反不反光、浮雕接不接得住低角度的阳光、山石跟远山接不接得上。游戏本身不引用这个文件。
+ * 调试接口 window.pc：view('lion' | 'stone' | 'game' | 'left' | 'right' | 'peak' | 'base' | 'far')、snap(w, h) 返回 JPEG 地址。
  */
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -13,7 +13,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { GradePass } from '../fx/grade.js';
 import { TIERS } from '../quality.js';
 import { buildEnvironment } from '../world/environment.js';
-import { PROP_SPOTS } from '../world/layout.js';
+import { buildLayout, PROP_SPOTS } from '../world/layout.js';
 import { loadProps } from '../world/props.js';
 
 /** 机位：[镜头位置, 看的点] */
@@ -24,6 +24,10 @@ const VIEWS = {
   // 中景石峰：从广场边上看左右两组
   left: [[-6, 3, -10], [-28, 1, -34]],
   right: [[6, 3, -10], [22, 0, -44]],
+  // 邻峰（从广场上顺着索桥看）、台底（从广场外面看）、远山（拉远，左右都进画）
+  peak: [[-6, 4, -2], [-27, -3, -16]],
+  base: [[18, 3, 22], [0, -5, 0]],
+  far: [[5.6, 7.4, 16.8], [-10, 4, -120]],
 };
 
 /** @param {HTMLElement} root @param {Record<string, string>} assets 文件名 → 地址 */
@@ -45,12 +49,8 @@ export function startPropCheck(root, assets) {
   composer.addPass(grade);
   const env = buildEnvironment(scene, renderer);
   env.setShadowMap(q.shadowMap);
-  const ground = new THREE.Mesh(new THREE.CircleGeometry(11, 64), new THREE.MeshStandardMaterial({ color: 0xcfc8bc, roughness: 0.55 }));
-  ground.rotation.x = -Math.PI / 2;
-  ground.receiveShadow = true;
-  scene.add(ground);
-  const dummy = { gateBox: new THREE.Object3D(), stoneBox: new THREE.Object3D() };
-  const ready = loadProps(scene, dummy, 'smooth', (f) => assets[f] || `missing:${f}`, renderer);
+  const layout = buildLayout(scene, { tex: 1024 });   // 广场、索桥、邻峰都在（台底、邻峰的山石换得对不对要放在一起看）
+  const ready = loadProps(scene, layout, 'smooth', (f) => assets[f] || `missing:${f}`, renderer, env);
 
   let w = 960, h = 540, view = 'lion';
   const render = () => {

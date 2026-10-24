@@ -83,3 +83,23 @@ export function staticGeometry(d) {
   geo.computeBoundingSphere();
   return geo;
 }
+
+/**
+ * 山石模型的顶面在哪（模型坐标）：高、平均宽，顶上一段的水平中心（取范围的中点：顶面不一定在整体正中），
+ * 顶面高度（顶上一薄层的中位数：顶面高低不平，取最高点会让放上去的东西悬空）。摆楼阁、拿石柱托索桥的落脚台用。
+ * @param {THREE.BufferGeometry} geo 底面在 y = 0
+ */
+export function topOf(geo) {
+  const p = geo.attributes.position, n = p.count;
+  let H = 0, x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (let i = 0; i < n; i++) { H = Math.max(H, p.getY(i)); x0 = Math.min(x0, p.getX(i)); x1 = Math.max(x1, p.getX(i)); z0 = Math.min(z0, p.getZ(i)); z1 = Math.max(z1, p.getZ(i)); }
+  let tx0 = Infinity, tx1 = -Infinity, tz0 = Infinity, tz1 = -Infinity;
+  const ys = [];
+  for (let i = 0; i < n; i++) {
+    const y = p.getY(i);
+    if (y > H * 0.9) { tx0 = Math.min(tx0, p.getX(i)); tx1 = Math.max(tx1, p.getX(i)); tz0 = Math.min(tz0, p.getZ(i)); tz1 = Math.max(tz1, p.getZ(i)); }
+    if (y > H * 0.94) ys.push(y);
+  }
+  ys.sort((a, b) => a - b);
+  return { H, W: (x1 - x0 + z1 - z0) / 2, x: (tx0 + tx1) / 2, z: (tz0 + tz1) / 2, y: ys[ys.length >> 1] ?? H };
+}

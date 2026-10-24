@@ -398,7 +398,7 @@ export function buildPlaza(scene, o) {
   foot.position.y = -H - 0.17;
   scene.add(lip, lipTop, foot);
 
-  // 台底山石：顶上收在台沿里面，往下收窄插进云海
+  // 台底山石：顶上收在台沿里面，往下收窄插进云海（山石模型到了换掉，见 layout.js PROP_SPOTS.base）
   const cliff = rockColumn(R - 0.45, 5.5, 21, 7);
   cliff.position.y = -H - 0.3 - 10.5;
   scene.add(cliff);
@@ -428,6 +428,8 @@ export function buildPlaza(scene, o) {
   }
 
   return {
+    /** 台底山石（props.js 换成模型以后藏起来） */
+    base: cliff,
     /** 入侵程度（world/invasion.js）：台面裂缝、焦痕跟着长 @param {number} k */
     setInvasion(k) { inv.value = k; ROCK_INV.value = k; },
     /** @param {number} dt 游戏时间 */
