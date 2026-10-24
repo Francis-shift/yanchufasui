@@ -251,7 +251,7 @@ const FLOOR = { time: { value: 0 }, inv: { value: 0 }, refl: { value: flat(0, 0,
  * 偶尔一滴水落下荡开一圈涟漪；倒影：电影档用平面反射换掉环境反射，菲涅耳比真水夸张（游戏机位俯看约 25°，真水只反 5%～10%，
  * 照出来的天跟晒亮的石面差不多亮，从游戏机位几乎看不出水洼）；流畅档水面的环境反射也按这个量
  * @param {{ color: THREE.Texture, aux: THREE.Texture }} floor @param {THREE.Texture} wear @param {number} R
- * @param {{ uniforms: Record<string, { value: any }>, decl: string, color: string, rough: string, emissive: string }} [extra] 广场的入侵损伤
+ * @param {{ uniforms: Record<string, { value: any }>, decl: string, color: string, rough: string, metal: string, emissive: string }} [extra] 广场的入侵损伤与阵纹
  */
 function stoneFloor(floor, wear, R, extra) {
   const mat = new THREE.MeshStandardMaterial({ map: floor.color, roughnessMap: floor.aux, bumpMap: floor.aux, bumpScale: 1.2, roughness: 1 });
@@ -285,6 +285,8 @@ function stoneFloor(floor, wear, R, extra) {
         roughnessFactor = mix(roughnessFactor, max(roughnessFactor, 0.8), sWear.g);
         roughnessFactor = mix(mix(roughnessFactor, roughnessFactor * 0.6, damp), 0.04, pool);
         ${extra?.rough ?? ''}`)
+      .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+        ${extra?.metal ?? ''}`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
         vec3 sTx = normalize((viewMatrix * vec4(1., 0., 0., 0.)).xyz), sTz = normalize((viewMatrix * vec4(0., 0., 1., 0.)).xyz);
         vec3 sN = texture2D(uStoneN, sp / 1.6).xyz * 2. - 1.;  // 贴图右 = +x、上 = +z（贴图不翻转）
@@ -318,7 +320,7 @@ function stoneFloor(floor, wear, R, extra) {
 }
 
 /**
- * 入侵的损伤图：R 是这一处裂开时的入侵程度，G 是烧焦时的程度（255 = 永远不会）。
+ * 入侵的损伤图：R 是这一处裂开时的入侵程度，G 是烧焦时的程度（255 = 永远不会）；B 是阵纹刻槽（0 = 槽里，顺手放在这张里，不多占一张图）。
  * 用"取较暗"叠上去，重叠处取最早出现的那个；同一条裂缝越往里越晚，看上去是一点点裂进来的。
  * 裂缝从敌人来的那一侧（石阶口、索桥口所在的 -z、-x 半边）的台边往里长；焦痕撒在敌人走过的半边，最后一两波才烧到中间。
  * @param {number} S @param {number} R
@@ -369,7 +371,10 @@ function damageTexture(S, R) {
         grad.addColorStop(1, 'rgb(255, 255, 255)');
         g.fillStyle = grad; g.beginPath(); g.arc(bx, by, rad, 0, Math.PI * 2); g.fill();
       }
-    }  }, false);
+    }
+    // B：阵纹刻槽（0 = 槽里）。描金的地方当金属，施法时流光、阵眼挨打时闪，都只走槽里
+    engraving((w, path) => { g.beginPath(); path(g); g.strokeStyle = 'rgb(255, 255, 0)'; g.lineWidth = w + 0.015; g.stroke(); });
+  }, false);
 }
 
 // ---------------------------------------------------------------- 台沿
@@ -508,8 +513,8 @@ export function rockColumn(rTop, rBottom, h, seed) {
 // ---------------------------------------------------------------- 组装
 /**
  * @param {THREE.Scene} scene
- * @param {{ R: number, stairs: { halfW: number, zTop: number, zBottom: number, yBottom: number }, tex: number, wear: Wear, reflect?: number }} o
- *   tex：台面贴图边长（电影档 2048、流畅档 1024）；wear：常走的路、东西脚下、水洼（layout.js 按摆放给）；
+ * @param {{ R: number, stairs: { halfW: number, zTop: number, zBottom: number, yBottom: number }, tex: number, wear: Wear, core: [number, number], reflect?: number }} o
+ *   tex：台面贴图边长（电影档 2048、流畅档 1024）；wear：常走的路、东西脚下、水洼（layout.js 按摆放给）；core：阵眼 [x, z]（阵纹流光往那扫）；
  *   reflect：水洼平面反射那张图的宽（电影档给；不给就只照出天）
  */
 export function buildPlaza(scene, o) {
@@ -517,17 +522,27 @@ export function buildPlaza(scene, o) {
   const shadowy = (m) => { m.castShadow = true; m.receiveShadow = true; return m; };
 
   // 台面
+  // 阵纹（10-25）：刻槽里的描金当金属（夕阳下反金光，不再是画上去的黄线）；施法时一道金光从台面远端扫向阵眼，
+  // 前沿 0.8 秒扫完、后面拖一段渐暗的尾巴；阵眼挨打时整片阵纹闪一下（离阵眼越近越亮，快速抖动）
+  const sigil = { flow: { value: 99 }, hit: { value: 0 }, core: { value: new THREE.Vector2(...o.core) } };
   const floor = floorTextures(o.tex, R), damage = damageTexture(Math.min(1024, o.tex), R);
   const floorMat = stoneFloor(floor, wearTexture(Math.min(1024, o.tex), R, o.wear), R, {
-    uniforms: { uDamage: { value: damage }, uInv: FLOOR.inv, uTime: FLOOR.time },
-    decl: '\nuniform sampler2D uDamage; uniform float uInv; uniform float uTime;',
-    color: `vec2 dmg = texture2D(uDamage, vMapUv).rg;
+    uniforms: { uDamage: { value: damage }, uInv: FLOOR.inv, uTime: FLOOR.time, uFlow: sigil.flow, uHit: sigil.hit, uCore: sigil.core },
+    decl: '\nuniform sampler2D uDamage; uniform float uInv, uTime, uFlow, uHit; uniform vec2 uCore;',
+    color: `vec3 dmg = texture2D(uDamage, vMapUv).rgb;
+        float groove = 1. - dmg.b;
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92, 0.64, 0.28), 0.75 * groove);   // 鎏金：当金属时这就是反光的颜色
         float crack = smoothstep(dmg.r - 0.02, dmg.r + 0.02, uInv) * step(dmg.r, 0.99);
         float scorch = clamp((uInv - dmg.g) / 0.2, 0., 1.) * step(dmg.g, 0.99);   // 软边：阈值比当前程度低得越多越黑（硬边实测像地上的洞）
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.13, 0.09, 0.07), scorch * scorch * 0.6);
         diffuseColor.rgb *= 1. - 0.85 * crack;`,
     rough: 'roughnessFactor = max(roughnessFactor, max(crack, scorch * 0.9));',
-    emissive: 'totalEmissiveRadiance += vec3(0.55, 0.18, 1.0) * crack * smoothstep(0.35, 0.8, uInv) * (0.5 + 0.3 * sin(uTime * 2.3 + vMapUv.x * 40.));',
+    metal: `metalnessFactor = mix(metalnessFactor, 0.8, groove * (1. - crack));   // 不到 1：背光那面只剩环境反射（场景的环境光弱），全金属会发黑
+        roughnessFactor = mix(roughnessFactor, 0.3, groove * (1. - pool) * (1. - crack));`,
+    emissive: `totalEmissiveRadiance += vec3(0.55, 0.18, 1.0) * crack * smoothstep(0.35, 0.8, uInv) * (0.5 + 0.3 * sin(uTime * 2.3 + vMapUv.x * 40.));
+        float dC = length(vec2(sp.x, -sp.y) - uCore), D = 19. - uFlow * 24.;   // 离阵眼多远；前沿从 19 米外扫进来
+        float flowK = (exp(-pow((dC - D) / 0.7, 2.)) + 0.35 * step(D, dC) * exp((D - dC) / 2.5)) * (1. - smoothstep(0.9, 1.5, uFlow));
+        totalEmissiveRadiance += vec3(1., 0.7, 0.32) * groove * (1. - crack) * (2.6 * flowK + uHit * (1.6 + 1.2 * exp(-dC / 5.)) * (0.75 + 0.25 * sin(uTime * 37.)));`,
   });
   const top = new THREE.Mesh(new THREE.CircleGeometry(R, 96), floorMat);
   top.rotation.x = -Math.PI / 2;
@@ -609,8 +624,15 @@ export function buildPlaza(scene, o) {
     base: cliff,
     /** 入侵程度（world/invasion.js）：台面裂缝、焦痕跟着长 @param {number} k */
     setInvasion(k) { FLOOR.inv.value = k; ROCK_INV.value = k; },
-    /** @param {number} dt 游戏时间 */
-    update(dt) { FLOOR.time.value += dt; },
+    /** 施法：阵纹里一道金光扫向阵眼 */
+    flow() { sigil.flow.value = 0; },
+    /** 阵眼挨打：阵纹闪一下 */
+    hit() { sigil.hit.value = 1; },
+    /**
+     * @param {number} dt 游戏时间（涟漪跟着慢放）
+     * @param {number} [real] 真实时间：流光、闪光按它走（咏唱慢放到 0.3 倍时，按游戏时间扫一趟要 2.7 秒，法术早放出去了）
+     */
+    update(dt, real = dt) { FLOOR.time.value += dt; sigil.flow.value += real; sigil.hit.value = Math.max(0, sigil.hit.value - real * 2.2); },
   };
 }
 

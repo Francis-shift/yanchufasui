@@ -215,7 +215,7 @@ export function buildLayout(scene, opts = {}) {
     pools: [[0.6, -5.0, 1.5, 0.9], [5.6, -0.8, 0.9, 0.7], [-4.6, -1.2, 0.8, 0.6], [2.6, 3.4, 0.8, 0.6], [-3.6, 7.2, 0.6, 0.45],
       [-6.8, 4.6, 0.55, 0.45], [8.3, -4.6, 0.5, 0.4], [-2.2, -9.4, 0.5, 0.35]],
   };
-  const plaza = buildPlaza(scene, { R: PLAZA_R, stairs: STAIRS, tex: opts.tex ?? 2048, wear, reflect: opts.reflect });
+  const plaza = buildPlaza(scene, { R: PLAZA_R, stairs: STAIRS, tex: opts.tex ?? 2048, wear, core: [CORE_POS.x, CORE_POS.z], reflect: opts.reflect });
 
   // 山门牌坊（占位：两组白石柱 + 横梁 + 蓝屋顶，尺寸同模型；模型加载出来就藏起来）
   const marble = new THREE.MeshStandardMaterial({ color: 0xd9d4ca, roughness: 0.6 });

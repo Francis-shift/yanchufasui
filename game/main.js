@@ -220,11 +220,18 @@ export function start(root, opts = {}) {
   const timers = [];
   const after = (sec, fn) => timers.push({ t: sec, fn });
 
+  /** 咏唱开始（四种施法入口都走这里）：法阵起光，台面阵纹里一道金光扫向阵眼 @param {string} el */
+  function beginChant(el) {
+    fx.beginChant(el);
+    layout.plaza.flow();
+  }
+
   function hitCore(dmg) {
     if (S.phase !== 'playing') return;
     S.core = Math.max(0, S.core - dmg);
     hud.setCore(S.core, CORE_HP);
     barrier.hit();
+    layout.plaza.hit();
     barrier.setDamage(1 - S.core / CORE_HP);
     fx.shake = Math.max(fx.shake, 0.35);
     layout.crystal.material.emissiveIntensity = 3;
@@ -379,7 +386,7 @@ export function start(root, opts = {}) {
     slowSince = 0; slowSpent = false;
     const t0 = performance.now();
     const castId = ++castSeq;
-    fx.beginChant(guessElement(text) || 'arcane');          // 回车 0.1 秒内先给反应
+    beginChant(guessElement(text) || 'arcane');          // 回车 0.1 秒内先给反应
     const kwRaw = parseKeywords(text);
     locks.show(castId, lockSteps(sanitizeIntent(kwRaw, text).steps).marks);   // 先按关键词亮锁定，模型回来再更正
     const remoteP = parseRemote(opts.parseUrl, text, PARSE_TIMEOUT_MS);
@@ -499,7 +506,7 @@ export function start(root, opts = {}) {
     pend = { els: [el], castId, t: window.setTimeout(fireButtons, BUTTON_CHANT_MS) };
     hud.setCharging(pend.els);
     buttonChant = true;
-    fx.beginChant(el);
+    beginChant(el);
     locks.show(castId, lockSteps(buttonIntent(el).steps).marks);
   }
 
@@ -519,7 +526,7 @@ export function start(root, opts = {}) {
     if (S.phase !== 'playing' || S.busy || pend || S.gauge < ULT_GAUGE || !hud.write.hidden) return;
     S.busy = true;
     buttonChant = true;
-    fx.beginChant('ice');
+    beginChant('ice');
     const intent = { steps: [], momentum: 0, name: '冰龙', unknown: [], overreach: false, notes: [], summon: 'ice' };
     perform(intent, { text: '按键 · 召唤', source: '天赋按键', ms: 0, raw: null, castId: ++castSeq, button: true });
   }
@@ -845,7 +852,7 @@ export function start(root, opts = {}) {
     const castId = ++castSeq;
     const intent = sanitizeIntent(raw, label);
     locks.show(castId, lockSteps(intent.steps, intent.momentum).marks);
-    fx.beginChant(intent.summon || intent.steps[0]?.el || 'arcane');
+    beginChant(intent.summon || intent.steps[0]?.el || 'arcane');
     after(0.2, () => perform(intent, { text: label, source: '试验场', ms: 0, raw, castId }));
   }
   function labTargets() {
@@ -911,7 +918,7 @@ export function start(root, opts = {}) {
     S.inv = lab.inv >= 0 ? lab.inv : stepInvasion(S.inv, invT, S.phase, dt);
     env.setInvasion(S.inv);
     layout.plaza.setInvasion(S.inv);   // 台面裂缝、焦痕
-    layout.plaza.update(dt);
+    layout.plaza.update(dt, realDt);
     if (lab.shield >= 0) barrier.setDamage(lab.shield);   // 试验场锁定光罩裂到几成
     barrier.update(dt, worldDim);
     layout.coreSigil.rotation.z += dt * 0.2;
