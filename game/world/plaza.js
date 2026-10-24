@@ -263,7 +263,7 @@ let _rockMat = /** @type {THREE.MeshStandardMaterial | null} */ (null);
 /** 山石的入侵程度（广场和邻峰共用一份材质）：根部融进的云色跟着变紫黑 */
 const ROCK_INV = { value: 0 };
 /** 山石材质：顶点颜色给大块的明暗和青苔，一张平铺的裂纹贴图给近看的细节（同时当凹凸）；
- * 往下融进云色（云海是不透明的平面，不融的话山石插进去是一刀切的直线） */
+ * 往下融进云色（云海是不透明的平面，不融的话山石插进去是一刀切的直线；meltIntoClouds） */
 function rockMaterial() {
   if (_rockMat) return _rockMat;
   const detail = paint(512, 512, (g, S) => {
@@ -285,16 +285,29 @@ function rockMaterial() {
   });
   detail.wrapS = detail.wrapT = THREE.RepeatWrapping;
   detail.repeat.set(16, 4);
-  _rockMat = new THREE.MeshStandardMaterial({ vertexColors: true, map: detail, bumpMap: detail, bumpScale: 2.5, roughness: 0.95 });
-  _rockMat.onBeforeCompile = (sh) => {
+  _rockMat = meltIntoClouds(new THREE.MeshStandardMaterial({ vertexColors: true, map: detail, bumpMap: detail, bumpScale: 2.5, roughness: 0.95 }));
+  return _rockMat;
+}
+
+/**
+ * 让山石往下融进云色（入侵时云色跟着变紫黑）。广场台底、邻峰、中景的石峰模型（props.js）共用。
+ * haze：额外的远景雾（按距离平方，跟远山同一种公式）。场景的雾很薄，中景三五十米外的模型不加这一层，
+ * 比后面的远山还深、还清楚，像贴上去的（实测）。
+ * @template {THREE.Material} M @param {M} m @param {number} [haze] @returns {M}
+ */
+export function meltIntoClouds(m, haze = 0) {
+  m.onBeforeCompile = (sh) => {
     sh.uniforms.uInv = ROCK_INV;
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vWy;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWy = (modelMatrix * vec4(transformed, 1.)).y;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vWy; uniform float uInv;')
       .replace('#include <dithering_fragment>', `#include <dithering_fragment>
+        ${haze ? `#ifdef USE_FOG
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, 1. - exp(-pow(vFogDepth * ${haze.toFixed(4)}, 2.)));
+        #endif` : ''}
         gl_FragColor.rgb = mix(gl_FragColor.rgb, mix(vec3(0.58, 0.54, 0.56), vec3(0.05, 0.035, 0.08), smoothstep(0.3, 0.7, uInv)), smoothstep(-4.5, -9., vWy));`);
   };
-  return _rockMat;
+  return m;
 }
 
 /**

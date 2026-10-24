@@ -69,6 +69,16 @@ export const PROP_SPOTS = {
   gate: { x: 0, y: 0, z: GATE.z, rotY: 0, mirror: false },
   lions: [{ x: -LION.x, y: 0, z: LION.z, rotY: LION.turn, mirror: false }, { x: LION.x, y: 0, z: LION.z, rotY: -LION.turn, mirror: true }],
   stone: { x: 0, y: STONE_BOTTOM, z: GATE.z, rotY: 0, mirror: false },
+  /**
+   * 中景（离广场 35～65 米）：牌坊两边各两块，牌坊背后不放（会从门洞里露出来、跟石阶上来的敌人搅在一起）。
+   * rock-a 是高石柱（打包成 30 米高），底下那截插进云海（云面 y = -9）；rock-b 是浮岛（20 米宽），悬在半空。scale 乘在打包尺寸上。
+   */
+  rocks: [
+    { model: 'rock-a', x: -24, y: -17.5, z: -38, rotY: 0.6, scale: 0.95, mirror: false },
+    { model: 'rock-b', x: -34, y: -1.8, z: -30, rotY: 1.2, scale: 0.85, mirror: false },
+    { model: 'rock-a', x: 19, y: -14.5, z: -30, rotY: 2.1, scale: 0.75, mirror: true },
+    { model: 'rock-a', x: 26, y: -16, z: -58, rotY: 4.0, scale: 1, mirror: false },
+  ],
 };
 
 /**

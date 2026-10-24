@@ -1,19 +1,25 @@
 // @ts-check
 /**
- * 场景物件模型（本人用 Tripo 生成，tools/pack_prop.py 打包）：牌坊、两只石兽、镇山石。
- * 开局后台下载，到了就摆到 layout.js 给的位置、把方块占位藏起来；下载失败就一直用占位，不影响玩。
+ * 场景物件模型（本人用 Tripo 生成，tools/pack_prop.py 打包）：牌坊、两只石兽、镇山石，中景的石柱和浮岛。
+ * 开局后台下载，到了就摆到 layout.js 给的位置、把方块占位藏起来；下载失败就一直用占位，不影响玩（中景没有占位，就是空着）。
  * 材质：Tripo 只给一张颜色贴图。打包时从颜色推出一张材质贴图（G 粗糙度、B 金属度），鎏金在夕阳和天空反射下才会发亮；
  * 同一张颜色贴图再当凹凸贴图，浮雕、瓦楞接得住低角度的阳光。
  */
 import * as THREE from 'three';
 import { decodeDRG2, fetchBytes, staticGeometry } from './drg2.js';
 import { PROP_SPOTS } from './layout.js';
+import { meltIntoClouds } from './plaza.js';
 
-/** 每个物件：颜色贴图在电影档 / 流畅档各用多大，材质贴图多大（文件名见打包脚本） */
+/**
+ * 每个物件：颜色贴图在电影档 / 流畅档各用多大，材质贴图多大（文件名见打包脚本）。
+ * mr 为 0 的是山石：全是粗糙的石头，不要材质贴图；底下往云色里融（跟广场台底、邻峰一样）
+ */
 const PROPS = {
   gate: { color: { cinema: 2048, smooth: 1024 }, mr: 1024, bump: 1 },
   lion: { color: { cinema: 1024, smooth: 512 }, mr: 512, bump: 1 },
   stone: { color: { cinema: 512, smooth: 512 }, mr: 512, bump: 1.5 },
+  'rock-a': { color: { cinema: 1024, smooth: 512 }, mr: 0, bump: 1.5 },
+  'rock-b': { color: { cinema: 1024, smooth: 512 }, mr: 0, bump: 1.5 },
 };
 
 /**
@@ -39,12 +45,12 @@ export function loadProps(scene, layout, tier, src, renderer) {
   const load = async (name) => {
     const p = PROPS[name];
     const [buf, map, mr] = await Promise.all([
-      fetchBytes(url(`${name}.drg2.gz`)), tex(url(`${name}-${p.color[tier]}.webp`), true), tex(url(`${name}-mr-${p.mr}.webp`), false),
+      fetchBytes(url(`${name}.drg2.gz`)), tex(url(`${name}-${p.color[tier]}.webp`), true), p.mr ? tex(url(`${name}-mr-${p.mr}.webp`), false) : null,
     ]);
     const geo = staticGeometry(decodeDRG2(buf));
-    const material = new THREE.MeshStandardMaterial({
-      map, roughnessMap: mr, metalnessMap: mr, roughness: 1, metalness: 1, bumpMap: map, bumpScale: p.bump,
-    });
+    const material = mr
+      ? new THREE.MeshStandardMaterial({ map, roughnessMap: mr, metalnessMap: mr, roughness: 1, metalness: 1, bumpMap: map, bumpScale: p.bump })
+      : meltIntoClouds(new THREE.MeshStandardMaterial({ map, roughness: 0.95, metalness: 0, bumpMap: map, bumpScale: p.bump }), 0.011);
     return { geo, material };
   };
   /** @param {{ geo: THREE.BufferGeometry, material: THREE.Material }} m @param {typeof PROP_SPOTS.gate} spot */
@@ -62,5 +68,14 @@ export function loadProps(scene, layout, tier, src, renderer) {
     load('gate').then((m) => { place(m, PROP_SPOTS.gate); layout.gateBox.visible = false; }).catch(warn('gate')),
     load('lion').then((m) => { for (const s of PROP_SPOTS.lions) place(m, s); }).catch(warn('lion')),
     load('stone').then((m) => { place(m, PROP_SPOTS.stone); layout.stoneBox.visible = false; }).catch(warn('stone')),
+    // 中景：一个模型摆几处，大小、朝向各不相同。离得远，不投影也不接影子（阴影贴图只罩着广场，罩不到的地方接影子会出黑边）
+    .../** @type {const} */ (['rock-a', 'rock-b']).map((name) => load(name).then((m) => {
+      for (const s of PROP_SPOTS.rocks) {
+        if (s.model !== name) continue;
+        const mesh = place(m, s);
+        mesh.scale.multiplyScalar(s.scale);
+        mesh.castShadow = mesh.receiveShadow = false;
+      }
+    }).catch(warn(name))),
   ]);
 }

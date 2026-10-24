@@ -3,7 +3,7 @@
  * 物件材质检查页（只给本机预览面板用：python tools/build_preview.py props --asset ...）。
  * 面板里的页面不能超过 512 KB，整场游戏加牌坊模型放不下，所以单拎出来：同一套傍晚天光、调色、物件加载与材质，
  * 只摆内嵌进来的模型（石兽、镇山石），看鎏金反不反光、浮雕接不接得住低角度的阳光。游戏本身不引用这个文件。
- * 调试接口 window.pc：view('lion' | 'stone' | 'game')、snap(w, h) 返回 JPEG 地址。
+ * 调试接口 window.pc：view('lion' | 'stone' | 'game' | 'left' | 'right')、snap(w, h) 返回 JPEG 地址。
  */
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -21,6 +21,9 @@ const VIEWS = {
   lion: [[-0.6, 2.6, -1.2], [-3.58, 1.5, -6.4]],
   stone: [[2.2, 4.6, -4.4], [0, 4.9, -8.6]],
   game: [[5.6, 7.4, 16.8], [0, 1.0, -3.5]],
+  // 中景石峰：从广场边上看左右两组
+  left: [[-6, 3, -10], [-28, 1, -34]],
+  right: [[6, 3, -10], [22, 0, -44]],
 };
 
 /** @param {HTMLElement} root @param {Record<string, string>} assets 文件名 → 地址 */

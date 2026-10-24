@@ -7,8 +7,8 @@
 不减面：减面会弄乱贴图坐标，面数在 Tripo 里就设好。
 
 用法：python tools/pack_prop.py 输入.glb 名字 (--width 米 | --height 米) [--stretch 起,止,倍数]（起止是占总高的比例）
-                               [--sizes 2048,1024] [--mr 1024] [--flip]
-产出：public/models/名字.drg2.gz、名字-<边长>.webp、名字-mr-<边长>.webp；最后打印包围盒与文件大小。
+                               [--sizes 2048,1024] [--mr 1024 | --mr 0] [--flip]
+产出：public/models/名字.drg2.gz、名字-<边长>.webp、名字-mr-<边长>.webp（--mr 0 不出）；最后打印包围盒与文件大小。
 """
 import argparse
 import gzip
@@ -164,14 +164,16 @@ def main():
         p = OUT / f"{a.name}-{size}.webp"
         tex.resize((size, size), Image.LANCZOS).save(p, "WEBP", quality=82, method=6)
         files.append((p.name, p.stat().st_size))
-    mr, gold, glaze = material_map(tex.resize((a.mr, a.mr), Image.LANCZOS))
-    p = OUT / f"{a.name}-mr-{a.mr}.webp"
-    mr.save(p, "WEBP", quality=80, method=6)
-    files.append((p.name, p.stat().st_size))
+    if a.mr:   # 山石一类全是粗糙的石头，不要材质贴图（--mr 0）
+        mr, gold, glaze = material_map(tex.resize((a.mr, a.mr), Image.LANCZOS))
+        p = OUT / f"{a.name}-mr-{a.mr}.webp"
+        mr.save(p, "WEBP", quality=80, method=6)
+        files.append((p.name, p.stat().st_size))
 
     ext = pos.max(0) - pos.min(0)
     print(f"{a.name}: {len(pos)} 顶点 {len(idx)} 三角形，修补法线 {fixed} 个；尺寸（米）宽 {ext[0]:.2f} 高 {ext[1]:.2f} 深 {ext[2]:.2f}")
-    print(f"  贴图里算作鎏金 {gold * 100:.1f}%、琉璃瓦 {glaze * 100:.1f}%")
+    if a.mr:
+        print(f"  贴图里算作鎏金 {gold * 100:.1f}%、琉璃瓦 {glaze * 100:.1f}%")
     if a.stretch:   # 牌坊：门洞顶（正中一窄条里、离地以上最低的顶点）
         mid = (np.abs(pos[:, 0]) < 0.03 * ext[0]) & (pos[:, 1] > 0.05 * ext[1])
         inner = pos[(pos[:, 1] < 0.3 * ext[1]) & (pos[:, 1] > 0.05 * ext[1])]
