@@ -219,7 +219,9 @@ export function buildEnvironment(scene, renderer) {
     U.uFlash.value = f * (1 - dimK * 0.5);
     bolt.update(f, camPos);
   };
-  return { sun, hemi, clouds, setDim, setInvasion, setShadowMap, aim, update, flash: strike, look: LOOK, useRocks };
+  /** 中景山石的材质（props.js 用），跟远山同一套，根部融进云的那段短一些 @param {THREE.Texture} map @param {number} haze */
+  const rockMaterial = (map, haze) => farRockMat(U, map, haze, -3);
+  return { sun, hemi, clouds, setDim, setInvasion, setShadowMap, aim, update, flash: strike, look: LOOK, useRocks, rockMaterial };
 }
 
 /** 云海：两层流动的噪声当起伏；朝太阳挪一点再取一次，差值大于零就是迎光坡，镀金边；远处融进天边色。
@@ -447,14 +449,17 @@ function buildFarLayer(scene, U) {
 }
 
 /**
- * 远山换成的山石模型的材质：跟代码石柱同一套光照、雾、入侵（被黑雾盖住的一侧不受阳光、压暗，雾融进天边色），
+ * 远山、中景的山石模型的材质：跟代码石柱同一套光照、雾、入侵（被黑雾盖住的一侧不受阳光、压暗，雾融进天边色），
  * 只是颜色取模型的贴图、法线取模型自己的（代码石柱用屏幕导数算的面法线，一面一个颜色，是塑料感的来源之一）。
- * @param {THREE.Texture} map
+ * 雾按方向取天边色：朝太阳那边金、背着太阳偏紫灰。
+ * @param {THREE.Texture} map @param {number} [haze] 按距离平方的雾，远山 0.003，中景厚一点
+ * @param {number} [rootTop] 根部从云面（y = -9）往上融进天边色融到多高。中景离得近、占画面大，这一段要短，
+ *   不然背光一侧下半截整片发金光
  */
-function farRockMat(U, map) {
+function farRockMat(U, map, haze = 0.003, rootTop = 2) {
   return new THREE.ShaderMaterial({
     fog: false,
-    uniforms: { ...U, uMap: { value: map }, uAmb: { value: ROCK_AMB }, uSunK: ROCK_SUN, uHaze: { value: 0.003 } },
+    uniforms: { ...U, uMap: { value: map }, uAmb: { value: ROCK_AMB }, uSunK: ROCK_SUN, uHaze: { value: haze }, uRootTop: { value: rootTop } },
     vertexShader: `varying vec3 vW; varying vec3 vN; varying vec2 vUv;
       void main(){
         mat4 m = modelMatrix;
@@ -465,7 +470,7 @@ function farRockMat(U, map) {
         vN = inverse(transpose(mat3(m))) * normal;   // 各方向缩放不一样，法线要用逆转置
         vUv = uv;
         gl_Position = projectionMatrix * viewMatrix * w; }`,
-    fragmentShader: `varying vec3 vW; varying vec3 vN; varying vec2 vUv; uniform sampler2D uMap; uniform vec3 uAmb; uniform float uSunK; uniform float uHaze;
+    fragmentShader: `varying vec3 vW; varying vec3 vN; varying vec2 vUv; uniform sampler2D uMap; uniform vec3 uAmb; uniform float uSunK; uniform float uHaze; uniform float uRootTop;
       ${COMMON_GLSL}
       void main(){
         vec3 v = normalize(vW - cameraPosition);
@@ -478,7 +483,7 @@ function farRockMat(U, map) {
         c += uSunCol * rim * 0.4 * (1. - m);
         float hd = length(vW - cameraPosition) * uHaze;
         float f = 1. - exp(-hd * hd);
-        f = max(f, (1. - smoothstep(-9., 2., vW.y)) * 0.75);   // 根部没进云里
+        f = max(f, (1. - smoothstep(-9., uRootTop, vW.y)) * 0.75);   // 根部没进云里
         c = mix(c, horizonInv(v), f);
         c += uInvGlow * flashAt(v) * m * 0.3;
         gl_FragColor = vec4(dimColor(c, uDim), 1.); }`,

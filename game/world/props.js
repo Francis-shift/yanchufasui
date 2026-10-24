@@ -28,7 +28,8 @@ const PROPS = {
  * @param {'cinema' | 'smooth'} tier
  * @param {string | ((file: string) => string)} src 模型目录的地址（以 / 结尾），或按文件名给地址的函数（预览页用内嵌的文件）
  * @param {THREE.WebGLRenderer} renderer
- * @param {{ useRocks: (models: Record<string, { geo: THREE.BufferGeometry, map: THREE.Texture, top: ReturnType<typeof topOf> }>) => void }} [env] 给了就把远山也换成山石模型
+ * @param {{ useRocks: (models: Record<string, { geo: THREE.BufferGeometry, map: THREE.Texture, top: ReturnType<typeof topOf> }>) => void,
+ *   rockMaterial: (map: THREE.Texture, haze: number) => THREE.Material }} [env] 给了就把远山也换成山石模型，中景用远山那套材质
  */
 export function loadProps(scene, layout, tier, src, renderer, env) {
   const url = typeof src === 'function' ? src : (/** @type {string} */ f) => src + f;
@@ -51,7 +52,7 @@ export function loadProps(scene, layout, tier, src, renderer, env) {
     const geo = staticGeometry(decodeDRG2(buf));
     const material = mr
       ? new THREE.MeshStandardMaterial({ map, roughnessMap: mr, metalnessMap: mr, roughness: 1, metalness: 1, bumpMap: map, bumpScale: p.bump })
-      : meltIntoClouds(new THREE.MeshStandardMaterial({ map, roughness: 0.95, metalness: 0, bumpMap: map, bumpScale: p.bump }), 0.011);
+      : meltIntoClouds(new THREE.MeshStandardMaterial({ map, roughness: 0.95, metalness: 0, bumpMap: map, bumpScale: p.bump }));
     return { geo, material, map };
   };
   /** @param {{ geo: THREE.BufferGeometry, material: THREE.Material }} m @param {typeof PROP_SPOTS.gate} spot */
@@ -69,12 +70,15 @@ export function loadProps(scene, layout, tier, src, renderer, env) {
     load('gate').then((m) => { place(m, PROP_SPOTS.gate); layout.gateBox.visible = false; }).catch(warn('gate')),
     load('lion').then((m) => { for (const s of PROP_SPOTS.lions) place(m, s); }).catch(warn('lion')),
     load('stone').then((m) => { place(m, PROP_SPOTS.stone); layout.stoneBox.visible = false; }).catch(warn('stone')),
-    // 山石：中景一个模型摆几处，大小、朝向各不相同，离得远，不投影也不接影子（阴影贴图只罩着广场，罩不到的地方接影子会出黑边）；
+    // 山石：中景一个模型摆几处，大小、朝向各不相同，离得远，不投影也不接影子（阴影贴图只罩着广场，罩不到的地方接影子会出黑边）。
+    // 中景跟远山用同一套材质（环境给）：原先用标准材质加一层雾，雾色固定取镜头正前方朝太阳那段天边的橙金色，
+    // 背光那面也被染成金色、比天还亮，跟广场上背光的东西对不上（10-24 本人看出光影怪，检查页量过）。
     // 邻峰、台底按顶面摆（离得近，跟原来的代码石头一样投影、接影子）；两种都到了（或到了一种、另一种失败）再换远山
     Promise.all(/** @type {const} */ (['rock-a', 'rock-b']).map((name) => load(name).then((m) => {
+      const mid = env ? { geo: m.geo, material: env.rockMaterial(m.map, 0.007) } : m;
       for (const s of PROP_SPOTS.rocks) {
         if (s.model !== name) continue;
-        const mesh = place(m, s);
+        const mesh = place(mid, s);
         mesh.scale.multiplyScalar(s.scale);
         mesh.castShadow = mesh.receiveShadow = false;
       }

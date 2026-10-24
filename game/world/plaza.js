@@ -290,21 +290,16 @@ function rockMaterial() {
 }
 
 /**
- * 让山石往下融进云色（入侵时云色跟着变紫黑）。广场台底、邻峰、中景的石峰模型（props.js）共用。
- * haze：额外的远景雾（按距离平方，跟远山同一种公式）。场景的雾很薄，中景三五十米外的模型不加这一层，
- * 比后面的远山还深、还清楚，像贴上去的（实测）。
- * @template {THREE.Material} M @param {M} m @param {number} [haze] @returns {M}
+ * 让山石往下融进云色（入侵时云色跟着变紫黑）。广场台底、邻峰（代码石头和换上的山石模型，props.js）共用。
+ * @template {THREE.Material} M @param {M} m @returns {M}
  */
-export function meltIntoClouds(m, haze = 0) {
+export function meltIntoClouds(m) {
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uInv = ROCK_INV;
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vWy;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWy = (modelMatrix * vec4(transformed, 1.)).y;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vWy; uniform float uInv;')
       .replace('#include <dithering_fragment>', `#include <dithering_fragment>
-        ${haze ? `#ifdef USE_FOG
-          gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, 1. - exp(-pow(vFogDepth * ${haze.toFixed(4)}, 2.)));
-        #endif` : ''}
         gl_FragColor.rgb = mix(gl_FragColor.rgb, mix(vec3(0.58, 0.54, 0.56), vec3(0.05, 0.035, 0.08), smoothstep(0.3, 0.7, uInv)), smoothstep(-4.5, -9., vWy));`);
   };
   return m;
