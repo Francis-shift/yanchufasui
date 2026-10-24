@@ -4,6 +4,7 @@
  * 贴图大多用代码在画布上画，不占下载：
  *   - 台面：一圈圈扇形石板，正中刻阵纹（同心槽、卷云、八卦、刻度），刻槽里描金；抛光，夕阳下有光泽；
  *     缝口倒斜边、积灰，边角有崩口；常走的路磨光、东西脚下积灰（生活痕迹图）；
+ *     台边石缝里长青苔、落着干松针，香炉脚下有香灰；着色器里再加飘过的云影；
  *     石面的细纹、凹坑和大理石纹叠一层实拍的 CC0 贴图（三张共约 160 KB，跟模型一起下载，见 useStoneMaps）；
  *   - 台沿：一圈浮雕石板（框 + 卷云），上下两道线脚，石阶口断开；
  *   - 台底：往下收窄的山石，竖向起棱，凹处暗，朝上的面长青苔；
@@ -95,8 +96,9 @@ function engraving(line) {
  * 台面两张贴图：颜色、辅助（R 高度，G 粗糙度，B 石板编号：着色器按它给每块石板转一个角度叠石纹，缝里是 0）。
  * 石板的色调和缝在两张里一一对应
  * @param {number} S @param {number} R @param {number[][]} [rings] 石板怎么铺（邻峰落脚台另给一套） @param {boolean} [engrave] 刻不刻阵纹
+ * @param {number[][]} [ash] 香炉脚下的香灰 [x, z, 半径]
  */
-function floorTextures(S, R, rings = RINGS, engrave = true) {
+function floorTextures(S, R, rings = RINGS, engrave = true, ash = []) {
   const rnd = rng(23), idr = rng(41), slabs = [], dens = (R / 11) ** 2;   // 斑点、崩口按面积撒，小台子不会更脏
   rings.forEach(([r0, r1, n], ri) => {
     const off = rnd() * Math.PI * 2, edge = ri === rings.length - 1;
@@ -142,6 +144,51 @@ function floorTextures(S, R, rings = RINGS, engrave = true) {
     g.strokeStyle = 'rgba(96, 86, 74, 0.8)'; g.lineWidth = 0.028; joints(g);
     chipPaths(g); g.fillStyle = 'rgba(238, 233, 222, 0.9)'; g.fill();
     g.strokeStyle = 'rgba(84, 74, 62, 0.45)'; g.lineWidth = 0.006; g.stroke();
+    // 青苔：靠台边两圈（没人走、背阴潮）的缝里长出一段段，缝交叉处一小团。
+    // 一段是一串大小不一的小点（画成一根线像掉了根棍子）
+    const mr = rng(61);
+    const moss = (/** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ w) => {
+      g.fillStyle = `rgba(${60 + mr() * 26}, ${80 + mr() * 22}, ${34 + mr() * 12}, ${0.35 + mr() * 0.35})`;
+      g.beginPath(); g.arc(x + (mr() - 0.5) * w, y + (mr() - 0.5) * w, 0.008 + mr() * w * 0.45, 0, Math.PI * 2); g.fill();
+    };
+    for (const s of slabs) {
+      if (s.r0 < R - 2.6 || mr() > 0.45) continue;
+      const r0 = s.r0 + (s.r1 - s.r0) * mr() * 0.5, r1 = r0 + (s.r1 - s.r0) * (0.25 + mr() * 0.5), c = Math.cos(s.a0), sn = Math.sin(s.a0);
+      const w = 0.03 + mr() * 0.03;
+      for (let r = r0; r < r1; r += 0.012) moss(c * r, sn * r, w * (0.5 + 0.5 * Math.sin(((r - r0) / (r1 - r0)) * Math.PI)));
+      if (mr() < 0.5) for (let j = 0; j < 14; j++) moss(c * s.r0, sn * s.r0, 0.1);
+    }
+    // 落下的干松针：台边一簇簇（被风吹到栏杆脚下），台中间零星几根
+    for (let i = 0; i < 90 * dens; i++) {
+      const a = mr() * Math.PI * 2, r = i % 6 ? R - 0.25 - mr() * 1.4 : Math.sqrt(mr()) * R, cx = Math.cos(a) * r, cy = Math.sin(a) * r;
+      for (let j = 0, n = 3 + Math.floor(mr() * 7); j < n; j++) {   // 松针两根一束，根部并在一起
+        const x = cx + (mr() - 0.5) * 0.25, y = cy + (mr() - 0.5) * 0.25, b = mr() * Math.PI * 2, l = 0.06 + mr() * 0.05, open = 0.12 + mr() * 0.3;
+        g.strokeStyle = mr() < 0.7 ? `rgba(${110 + mr() * 30}, ${72 + mr() * 18}, 38, 0.85)` : 'rgba(78, 86, 44, 0.8)'; g.lineWidth = 0.008;
+        g.beginPath();
+        for (const t of [b, b + open]) { g.moveTo(x, y); g.lineTo(x + Math.cos(t) * l, y + Math.sin(t) * l); }
+        g.stroke();
+      }
+    }
+    // 香灰：从香炉里落下来、被风吹向下风处（+x、+z，跟云影同向），炉身外露出一片灰，再撒些深浅不一的灰点；
+    // 几根插剩的红香脚
+    for (const [x, z, r] of ash) {
+      const ox = x + r * 0.7, oz = z + r * 0.5;
+      g.save(); g.translate(ox, oz); g.rotate(Math.atan2(0.5, 0.7)); g.scale(1.6, 1);
+      const gr = g.createRadialGradient(0, 0, 0, 0, 0, r * 1.2);
+      gr.addColorStop(0, 'rgba(122, 118, 112, 0.6)'); gr.addColorStop(0.6, 'rgba(130, 126, 120, 0.35)'); gr.addColorStop(1, 'rgba(130, 126, 120, 0)');
+      g.fillStyle = gr; g.beginPath(); g.arc(0, 0, r * 1.2, 0, Math.PI * 2); g.fill(); g.restore();
+      for (let j = 0; j < 260; j++) {
+        const a = mr() * Math.PI * 2, d = Math.sqrt(mr()) * r * 1.5;
+        g.fillStyle = mr() < 0.6 ? 'rgba(92, 88, 84, 0.65)' : 'rgba(225, 222, 216, 0.75)';
+        g.fillRect(ox + Math.cos(a) * d * 1.3, oz + Math.sin(a) * d, 0.008 + mr() * 0.014, 0.008 + mr() * 0.014);
+      }
+      g.lineWidth = 0.01;
+      for (let j = 0; j < 7; j++) {
+        const a = mr() * Math.PI * 2, d = r * (1 + mr() * 0.8), b = mr() * Math.PI, l = 0.08 + mr() * 0.08, px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d;
+        g.strokeStyle = `rgba(${150 + mr() * 30}, ${42 + mr() * 16}, 34, 0.9)`;
+        g.beginPath(); g.moveTo(px, pz); g.lineTo(px + Math.cos(b) * l, pz + Math.sin(b) * l); g.stroke();
+      }
+    }
     // 刻槽里描金：先一道暗边当槽的阴影，再一道金
     if (engrave) engraving((w, path) => {
       g.beginPath(); path(g);
@@ -248,7 +295,7 @@ const FLOOR = { time: { value: 0 }, inv: { value: 0 }, refl: { value: flat(0, 0,
  * 台面材质：代码画的石板（颜色、凹凸、粗糙度、编号）叠上实拍石材、生活痕迹和雨后积水。
  * 细节贴图大理石那张的平均色（线性）是 (0.63, 0.55, 0.43)，除掉它只留明暗起伏；细节的 AO 均值 0.48、粗糙度均值 0.83，同样只取起伏。
  * 积水（生活痕迹图 B）：过 0.5 是水，按石面明暗抖出不规则的水边；水边外一圈湿的（发暗、光一点）；水面是平的，
- * 偶尔一滴水落下荡开一圈涟漪；倒影：电影档用平面反射换掉环境反射，菲涅耳比真水夸张（游戏机位俯看约 25°，真水只反 5%～10%，
+ * 偶尔一滴水落下荡开一圈涟漪；云影只落在台面上（竖着的物件不跟着暗，只做了地面）；倒影：电影档用平面反射换掉环境反射，菲涅耳比真水夸张（游戏机位俯看约 25°，真水只反 5%～10%，
  * 照出来的天跟晒亮的石面差不多亮，从游戏机位几乎看不出水洼）；流畅档水面的环境反射也按这个量
  * @param {{ color: THREE.Texture, aux: THREE.Texture }} floor @param {THREE.Texture} wear @param {number} R
  * @param {{ uniforms: Record<string, { value: any }>, decl: string, color: string, rough: string, metal: string, emissive: string }} [extra] 广场的入侵损伤与阵纹
@@ -263,7 +310,10 @@ function stoneFloor(floor, wear, R, extra) {
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvRefl = uReflMat * modelMatrix * vec4(transformed, 1.0);');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-        uniform sampler2D uStoneN, uStoneD, uStoneM, uWear, uRefl; uniform float uStone, uR, uFloorTime, uFloorInv, uReflOn; varying vec4 vRefl;${extra?.decl ?? ''}`)
+        uniform sampler2D uStoneN, uStoneD, uStoneM, uWear, uRefl; uniform float uStone, uR, uFloorTime, uFloorInv, uReflOn; varying vec4 vRefl;
+        float sHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float sNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
+          return mix(mix(sHash(i), sHash(i + vec2(1., 0.)), f.x), mix(sHash(i + vec2(0., 1.)), sHash(i + 1.), f.x), f.y); }${extra?.decl ?? ''}`)
       .replace('#include <map_fragment>', `#include <map_fragment>
         vec2 sp = (vMapUv * 2. - 1.) * uR;                     // 台面上的位置（米）
         float sId = texture2D(roughnessMap, vMapUv).b;
@@ -308,6 +358,10 @@ function stoneFloor(floor, wear, R, extra) {
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         ${extra?.emissive ?? ''}`)
       .replace('#include <aomap_fragment>', `#include <aomap_fragment>
+        // 云影：几块大而软的影子顺着风慢慢飘过（约 0.3 米每秒），只压太阳直射的那份，入侵后天被黑雾盖住就不要了
+        vec2 cp = sp + uFloorTime * vec2(-0.22, 0.17);
+        float cl = 1. - 0.38 * (1. - uFloorInv) * smoothstep(0.44, 0.62, 0.6 * sNoise(cp / 6.) + 0.4 * sNoise(cp / 2.6 + 5.3));
+        reflectedLight.directDiffuse *= cl; reflectedLight.directSpecular *= cl;
         if (pool > 0.) {
           float nv = saturate(dot(normal, geometryViewDir)), F = 0.06 + 0.94 * pow(1. - nv, 2.5);   // 俯看 25° 约 0.3（真水约 0.08）
           vec3 refl = mix(reflectedLight.indirectSpecular * F / (0.04 + 0.96 * pow(1. - nv, 5.)),   // 流畅档：环境反射按同样的量放大
@@ -513,8 +567,9 @@ export function rockColumn(rTop, rBottom, h, seed) {
 // ---------------------------------------------------------------- 组装
 /**
  * @param {THREE.Scene} scene
- * @param {{ R: number, stairs: { halfW: number, zTop: number, zBottom: number, yBottom: number }, tex: number, wear: Wear, core: [number, number], reflect?: number }} o
+ * @param {{ R: number, stairs: { halfW: number, zTop: number, zBottom: number, yBottom: number }, tex: number, wear: Wear, core: [number, number], ash?: number[][], reflect?: number }} o
  *   tex：台面贴图边长（电影档 2048、流畅档 1024）；wear：常走的路、东西脚下、水洼（layout.js 按摆放给）；core：阵眼 [x, z]（阵纹流光往那扫）；
+ *   ash：香炉脚下的香灰 [x, z, 半径]；
  *   reflect：水洼平面反射那张图的宽（电影档给；不给就只照出天）
  */
 export function buildPlaza(scene, o) {
@@ -525,7 +580,7 @@ export function buildPlaza(scene, o) {
   // 阵纹（10-25）：刻槽里的描金当金属（夕阳下反金光，不再是画上去的黄线）；施法时一道金光从台面远端扫向阵眼，
   // 前沿 0.8 秒扫完、后面拖一段渐暗的尾巴；阵眼挨打时整片阵纹闪一下（离阵眼越近越亮，快速抖动）
   const sigil = { flow: { value: 99 }, hit: { value: 0 }, core: { value: new THREE.Vector2(...o.core) } };
-  const floor = floorTextures(o.tex, R), damage = damageTexture(Math.min(1024, o.tex), R);
+  const floor = floorTextures(o.tex, R, RINGS, true, o.ash), damage = damageTexture(Math.min(1024, o.tex), R);
   const floorMat = stoneFloor(floor, wearTexture(Math.min(1024, o.tex), R, o.wear), R, {
     uniforms: { uDamage: { value: damage }, uInv: FLOOR.inv, uTime: FLOOR.time, uFlow: sigil.flow, uHit: sigil.hit, uCore: sigil.core },
     decl: '\nuniform sampler2D uDamage; uniform float uInv, uTime, uFlow, uHit; uniform vec2 uCore;',

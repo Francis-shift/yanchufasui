@@ -919,6 +919,8 @@ export function start(root, opts = {}) {
     env.setInvasion(S.inv);
     layout.plaza.setInvasion(S.inv);   // 台面裂缝、焦痕
     layout.plaza.update(dt, realDt);
+    layout.ambience.setInvasion(S.inv);
+    layout.ambience.update(dt);   // 浮尘、飘落的松针
     if (lab.shield >= 0) barrier.setDamage(lab.shield);   // 试验场锁定光罩裂到几成
     barrier.update(dt, worldDim);
     layout.coreSigil.rotation.z += dt * 0.2;
