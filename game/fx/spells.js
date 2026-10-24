@@ -49,7 +49,7 @@ export class SpellFx {
     this.idleT = 0;
   }
 
-  /** 回车瞬间：按关键词猜的元素先上色（猜不出用奥术色） @param {string} el */
+  /** 回车瞬间：按关键词猜的元素先上色（猜不出用法阵本色：我方的金） @param {string} el */
   beginChant(el) {
     this.chantEl = PALETTE[el] ? el : 'arcane';
     this.chantColor = col(PALETTE[this.chantEl].primary, 1.4);

@@ -4,6 +4,7 @@ import * as THREE from 'three';
 
 /**
  * 元素配色（RGB 0～1，见设计文档风格卡）；core 是最亮的内核色。
+ * 敌我配色（10-21 定）：我方用金色——arcane 是施法法阵、阵眼的本色（猜不出元素时用它）；紫色只给敌人（enemy：傀儡眼睛、裂纹）。
  * ink：墨点、墨烟的多少（特效风格 v2：能量外缘加墨色——火是黑烟，土、雷墨最重，冰几乎不带）
  */
 export const PALETTE = {
@@ -11,7 +12,8 @@ export const PALETTE = {
   ice:    { primary: [0.18, 0.6, 1.0],  secondary: [0.45, 0.88, 1.0], core: [0.8, 0.95, 1.0],  sparkGravity: -4, emberGravity: -0.6, ink: 0.3 },
   wind:   { primary: [0.3, 0.95, 0.65], secondary: [0.7, 1.0, 0.85],  core: [0.9, 1.0, 0.95],  sparkGravity: -2, emberGravity: 0.8, ink: 0.75 },
   earth:  { primary: [0.85, 0.55, 0.25], secondary: [1.0, 0.8, 0.5],  core: [1.0, 0.92, 0.8],  sparkGravity: -12, emberGravity: -2, ink: 1.25 },
-  arcane: { primary: [0.62, 0.38, 1.0], secondary: [0.35, 0.85, 1.0], core: [1.0, 0.95, 1.0],  sparkGravity: -6, emberGravity: 0.4, ink: 0.6 },
+  arcane: { primary: [1.0, 0.7, 0.26], secondary: [1.0, 0.88, 0.55], core: [1.0, 0.97, 0.88], sparkGravity: -6, emberGravity: 0.4, ink: 0.6 },
+  enemy:  { primary: [0.62, 0.32, 1.0], secondary: [0.8, 0.55, 1.0],  core: [0.95, 0.9, 1.0],  sparkGravity: -6, emberGravity: 0.4, ink: 0.6 },
   thunder: { primary: [0.55, 0.45, 1.0], secondary: [0.95, 0.92, 0.55], core: [0.95, 0.95, 1.0], sparkGravity: -3, emberGravity: 0, ink: 1.0 },
 };
 

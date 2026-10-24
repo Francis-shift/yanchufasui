@@ -174,13 +174,13 @@ export function buildLayout(scene, opts = {}) {
   scene.add(peak, landing);
 
   // 阵眼：地上一圈发光阵盘 + 悬浮水晶 + 八根石桩
-  const coreColor = col(PALETTE.arcane.secondary, 1.6);
+  const coreColor = col(PALETTE.arcane.secondary, 1.6);   // 我方金色（风格卡敌我配色）
   const coreSigil = new THREE.Mesh(new THREE.PlaneGeometry(4.8, 4.8), sigilMat(sigilTex(), coreColor));
   coreSigil.material.opacity = 0.9;
   coreSigil.rotation.x = -Math.PI / 2;
   coreSigil.position.set(CORE_POS.x, 0.03, CORE_POS.z);
   const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.55, 0),
-    new THREE.MeshStandardMaterial({ color: 0x9fe7ff, emissive: coreColor, emissiveIntensity: 0.8, roughness: 0.2 }));
+    new THREE.MeshStandardMaterial({ color: 0xffe3a6, emissive: coreColor, emissiveIntensity: 0.8, roughness: 0.2 }));
   crystal.position.set(CORE_POS.x, 1.7, CORE_POS.z);
   crystal.castShadow = true;
   scene.add(coreSigil, crystal);

@@ -33,6 +33,7 @@ import { Particles } from './fx/particles.js';
 import { SpellFx } from './fx/spells.js';
 import { buildEnvironment } from './world/environment.js';
 import { invasionTarget, stepInvasion } from './world/invasion.js';
+import { buildBarrier } from './world/barrier.js';
 import { fitFrame } from './world/framing.js';
 import { loadProps } from './world/props.js';
 import { buildLayout, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS } from './world/layout.js';
@@ -117,6 +118,7 @@ export function start(root, opts = {}) {
   const env = buildEnvironment(scene, renderer);
   env.setShadowMap(quality.shadowMap);
   const layout = buildLayout(scene, { tex: quality.name === 'cinema' ? 2048 : 1024 });
+  const barrier = buildBarrier(scene, { tex: quality.name === 'cinema' ? 2048 : 1024 });   // 护山大阵的金色光罩，裂纹跟阵眼血量
   if (opts.models) loadProps(scene, layout, quality.name, opts.models, renderer);   // 牌坊、石兽、镇山石的模型，到了替换方块占位
   const particles = new Particles(scene, quality.particles);
   particles.floorAt = (x, z) => (groundHeightAt(x, z) ?? -60) + 0.03;
@@ -218,10 +220,13 @@ export function start(root, opts = {}) {
     if (S.phase !== 'playing') return;
     S.core = Math.max(0, S.core - dmg);
     hud.setCore(S.core, CORE_HP);
+    barrier.hit();
+    barrier.setDamage(1 - S.core / CORE_HP);
     fx.shake = Math.max(fx.shake, 0.35);
     layout.crystal.material.emissiveIntensity = 3;
     if (S.core <= 0) {
       S.phase = 'lost';
+      barrier.shatter();
       hud.showOverlay('阵眼破碎', '傀儡冲破了护山大阵。换个说法再来一次？', '重新守关');
     }
   }
@@ -238,6 +243,7 @@ export function start(root, opts = {}) {
     hud.closeWrite();
     Object.assign(S, { phase: 'playing', mana: MANA_MAX, core: CORE_HP, gauge: 0, lastCombo: null, seen: [], said: new Set(),
       wave: 0, busy: false, restT: 0, inv: 0 });   // 新的一局天先放晴，再随第一波慢慢压上来
+    barrier.reset();
     S.talents = [...S.talents].sort((a, b) => TALENTS.indexOf(a) - TALENTS.indexOf(b));
     S.binds = Object.fromEntries(Object.entries(S.binds).filter(([k]) => S.talents.includes(k)));
     hud.setSkills(S.talents.map((el) => ({ el, label: S.binds[el]?.name || elName(el), named: !!S.binds[el] })),
@@ -826,7 +832,7 @@ export function start(root, opts = {}) {
   renderer.info.autoReset = false;   // 后期处理一帧要画好几遍，手动清零才能数出整帧的绘制次数
 
   // ---------------------------------------------------------------- 特效试验场（?lab 或 demo.lab()；面板在 ui/lab.js）
-  const lab = { on: false, dim: -1, inv: -1, speed: 1, panel: /** @type {ReturnType<typeof mountLab> | null} */ (null) };
+  const lab = { on: false, dim: -1, inv: -1, shield: -1, speed: 1, panel: /** @type {ReturnType<typeof mountLab> | null} */ (null) };
   /** 放一发：raw 是模型格式的意图，走和玩家一样的清洗、裁决、演出；不扣法力、不计重复衰减 @param {any} raw @param {string} label */
   function labCast(raw, label) {
     if (S.phase !== 'playing') return;
@@ -852,7 +858,7 @@ export function start(root, opts = {}) {
     hud.setHint('特效试验场：在面板里挑招放，可放慢、定格、锁定压暗');
     labTargets();
     lab.panel = mountLab(root, {
-      cast: labCast, speed: (s) => { lab.speed = s; }, dim: (v) => { lab.dim = v; }, inv: (v) => { lab.inv = v; },
+      cast: labCast, speed: (s) => { lab.speed = s; }, dim: (v) => { lab.dim = v; }, inv: (v) => { lab.inv = v; }, shield: (v) => { lab.shield = v; },
       targets: labTargets, clear: () => { for (const e of [...enemies.list]) enemies.kill(e, e.pos); },
       quality: quality.name,
     });
@@ -902,6 +908,8 @@ export function start(root, opts = {}) {
     env.setInvasion(S.inv);
     layout.plaza.setInvasion(S.inv);   // 台面裂缝、焦痕
     layout.plaza.update(dt);
+    if (lab.shield >= 0) barrier.setDamage(lab.shield);   // 试验场锁定光罩裂到几成
+    barrier.update(dt, worldDim);
     layout.coreSigil.rotation.z += dt * 0.2;
     layout.crystal.rotation.y += dt * 0.8;
     layout.crystal.position.y = 1.7 + Math.sin(idleT * 1.6) * 0.12;
@@ -910,7 +918,7 @@ export function start(root, opts = {}) {
     hud.setMana(S.mana, MANA_MAX);
     if (lab.on) {   // 试验场：法力、阵眼一直满
       S.mana = MANA_MAX;
-      if (S.core < CORE_HP) { S.core = CORE_HP; hud.setCore(S.core, CORE_HP); }
+      if (S.core < CORE_HP) { S.core = CORE_HP; hud.setCore(S.core, CORE_HP); if (lab.shield < 0) barrier.setDamage(0); }
       labT += realDt;
       if (lab.panel && labT > 0.3) {
         labT = 0;
@@ -968,6 +976,8 @@ export function start(root, opts = {}) {
     zap: (a, b) => fx.arc(new THREE.Vector3(...a), new THREE.Vector3(...b)),
     /** 入侵程度锁在 k（0～1），不给就回到跟着波次走；flash 在黑雾里劈一道闪电 */
     invade: (k = -1) => { lab.inv = k; },
+    /** 光罩裂到几成（0～1），不给就回到跟着阵眼血量走 */
+    shield: (d = -1) => { lab.shield = d; if (d < 0) barrier.setDamage(1 - S.core / CORE_HP); },
     flash: () => env.flash(),
     talents: (list) => { if (list) { S.talents = list; renderPicker(); } return [...S.talents]; },
     binds: () => Object.fromEntries(Object.entries(S.binds).map(([k, v]) => [k, { name: v.name, text: v.text }])),
@@ -995,7 +1005,7 @@ export function start(root, opts = {}) {
     endless: (on = true) => { S.endless = on; },
     cubes: (n = 300, life = 12) => dropCubes(n, life),
     /** 调画面：env.look 里改灯的基准强度与天空、云海的颜色，renderer.toneMappingExposure 改曝光 */
-    world: { scene, renderer, env },
+    world: { scene, renderer, env, camera },
     gl: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles, ratio: renderer.getPixelRatio(),
       size: renderer.getDrawingBufferSize(new THREE.Vector2()).toArray(), cubes: stressList.length, mobile }),
   };

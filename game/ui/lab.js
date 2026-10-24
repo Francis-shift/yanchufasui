@@ -41,7 +41,7 @@ export const LAB_PRESETS = [
 /**
  * @param {HTMLElement} root
  * @param {{
- *   cast: (raw: object, label: string) => void, speed: (s: number) => void, dim: (v: number) => void, inv: (v: number) => void,
+ *   cast: (raw: object, label: string) => void, speed: (s: number) => void, dim: (v: number) => void, inv: (v: number) => void, shield: (v: number) => void,
  *   targets: () => void, clear: () => void, quality: string,
  * }} api
  */
@@ -111,6 +111,8 @@ export function mountLab(root, api) {
   radio('压暗', [[-1, '自动'], [0, '不压'], [0.5, '一半'], [0.85, '压满']], () => dim, (v) => { dim = v; api.dim(v); });
   let inv = -1;   // 入侵：各波开打时的样子（world/invasion.js），看天色、云海、远山
   radio('入侵', [[-1, '自动'], [0, '无'], [0.33, '二波'], [0.51, '三波'], [0.69, '四波'], [0.9, '末波'], [1, '输了']], () => inv, (v) => { inv = v; api.inv(v); });
+  let shield = -1;   // 光罩：阵眼掉了几成血时的裂纹（world/barrier.js）
+  radio('光罩', [[-1, '自动'], [0, '完好'], [0.3, '三成'], [0.6, '六成'], [0.9, '九成']], () => shield, (v) => { shield = v; api.shield(v); });
   if (/^https?:$/.test(location.protocol)) {
     radio('画质', [['cinema', '电影档'], ['smooth', '流畅档']], () => api.quality, (v) => {
       const u = new URL(location.href);

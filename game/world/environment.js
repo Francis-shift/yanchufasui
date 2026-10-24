@@ -22,7 +22,7 @@ const ROCK = new THREE.Color(0.62, 0.5, 0.4), ROCK_SHADE = new THREE.Color(0.11,
 /** 石峰顶上的松树（远看只是一层深绿） */
 const PINE = new THREE.Color(0.16, 0.24, 0.1);
 /** 黑雾从哪个水平方向来：索桥那一侧偏石阶（镜头左前方，约 -145°） */
-const INV_DIR = new THREE.Vector2(Math.cos(-2.53), Math.sin(-2.53));
+export const INV_DIR = new THREE.Vector2(Math.cos(-2.53), Math.sin(-2.53));
 /** 云海从哪里先黑：石阶下方 */
 const INV_ORIGIN = new THREE.Vector2(-5, -30);
 /** 黑雾的颜色：最深处、翻起来的团块、边缘和闪电照亮时的紫光（紫色只给敌人，风格卡"敌我配色"） */

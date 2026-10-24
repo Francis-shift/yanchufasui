@@ -66,7 +66,7 @@ export class Enemies {
       eye: new THREE.BoxGeometry(0.08, 0.06, 0.02), shard: new THREE.BoxGeometry(0.22, 0.22, 0.22),
       shield: new THREE.BoxGeometry(0.9, 1.0, 0.1), bar: new THREE.PlaneGeometry(0.8, 0.07),
     };
-    this.eyeMat = new THREE.MeshBasicMaterial({ color: col(PALETTE.arcane.primary, 2.2) });
+    this.eyeMat = new THREE.MeshBasicMaterial({ color: col(PALETTE.enemy.primary, 2.2) });
     this.barBg = new THREE.MeshBasicMaterial({ color: 0x1a1a1a, transparent: true, opacity: 0.6, depthTest: false });
     this._p = new THREE.Vector3(); this._d = new THREE.Vector3();
   }
