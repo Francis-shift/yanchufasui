@@ -85,15 +85,15 @@ test('松树：根团悬在外面的不到 3%', () => {
   }
 });
 
-test('松树：石壁上的黄山松树冠伸在外面（八成五以上的树冠顶点在山石外），台底的树冠不高过台面', () => {
+test('松树：石壁上的黄山松树冠伸在外面（八成五以上的树冠顶点在山石外），台底、邻峰的树冠不高过台面', () => {
   for (const [g, mats] of [[0, lists[0][1]], [1, lists[1][1]]]) {
     mats.forEach((m, i) => {
       const out = share(1, m, 1.4, Infinity, 6, (v) => !inside(v));
       assert.ok(out >= 0.85, `${NAME[/** @type {number} */ (g)][1]}第 ${i + 1} 棵：树冠只有 ${(out * 100).toFixed(0)}% 在外面`);
-      const at = new THREE.Vector3().setFromMatrixPosition(m);
-      if (Math.hypot(at.x, at.z) < 15) {   // 台底那几棵
+      // 近处的（台底、邻峰）上面都压着台面（y = 0）：树冠高过台面会从台面上冒出来（10-25 邻峰那两棵就是）
+      if (g === 1) {
         const topY = share(1, m, 0, Infinity, 1, (v) => v.y > -1);
-        assert.equal(topY, 0, `台底第 ${i + 1} 棵树冠高过台面下 1 米`);
+        assert.equal(topY, 0, `近处第 ${i + 1} 棵树冠高过台面下 1 米`);
       }
     });
   }

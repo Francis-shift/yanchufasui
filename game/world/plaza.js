@@ -294,8 +294,9 @@ const FLOOR = { time: { value: 0 }, inv: { value: 0 }, refl: { value: flat(0, 0,
 /**
  * 台面材质：代码画的石板（颜色、凹凸、粗糙度、编号）叠上实拍石材、生活痕迹和雨后积水。
  * 细节贴图大理石那张的平均色（线性）是 (0.63, 0.55, 0.43)，除掉它只留明暗起伏；细节的 AO 均值 0.48、粗糙度均值 0.83，同样只取起伏。
- * 积水（生活痕迹图 B）：过 0.5 是水，按石面明暗抖出不规则的水边；水边外一圈湿的（发暗、光一点）；水面是平的，
- * 偶尔一滴水落下荡开一圈涟漪；云影只落在台面上（竖着的物件不跟着暗，只做了地面）；倒影：电影档用平面反射换掉环境反射，菲涅耳比真水夸张（游戏机位俯看约 25°，真水只反 5%～10%，
+ * 积水（生活痕迹图 B）：过 0.5 是水，按石面明暗抖出不规则的水边；水边外一圈湿的（发暗、光一点）；水边一薄层透出湿石头、越往里倒影越清楚；
+ * 水面有风吹的细波，偶尔一滴水落下荡开一圈涟漪；云影只落在台面上（竖着的物件不跟着暗，只做了地面）；
+ * 倒影：电影档用平面反射换掉环境反射，跟着波纹扭、稍微糊开、偏暗偏黄（10-25 本人说原来像镜子）；菲涅耳仍比真水夸张一倍（游戏机位俯看约 25°，真水只反 5%～10%，
  * 照出来的天跟晒亮的石面差不多亮，从游戏机位几乎看不出水洼）；流畅档水面的环境反射也按这个量
  * @param {{ color: THREE.Texture, aux: THREE.Texture }} floor @param {THREE.Texture} wear @param {number} R
  * @param {{ uniforms: Record<string, { value: any }>, decl: string, color: string, rough: string, metal: string, emissive: string }} [extra] 广场的入侵损伤与阵纹
@@ -326,14 +327,15 @@ function stoneFloor(floor, wear, R, extra) {
         diffuseColor.rgb *= 1. + uStone * (0.06 * clamp((sDet.r - 0.48) / 0.06, -2.5, 1.5) + 0.04 * (sDet.b - 0.5) / 0.157) + 0.05 * sWear.r;
         diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.72, 0.66, 0.58), sWear.g);
         float sWet = sWear.b + uStone * (0.5 * texture2D(uStoneD, sp / 0.9 + 0.37).b + 0.4 * texture2D(uStoneD, sp / 3.1 + 0.71).b - 0.45);   // 两层石面明暗把水边抖得不规则（约 ±0.25 米）
-        float pool = smoothstep(0.5, 0.53, sWet), damp = smoothstep(0.3, 0.5, sWet);   // 水；水边外一圈湿的
-        diffuseColor.rgb *= 1. - 0.25 * damp - 0.2 * pool;   // 湿石头发深；水底再深一点，倒影才托得出来
+        // 水；水边外一圈湿的；deep 是水多深：水边一薄层透出底下的湿石头，往里才渐渐照得出东西（一下子满反射像贴了块镜子）
+        float pool = smoothstep(0.49, 0.54, sWet), damp = smoothstep(0.3, 0.5, sWet), deep = smoothstep(0.5, 0.7, sWet);
+        diffuseColor.rgb *= 1. - 0.25 * damp - 0.2 * deep;   // 湿石头发深；水底再深一点，倒影才托得出来
         ${extra?.color ?? ''}`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
         roughnessFactor *= 1. + uStone * 0.3 * clamp((sDet.g - 0.832) / 0.06, -2., 2.);
         roughnessFactor = max(roughnessFactor * (1. - 0.35 * sWear.r), 0.24);   // 走得多的地方磨光，夕阳下亮一条；再光就成镜子，朝太阳看白成一片
         roughnessFactor = mix(roughnessFactor, max(roughnessFactor, 0.8), sWear.g);
-        roughnessFactor = mix(mix(roughnessFactor, roughnessFactor * 0.6, damp), 0.04, pool);
+        roughnessFactor = mix(mix(roughnessFactor, roughnessFactor * 0.6, damp), mix(0.14, 0.05, deep), pool);   // 水边的薄水膜里石面还冒头，没那么光
         ${extra?.rough ?? ''}`)
       .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
         ${extra?.metal ?? ''}`)
@@ -341,8 +343,12 @@ function stoneFloor(floor, wear, R, extra) {
         vec3 sTx = normalize((viewMatrix * vec4(1., 0., 0., 0.)).xyz), sTz = normalize((viewMatrix * vec4(0., 0., 1., 0.)).xyz);
         vec3 sN = texture2D(uStoneN, sp / 1.6).xyz * 2. - 1.;  // 贴图右 = +x、上 = +z（贴图不翻转）
         normal = normalize(normal + uStone * 1.5 * (sN.x * sTx + sN.y * sTz));
-        vec2 rip = vec2(0.);
-        if (pool > 0.) {   // 涟漪：0.45 米一格，约三成的格子每 3 秒落一滴，荡开一圈（sp 的 y 朝 -z）
+        vec2 rip = vec2(0.), wave = vec2(0.);
+        if (pool > 0.) {
+          // 风吹的细波：实拍石面那张法线错开两层、朝不同方向移（每秒十几到二十几厘米），水面一直在轻轻晃（没下载到石材时是平的）。
+          // 两层叠起来的起伏标准差约 0.047（量过 stone-normal.webp），乘 21 归一，下面再按要的大小乘
+          wave = 21. * (texture2D(uStoneN, sp / 0.5 + uFloorTime * vec2(0.3, 0.18)).xy + texture2D(uStoneN, sp / 0.85 + vec2(0.5) - uFloorTime * vec2(0.12, 0.27)).xy - 1.);
+          // 涟漪：0.45 米一格，约三成的格子每 3 秒落一滴，荡开一圈（sp 的 y 朝 -z）
           vec2 rp = sp * 2.2, cell = floor(rp);
           for (int i = -1; i <= 1; i++) for (int j = -1; j <= 1; j++) {
             vec2 c = cell + vec2(i, j);
@@ -354,7 +360,8 @@ function stoneFloor(floor, wear, R, extra) {
             rip += d / max(r, 1e-3) * sin(w) * step(abs(w), 6.2832) * (1. - t) * (1. - t);
           }
         }
-        normal = normalize(mix(normal, normalize((viewMatrix * vec4(0., 1., 0., 0.)).xyz), pool) + pool * 0.2 * (rip.x * sTx - rip.y * sTz));`)
+        vec2 sTilt = 0.2 * rip + 0.05 * wave;   // 细波让水面倾约 0.05（3°）
+        normal = normalize(mix(normal, normalize((viewMatrix * vec4(0., 1., 0., 0.)).xyz), pool) + pool * (sTilt.x * sTx - sTilt.y * sTz));`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         ${extra?.emissive ?? ''}`)
       .replace('#include <aomap_fragment>', `#include <aomap_fragment>
@@ -363,11 +370,16 @@ function stoneFloor(floor, wear, R, extra) {
         float cl = 1. - 0.38 * (1. - uFloorInv) * smoothstep(0.44, 0.62, 0.6 * sNoise(cp / 6.) + 0.4 * sNoise(cp / 2.6 + 5.3));
         reflectedLight.directDiffuse *= cl; reflectedLight.directSpecular *= cl;
         if (pool > 0.) {
-          float nv = saturate(dot(normal, geometryViewDir)), F = 0.06 + 0.94 * pow(1. - nv, 2.5);   // 俯看 25° 约 0.3（真水约 0.08）
+          float nv = saturate(dot(normal, geometryViewDir)), F = 0.04 + 0.96 * pow(1. - nv, 3.5);   // 俯看 25° 约 0.18（真水约 0.08；原来 0.3 太像镜子）
+          // 倒影：跟着细波和涟漪扭，再在 5 个点上取平均糊开一点（约 4 个像素），积水不干净、偏暗偏黄
+          vec4 rc = vRefl + vec4((rip * 0.03 + wave * 0.004) * vRefl.w, 0., 0.);   // 细波把倒影扭开约 4 个像素
+          vec2 bo = vec2(0.0042, 0.0016) * vRefl.w;
+          vec3 rs = 0.36 * texture2DProj(uRefl, rc).rgb + 0.16 * (texture2DProj(uRefl, rc + vec4(bo, 0., 0.)).rgb + texture2DProj(uRefl, rc - vec4(bo, 0., 0.)).rgb
+            + texture2DProj(uRefl, rc + vec4(-bo.y, bo.x, 0., 0.)).rgb + texture2DProj(uRefl, rc - vec4(-bo.y, bo.x, 0., 0.)).rgb);
           vec3 refl = mix(reflectedLight.indirectSpecular * F / (0.04 + 0.96 * pow(1. - nv, 5.)),   // 流畅档：环境反射按同样的量放大
-            texture2DProj(uRefl, vRefl + vec4(rip * 0.03 * vRefl.w, 0., 0.)).rgb * F, uReflOn);
+            rs * F, uReflOn) * vec3(0.9, 0.87, 0.8);
           vec3 tint = mix(vec3(1.), vec3(0.72, 0.5, 1.35), (0.7 - 0.35 * uReflOn) * uFloorInv);   // 入侵：倒影染紫（环境贴图开局烤好，不会跟着天变）
-          reflectedLight.indirectSpecular = mix(reflectedLight.indirectSpecular, refl * tint, pool);
+          reflectedLight.indirectSpecular = mix(reflectedLight.indirectSpecular, refl * tint, pool * (0.35 + 0.65 * deep));
         }`);
   };
   return mat;
