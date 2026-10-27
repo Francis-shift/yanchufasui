@@ -98,9 +98,10 @@ export class Walls {
     return w;
   }
 
-  /** 土墙段的位置，给流场当障碍 */
+  /** 土墙段的位置，给流场当障碍；bounce：这堵墙写了字诀「返」（payload 是那一步，见 run.js applyRunes），冰锥撞上弹回去 */
   obstacles() {
-    return this.list.filter((w) => w.el === 'earth').flatMap((w) => w.pts.map((p) => ({ x: p.x, z: p.z, r: 0.6 })));
+    return this.list.filter((w) => w.el === 'earth')
+      .flatMap((w) => w.pts.map((p) => ({ x: p.x, z: p.z, r: 0.6, bounce: !!w.payload?.runes?.includes('fan') })));
   }
 
   /** 正在生效的帘子（火冰风墙） */

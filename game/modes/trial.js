@@ -16,6 +16,7 @@ import {
 } from '../rules/trial.js';
 import { CASTER_POS, CORE_POS, OBSTACLES, PLAZA_R } from '../world/layout.js';
 import { rand } from '../fx/common.js';
+import { distToSegment } from '../fx/walls.js';
 
 /** 守关时施法者站的地方（开局就记下，试炼结束放回这里） */
 const HOME = CASTER_POS.clone();
@@ -31,6 +32,7 @@ const SWEEP_HALF = (BOSS.sweep.halfDeg * Math.PI) / 180;
 /** 同时在飞的冰锥最多这么多（旋转弹幕狂暴时一轮约 70 颗） */
 const MAX_BULLETS = 200;
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
+const NO_SIZE = new THREE.Vector3(0, 0, 0);
 /** @type {Record<string, [number, number]>} 键 → 屏幕上的方向（右、上） */
 const MOVE_KEYS = { KeyW: [0, 1], ArrowUp: [0, 1], KeyS: [0, -1], ArrowDown: [0, -1], KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0] };
 
@@ -41,10 +43,12 @@ export class Trial {
    *           particles: import('../fx/particles.js').Particles, hud: import('../ui/hud.js').Hud,
    *           caster: THREE.Object3D, origins: THREE.Vector3[], canvas: HTMLElement, mobile: boolean,
    *           floatText: (p: THREE.Vector3, text: string, color: string) => void, win: () => void, lose: () => void,
-   *           blockers: () => { x: number, z: number, r: number }[], reward: (mana: number, gauge: number) => void,
-   *           local: (x: number, y: number) => { x: number, y: number }, pick: (insight: boolean, done: () => void) => void }} d
-   *   origins：法术起点（施法者胸口高度），跟着玩家走；blockers：此刻的土墙（挡冰锥）；reward：完美闪避回法力、加气势；
-   *   local：屏幕坐标换成界面坐标（画面转了 90° 时要转回来）；pick：出三选一（insight：打完 boss 那次），选完调 done 接着打
+   *           blockers: () => { x: number, z: number, r: number, bounce?: boolean }[], reward: (mana: number, gauge: number) => void,
+   *           local: (x: number, y: number) => { x: number, y: number }, pick: (insight: boolean, done: () => void) => void,
+   *           strike: (e: any, dmg: number, at: { x: number, z: number }) => void }} d
+   *   origins：法术起点（施法者胸口高度），跟着玩家走；blockers：此刻的土墙（挡冰锥；bounce 的写了字诀「返」，把冰锥弹回去）；
+   *   reward：完美闪避回法力、加气势；local：屏幕坐标换成界面坐标（画面转了 90° 时要转回来）；
+   *   pick：出三选一（insight：打完 boss 那次），选完调 done 接着打；strike：弹回去的冰锥撞上敌人，打它一下（main.js 结算）
    */
   constructor(scene, d) {
     this.scene = scene; this.d = d;
@@ -63,8 +67,9 @@ export class Trial {
     /** @type {{ id: number, x: number, y: number, t: number, moved: boolean } | null} */
     this.ptr = null;
     this.dashT = 0; this.dashDir = new THREE.Vector3(); this.hurtT = 0; this.flash = 0;
-    // 精力：还剩几格（攒到一半也算数）、离上次按闪避过了几秒；shownSta 是闪避按钮上画到几格（变了才重画）
-    this.stamina = TRIAL.stamina.max; this.sinceDash = Infinity; this.shownSta = -1;
+    // 精力：还剩几格（攒到一半也算数）、离上次按闪避过了几秒；shownSta 是闪避按钮上画成什么样（变了才重画）
+    // dashLock：字诀「重」放完这几秒不能闪避；slowTele：字诀「凝」冻住了 boss，下一招预警变慢
+    this.stamina = TRIAL.stamina.max; this.sinceDash = Infinity; this.shownSta = ''; this.dashLock = 0; this.slowTele = false;
     /** 小怪潮里冒着紫烟、还没出来的小傀儡：落点与还要几秒 @type {{ x: number, z: number, t: number }[]} */
     this.pending = [];
     /** @type {any} */
@@ -80,8 +85,9 @@ export class Trial {
     this._f = new THREE.Vector3(); this._r = new THREE.Vector3(); this._m = new THREE.Vector3();
     // 完美闪避：按闪避的时刻与位置（招落下时回头核对）；一次闪避只算一次
     this.clock = 0; this.dashAt = -Infinity; this.dashFrom = new THREE.Vector3(); this.perfectUsed = true; this.glow = 0;
-    // 冰锥：位置、速度、飞了多久；homing 的会追人
-    /** @type {{ x: number, y: number, z: number, vx: number, vz: number, t: number, life: number, homing: boolean, dmg: number, r: number, fooled?: boolean }[]} */
+    // 冰锥：位置、速度、飞了多久；homing 的会追人；friendly：被写了字诀「返」的土墙弹回去的，不伤人、打敌人
+    /** @type {{ x: number, y: number, z: number, vx: number, vz: number, t: number, life: number, homing: boolean, dmg: number, r: number,
+     *           fooled?: boolean, friendly?: boolean }[]} */
     this.bullets = [];
     this.emitT = 0; this.a0 = 0; this.chT = 0;   // 旋转弹幕：下一轮还有多久、起始角、已经转了几秒
     // 冰锥要在十几米外的镜头里一眼看见：0.2 米那版在截图里只剩一个白点（10-27），放大、自发光压过泛光阈值
@@ -315,7 +321,7 @@ export class Trial {
     this.dashAt = -Infinity; this.perfectUsed = true; this.glow = 0; this.lastMove = '';
     this.keys.clear(); this.ptr = null; this.stick.x = this.stick.y = 0;
     this.dashT = 0; this.hurtT = 0; this.flash = 0;
-    this.stamina = TRIAL.stamina.max; this.sinceDash = Infinity; this.shownSta = -1;
+    this.stamina = TRIAL.stamina.max; this.sinceDash = Infinity; this.shownSta = ''; this.dashLock = 0; this.slowTele = false;
     this.pending.length = 0;
     this.ghostT = 0; this.ghost.visible = false;
     this.p.copy(HOME); this.face.set(0, 0, -1);
@@ -338,7 +344,7 @@ export class Trial {
 
   // ---------------------------------------------------------------- 玩家
   dash() {
-    if (!this.on || !canDash(this.stamina, this.sinceDash) || this.hp <= 0) return;
+    if (!this.on || !canDash(this.stamina, this.sinceDash) || this.dashLock > 0 || this.hp <= 0) return;
     const mv = this.input();
     this.dashDir.copy(mv.lengthSq() > 0.01 ? mv.normalize() : this.face);
     this.dashT = TRIAL.dash.sec;
@@ -354,6 +360,7 @@ export class Trial {
     // 冰锥眼看就要撞上（正朝人飞、window 秒内到）才闪：当场算完美闪避
     const W = this.mods.perfectWindow;
     for (const b of this.bullets) {
+      if (b.friendly) continue;
       const rx = this.p.x - b.x, rz = this.p.z - b.z, d = Math.hypot(rx, rz), sp = Math.hypot(b.vx, b.vz);
       if (d < b.r + BODY + sp * W && rx * b.vx + rz * b.vz > 0.7 * d * sp) { this.perfect(); break; }
     }
@@ -414,6 +421,7 @@ export class Trial {
       if (mv.lengthSq() > 0.0025) { this.p.addScaledVector(mv, TRIAL.speed * dt); this.face.copy(mv).normalize(); }
     }
     this.sinceDash += dt;
+    this.dashLock = Math.max(0, this.dashLock - dt);
     this.stamina = regenStamina(this.stamina, dt);
     this.showStamina();
     const block = this.boss ? [...BLOCK, { x: this.boss.pos.x, z: this.boss.pos.z, r: BOSS_BODY }] : BLOCK;
@@ -427,12 +435,26 @@ export class Trial {
     this.robe.emissive.setRGB(0.9 * this.flash + 0.8 * this.glow, 0.08 * this.flash + 0.8 * this.glow, 0.04 * this.flash + 0.9 * this.glow);
   }
 
-  /** 闪避按钮上的精力格（攒到几成画几成；变化不到 2% 不重画） */
+  /** 闪避按钮上的精力格（攒到几成画几成；变化不到 2% 不重画）；字诀「重」锁住闪避时按钮变淡 */
   showStamina() {
-    const s = Math.round(this.stamina * 50) / 50;
-    if (s === this.shownSta) return;
-    this.shownSta = s;
-    this.d.hud.setStamina(s, TRIAL.stamina.max);
+    const s = Math.round(this.stamina * 50) / 50, locked = this.dashLock > 0, key = `${s}|${locked}`;
+    if (key === this.shownSta) return;
+    this.shownSta = key;
+    this.d.hud.setStamina(s, TRIAL.stamina.max, locked);
+  }
+
+  /** 字诀「重」：放完 sec 秒内不能闪避 @param {number} sec */
+  lockDash(sec) {
+    this.dashLock = Math.max(this.dashLock, sec);
+    this.showStamina();
+  }
+
+  /** 字诀「凝」冻住了 boss：它的下一招预警变慢（只管一招），boss 头上飘个「凝」 */
+  chill() {
+    const b = this.boss;
+    if (!b) return;
+    if (!this.slowTele) this.d.floatText(new THREE.Vector3(b.pos.x, 3.6, b.pos.z), '凝', '#9fd4ff');
+    this.slowTele = true;
   }
 
   /** 施法者、脚下法阵、法术起点都挪到玩家的位置 */
@@ -466,12 +488,12 @@ export class Trial {
 
   // ---------------------------------------------------------------- boss
   /**
-   * boss 挨一下（main.js hitEnemy 在结算前调）：按冰甲改这一下，削穿了演一下碎甲。
+   * boss 挨一下（main.js hitEnemy 在结算前调）：按冰甲改这一下，削穿了演一下碎甲。po：这一下带着字诀「破」
    * @template {{ dmg: number, reaction: string, freezeSec: number, push: number, stunSec: number }} R
-   * @param {any} e @param {string} el @param {R} r @returns {R}
+   * @param {any} e @param {string} el @param {R} r @param {boolean} [po] @returns {R}
    */
-  hitBoss(e, el, r) {
-    const h = bossHit({ armor: this.armor, freezeCd: this.freezeCd }, el, r);
+  hitBoss(e, el, r, po = false) {
+    const h = bossHit({ armor: this.armor, freezeCd: this.freezeCd }, el, r, po);
     this.armor = h.armor;
     if (h.broke) {
       this.d.hud.bigText('冰甲碎了', '#2f6fae', 1100);
@@ -525,7 +547,9 @@ export class Trial {
   startTele() {
     const b = this.boss, second = this.move === 'slam' && this.left < slamCount(this.phase);
     this.state = 'tele';
-    this.t = this.teleLen = teleSec(this.move, this.phase) * (second ? 0.7 : 1);   // 连砸的第二下快一点
+    // 连砸的第二下快一点；字诀「凝」冻住过它，这一招慢一些
+    this.t = this.teleLen = teleSec(this.move, this.phase) * (second ? 0.7 : 1) * (this.slowTele ? RUN.runes.ning.tele : 1);
+    this.slowTele = false;
     if (this.move === 'slam') {
       this.target.set(this.p.x, 0, this.p.z);
       this.circle.g.position.set(this.target.x, 0.03, this.target.z);
@@ -559,13 +583,80 @@ export class Trial {
 
   clearBullets() { this.bullets.length = 0; this.shards.count = this.dots.count = 0; }
 
-  /** 冰锥飞一帧：追人的转弯；撞上土墙、场上的石物件就碎；撞上人就伤人 @param {number} dt */
+  /**
+   * 字诀「返」：冰锥撞上写了「返」的土墙，被推回墙外、掉头飞向 boss（没有 boss 就照墙面反射），快一些、伤害翻倍，从此不伤人
+   * @param {{ x: number, y: number, z: number, vx: number, vz: number, t: number, life: number, homing: boolean, dmg: number, r: number,
+   *           friendly?: boolean }} b @param {{ x: number, z: number, r: number }} o 撞上的那段墙
+   */
+  bounce(b, o) {
+    const F = RUN.runes.fan, sp = Math.hypot(b.vx, b.vz) * F.speed;
+    let nx = b.x - o.x, nz = b.z - o.z;
+    const nl = Math.hypot(nx, nz) || 1;
+    nx /= nl; nz /= nl;
+    b.x = o.x + nx * (o.r + b.r + 0.05); b.z = o.z + nz * (o.r + b.r + 0.05);
+    let vx = b.vx, vz = b.vz;
+    if (this.boss) { vx = this.boss.pos.x - b.x; vz = this.boss.pos.z - b.z; }
+    else { const d = vx * nx + vz * nz; if (d < 0) { vx -= 2 * d * nx; vz -= 2 * d * nz; } }
+    const vl = Math.hypot(vx, vz) || 1;
+    b.vx = (vx / vl) * sp; b.vz = (vz / vl) * sp;
+    b.friendly = true; b.homing = false; b.t = 0; b.life = (PLAZA_R * 2) / sp; b.dmg *= F.mult;
+    for (let k = 0; k < 8; k++) {   // 墙上迸几粒金色的石屑
+      this.d.particles.emit(b.x, b.y, b.z, nx * rand(1, 3) + rand(-1, 1), rand(0.5, 2.5), nz * rand(1, 3) + rand(-1, 1), rand(0.25, 0.45), rand(0.04, 0.08),
+        [2.4, 1.6, 0.5], [0.8, 0.45, 0.1], { drag: 2, grav: -8 });
+    }
+  }
+
+  /**
+   * 字诀「引」：一道闪电从 a 劈到 b，两侧 r 米内的冰锥全碎（弹回去的不算）
+   * @param {{ x: number, z: number }} a @param {{ x: number, z: number }} b @param {number} r @returns {number} 碎了几颗
+   */
+  shatter(a, b, r) {
+    let n = 0;
+    for (let i = this.bullets.length - 1; i >= 0; i--) {
+      const q = this.bullets[i];
+      if (q.friendly || distToSegment(q, a, b) > r) continue;
+      for (let k = 0; k < 8; k++) {
+        this.d.particles.emit(q.x, q.y, q.z, rand(-3, 3), rand(0.5, 3), rand(-3, 3), rand(0.25, 0.5), rand(0.05, 0.1), [2.2, 1.9, 0.9], [0.5, 0.55, 0.9], { drag: 2, grav: -8 });
+      }
+      this.bullets.splice(i, 1);
+      n++;
+    }
+    return n;
+  }
+
+  /**
+   * 弹回去的冰锥飞一帧：穿过土墙（刚从墙上弹出来）、撞上石物件就碎、撞上敌人打它一下；拖一道金光
+   * @param {{ x: number, y: number, z: number, vx: number, vz: number, t: number, life: number, dmg: number, r: number }} b @param {number} dt
+   * @returns {boolean} 没了
+   */
+  flyBack(b, dt) {
+    b.x += b.vx * dt; b.z += b.vz * dt;
+    b.y += (1.0 - b.y) * Math.min(1, dt * 4);
+    if (b.t > b.life || Math.hypot(b.x, b.z) > PLAZA_R + 3) return true;
+    for (const o of BLOCK) if ((b.x - o.x) ** 2 + (b.z - o.z) ** 2 < (o.r + b.r) ** 2) return true;
+    for (const e of this.d.enemies.list) {
+      const r = (e === this.boss ? BOSS_BODY : 0.45) + b.r;
+      if ((b.x - e.pos.x) ** 2 + (b.z - e.pos.z) ** 2 < r * r) { this.d.strike(e, b.dmg, b); return true; }
+    }
+    if (Math.random() < dt * 40) {
+      this.d.particles.emit(b.x, b.y, b.z, -b.vx * 0.1, 0.2, -b.vz * 0.1, rand(0.25, 0.4), rand(0.1, 0.18), [2.4, 1.7, 0.6], [0.8, 0.45, 0.1], { alpha: 0.7, drag: 3 });
+    }
+    return false;
+  }
+
+  /** 冰锥飞一帧：追人的转弯；撞上土墙、场上的石物件就碎（写了「返」的土墙弹回去）；撞上人就伤人；弹回去的撞上敌人打敌人 @param {number} dt */
   updateBullets(dt) {
     const { particles } = this.d, walls = this.d.blockers(), H = BOSS.homing;
     const ghost = this.ghostT > 0 ? this.ghost.position : null;   // 残影在：追踪的改追它
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];
       b.t += dt;
+      if (b.friendly) {
+        const gone = this.flyBack(b, dt);
+        if (this.bullets[i] !== b) return;   // 这一下打碎了 boss：冰锥已经全收了
+        if (gone) this.bullets.splice(i, 1);
+        continue;
+      }
       // 甩出去先直飞一小段再拐。追过残影的算被骗过：残影散了也不再回头，直飞到化掉
       // （转向有上限，两侧的冰锥 1.5 秒里拐不到残影跟前；不这样，残影一散它们又掉头追人，10-27 预览实测）
       if (b.homing && ghost) b.fooled = true;
@@ -578,7 +669,12 @@ export class Trial {
       b.y += (1.0 - b.y) * Math.min(1, dt * 4);   // 追踪冰锥从高处甩出，落到齐腰高
       let gone = b.t > b.life || Math.hypot(b.x, b.z) > PLAZA_R + 3;
       if (!gone) {
-        for (const o of walls) if ((b.x - o.x) ** 2 + (b.z - o.z) ** 2 < (o.r + b.r) ** 2) { gone = true; break; }
+        for (const o of walls) {
+          if ((b.x - o.x) ** 2 + (b.z - o.z) ** 2 >= (o.r + b.r) ** 2) continue;
+          if (o.bounce) this.bounce(b, o); else gone = true;
+          break;
+        }
+        if (b.friendly) continue;
         if (!gone) for (const o of BLOCK) if ((b.x - o.x) ** 2 + (b.z - o.z) ** 2 < (o.r + b.r) ** 2) { gone = true; break; }
         if (!gone && ghost && b.y < 1.6 && inCircle(b, ghost, b.r, RUN.arts.ghost.r)) gone = true;
         if (gone) {   // 撞碎：溅几片冰
@@ -589,7 +685,10 @@ export class Trial {
       }
       if (!gone && b.y < 1.6 && inCircle(b, this.p, b.r, BODY)) {
         if (this.dashT > 0) this.perfect();   // 冲刺中穿身而过
-        else { this.hurt(b.dmg); gone = true; }
+        else {
+          this.hurt(b.dmg); gone = true;
+          if (this.bullets[i] !== b) return;   // 这一下打死了人：收场时冰锥已经清空，别再往下数
+        }
       }
       if (gone) { this.bullets.splice(i, 1); continue; }
       // 身后拖一道冷光：追踪的拖得密，看得出它在拐弯；旋转弹幕一轮几十颗，拖得稀，不然连成一片白
@@ -603,7 +702,8 @@ export class Trial {
       this._bd.set(b.vx, 0, b.vz).normalize();
       this._q.setFromUnitVectors(Z_AXIS, this._bd);
       this.shards.setMatrixAt(i, this._m4.compose(this._bp.set(b.x, b.y, b.z), this._q, this._s));
-      this.dots.setMatrixAt(i, this._m4.compose(this._bp.set(b.x, 0.035, b.z), this._q.identity(), this._s));
+      // 弹回去的不伤人，地上不画红点
+      this.dots.setMatrixAt(i, this._m4.compose(this._bp.set(b.x, 0.035, b.z), this._q.identity(), b.friendly ? NO_SIZE : this._s));
     }
     this.shards.count = this.dots.count = n;
     this.shards.instanceMatrix.needsUpdate = this.dots.instanceMatrix.needsUpdate = true;

@@ -21,20 +21,23 @@ export function bossPhase(hp, max) {
  * boss 挨一下：先照常由 damageTo 算出这一下，再按冰甲改。
  * 甲在时：火照常伤害、同时削甲（削穿就碎）；别的元素只剩 armoredMult，也冻不住。boss 太重，风推不动；麻痹最多 stunMax 秒。
  * 冻过一次、化开后 freezeGrace 秒内（freezeCd > 0）再冻不住。
+ * 字诀「破」（po）：甲在时伤害 × RUN.runes.po、不打折，什么元素都照常削甲（削掉的按翻倍前算）。
  * @template {{ dmg: number, reaction: string, freezeSec: number, push: number, stunSec: number }} R
  * @param {{ armor: number, freezeCd: number }} b
  * @param {string} el
  * @param {R} r
+ * @param {boolean} [po]
  * @returns {{ r: R, armor: number, broke: boolean }}
  */
-export function bossHit(b, el, r) {
+export function bossHit(b, el, r, po = false) {
   const out = { ...r, push: 0, stunSec: Math.min(r.stunSec, BOSS.stunMax) };
   let armor = b.armor, broke = false;
   if (armor > 0) {
-    if (el === 'fire') {
+    if (el === 'fire' || po) {
       armor = Math.max(0, armor - r.dmg);
       broke = armor === 0;
-      out.reaction = out.reaction || '融甲';
+      out.reaction = out.reaction || (po ? '破甲' : '融甲');
+      if (po) out.dmg = r.dmg * RUN.runes.po;
     } else {
       out.dmg = r.dmg * BOSS.armoredMult;
       out.reaction = out.reaction || '冰甲';

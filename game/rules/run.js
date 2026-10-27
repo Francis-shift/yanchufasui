@@ -2,11 +2,11 @@
 /**
  * 试炼的一局（设计文档第 4 节"试炼模式：一局与奖励"）。纯函数：
  *   一局怎么排（RUN_STAGES）、卡池（CARDS）、出哪几张（offer）、拿了（take）、重抽（reroll）、不拿（skip），
- *   拿过的卡合成这一局的加成（runMods）。
+ *   拿过的卡合成这一局的加成（runMods）、按钮的咒里认出哪几个字诀（runesOf、applyRunes）。
  * 卡的效果在用到它的地方生效（完美闪避的窗口、法力回复、召龙要几格气势……），这里只记"拿了什么、到几级"。
  * 卡池里写全了设计里的卡；ready 为假的是效果还没做的，不会出（做一样开一样）。
  */
-import { ELEMENTS, FORMS, RUN, TALENT_DEFAULT, TRIAL, ULT_GAUGE } from './numbers.js';
+import { BUTTON_CHANT_MS, ELEMENTS, FORMS, RUN, TALENT_DEFAULT, TRIAL, ULT_GAUGE } from './numbers.js';
 
 /**
  * 一局：小怪潮 → 三选一 → boss → 三选一（第三张是领悟）→ …… → 第三个 boss → 结算；打完最后一个 boss 不再选卡。
@@ -39,17 +39,17 @@ export const CARDS = [
   { id: 'sky', kind: 'move', name: '天降', text: '弹从天而降，盾挡不住', max: 1, ready: true },
   { id: 'behind', kind: 'move', name: '绕后', text: '弹绕到背后再打', max: 1, ready: true },
   { id: 'three', kind: 'move', name: '三颗', text: '弹一次放三颗', max: 1, ready: true },
-  // 字诀：写进按钮的咒语才生效
-  { id: 'po', kind: 'rune', name: '破', text: '打有甲的目标伤害翻倍，不是火也能削甲', max: 1, ready: false },
-  { id: 'lian', kind: 'rune', name: '连', text: '放完 0.5 秒自动再放一次，第二次半伤', max: 1, ready: false },
-  { id: 'zhong', kind: 'rune', name: '重', text: '伤害 ×1.6；咏唱加倍，放完 0.5 秒内不能闪避', max: 1, ready: false },
-  { id: 'ji', kind: 'rune', name: '疾', text: '咏唱 0.6 → 0.2 秒，法力多花三成', max: 1, ready: false },
-  { id: 'sui', kind: 'rune', name: '随', text: '飞弹绕开障碍追着打', max: 1, ready: false },
-  { id: 'liao', kind: 'rune', name: '燎', el: 'fire', text: '落地留火', max: 1, ready: false },
-  { id: 'ning', kind: 'rune', name: '凝', el: 'ice', text: '冻得更久；boss 冻住时下一招预警变慢', max: 1, ready: false },
-  { id: 'hui', kind: 'rune', name: '回', el: 'wind', text: '风刃飞出去再飞回来，打两次', max: 1, ready: false },
-  { id: 'fan', kind: 'rune', name: '返', el: 'earth', text: '墙挡下的冰锥反弹回去', max: 1, ready: false },
-  { id: 'yin', kind: 'rune', name: '引', el: 'thunder', text: '雷链多跳两次，能打碎冰锥', max: 1, ready: false },
+  // 字诀：写进按钮的咒语才生效（runesOf）
+  { id: 'po', kind: 'rune', name: '破', text: `打有甲的目标伤害 ×${RUN.runes.po}，不是火也能削甲`, max: 1, ready: true },
+  { id: 'lian', kind: 'rune', name: '连', text: `放完 ${RUN.runes.lian.sec} 秒自动再放一次，第二次半伤、不花法力`, max: 1, ready: true },
+  { id: 'zhong', kind: 'rune', name: '重', text: `伤害 ×${RUN.runes.zhong.dmg}；咏唱加倍，放完 ${RUN.runes.zhong.lock} 秒内不能闪避`, max: 1, ready: true },
+  { id: 'ji', kind: 'rune', name: '疾', text: `咏唱 ${BUTTON_CHANT_MS / 1000} → ${RUN.runes.ji.chantMs / 1000} 秒，法力多花三成`, max: 1, ready: true },
+  { id: 'sui', kind: 'rune', name: '随', text: '飞弹追着打：目标倒了改追最近的，爆和雨的落点跟着目标走', max: 1, ready: true },
+  { id: 'liao', kind: 'rune', name: '燎', el: 'fire', text: `落地留一片火，烧 ${RUN.runes.liao.sec} 秒`, max: 1, ready: true },
+  { id: 'ning', kind: 'rune', name: '凝', el: 'ice', text: `冻得更久（×${RUN.runes.ning.freeze}）；boss 冻住后下一招预警变慢`, max: 1, ready: true },
+  { id: 'hui', kind: 'rune', name: '回', el: 'wind', text: '风刃飞出去再飞回手上，路上再打一次', max: 1, ready: true },
+  { id: 'fan', kind: 'rune', name: '返', el: 'earth', text: '土墙挡下的冰锥反弹回去打 boss', max: 1, ready: true },
+  { id: 'yin', kind: 'rune', name: '引', el: 'thunder', text: '雷链多跳两次，劈过的地方冰锥全碎', max: 1, ready: true },
   // 心法：拿了就生效
   { id: 'jianqie', kind: 'art', name: '见切', text: `完美闪避的窗口 ${TRIAL.perfect.window} → ${RUN.arts.window} 秒`, max: 1, ready: true },
   { id: 'chana', kind: 'art', name: '刹那', text: `完美闪避后 ${RUN.arts.slow.sec} 秒全场慢到三成，自己照常快`, max: 1, ready: true },
@@ -66,7 +66,7 @@ export const CARDS = [
     text: '先按风、再按火，两招合成火卷风', max: 1, ready: true },
   ...[['fire', '火'], ['ice', '冰'], ['wind', '风'], ['earth', '土'], ['thunder', '雷']].map(([el, name]) => /** @type {Card} */ ({
     id: `learn-${el}`, kind: 'insight', name, lack: el, text: `领悟「${name}」，多一个${name}的按钮`, max: 1, ready: false })),
-  { id: 'slot', kind: 'insight', name: '双诀', text: '每句咒多认一个字诀', max: 1, ready: false },
+  { id: 'slot', kind: 'insight', name: '双诀', text: '每句咒多认一个字诀', max: 1, ready: true },
   { id: 'button', kind: 'insight', name: '一心二用', text: '多一个按钮，同一个元素能装两种招', max: 1, ready: false },
   { id: 'twin', kind: 'insight', name: '双龙', text: '一次召两条龙，各打六成，分扑两个目标', max: 1, ready: false },
   { id: 'guard', kind: 'insight', name: '护身', text: '龙不扑出去，绕着自己转 5 秒，挡掉碰到的冰锥', max: 1, ready: false },
@@ -87,7 +87,7 @@ export const level = (run, id) => run.have[id] ?? 0;
 
 /**
  * 这张卡现在能不能出：效果做好了、还没拿满、元素条件满足（字诀里带元素的、合字要手上有那几个元素，领悟新元素要手上没有）；
- * 招式字还要有按钮换得上（轨迹、颗数只换得了弹）。
+ * 招式字还要有按钮换得上（轨迹、颗数只换得了弹）；「双诀」要已经学会一个字诀。
  * @param {Card} c @param {Run} run @param {string[]} els 玩家现有的元素
  */
 export function eligible(c, run, els) {
@@ -96,6 +96,7 @@ export function eligible(c, run, els) {
   if (c.need && !c.need.every((e) => els.includes(e))) return false;
   if (c.lack && els.includes(c.lack)) return false;
   if (c.kind === 'move' && !moveTargets(run, c, els).length) return false;
+  if (c.id === 'slot' && !RUNES.some((r) => level(run, r.id) > 0)) return false;
   return true;
 }
 
@@ -183,6 +184,73 @@ export function limitToLearned(intent, run, btn) {
 
 /** 试炼里能合成的融合：领悟了哪几个合字（守关不用这个，融合全开） @param {Run} run @returns {string[]} */
 export const runFusions = (run) => CARDS.filter((c) => c.fuse && level(run, c.id) > 0).map((c) => /** @type {string} */ (c.fuse));
+
+// ---------------------------------------------------------------- 字诀（设计文档第 4 节"字诀"）
+/** 十个字诀：破连重疾随（通用）、燎凝回返引（火冰风土雷） */
+export const RUNES = CARDS.filter((c) => c.kind === 'rune');
+/** 咒语卡上字诀旁边注明的作用 @type {Record<string, string>} */
+const RUNE_TAG = { po: '破甲', lian: '连放', zhong: '加重', ji: '快咏', sui: '追着打', liao: '留火', ning: '久冻', hui: '飞回', fan: '反弹', yin: '多跳' };
+
+/** 一句咒有几个字诀槽：1 个，领悟「双诀」再加 1 个 @param {Run} run */
+export const runeSlots = (run) => 1 + level(run, 'slot');
+
+/**
+ * 写进按钮的这句咒认出哪几个字诀：不经过模型，只看原话里有没有这个字（同一个字写两遍只算一次）。
+ * 按字出现的先后：学会了、又用得上的占字诀槽（元素字诀要这句里有那个元素的步），槽满了，后面的标灰"字诀槽已满"；
+ * 没学会的标灰"尚未领悟"；学会了、这句里却没有那个元素的步，标灰"只对某元素起作用"（不占槽）。
+ * @param {string} text @param {Run} run @param {string[]} els 这句咒里各步的元素
+ * @returns {{ runes: Card[], notes: string[] }}
+ */
+export function runesOf(text, run, els) {
+  /** @type {Card[]} */
+  const runes = [];
+  /** @type {string[]} */
+  const notes = [];
+  for (const ch of new Set(text)) {
+    const c = RUNES.find((r) => r.name === ch);
+    if (!c) continue;
+    if (level(run, c.id) <= 0) notes.push(`尚未领悟字诀「${ch}」`);
+    else if (c.el && !els.includes(c.el)) notes.push(`字诀「${ch}」只对${ELEMENTS[c.el].name}起作用`);
+    else if (runes.length >= runeSlots(run)) notes.push(`字诀槽已满，「${ch}」不生效`);
+    else runes.push(c);
+  }
+  return { runes, notes };
+}
+
+/**
+ * 试炼里按钮放出去之前认字诀（在 limitToLearned 之后）：每一步记上作用在它身上的字诀（runes；元素字诀只给那个元素的步），
+ * 「重」「疾」的伤害、法力倍数写进这一步（dmgK、costK，裁决器照乘）；别的字诀在演出时看 runes 生效（main.js、modes/trial.js）。
+ * 认出的字记进 intent.runes（咒语卡上加下划线），标灰的记进 notes。
+ * @param {import('./intent.js').Intent} intent @param {Run} run @param {string} text 写进按钮的原话（没写过就是空串）
+ * @returns {import('./intent.js').Intent}
+ */
+export function applyRunes(intent, run, text) {
+  const { runes, notes } = runesOf(text, run, intent.steps.map((s) => s.el));
+  if (!runes.length && !notes.length) return intent;
+  const R = RUN.runes;
+  const steps = intent.steps.map((s) => {
+    const ids = runes.filter((c) => !c.el || c.el === s.el).map((c) => c.id);
+    if (!ids.length) return s;
+    return { ...s, runes: ids, dmgK: ids.includes('zhong') ? R.zhong.dmg : 1, costK: ids.includes('ji') ? R.ji.cost : 1 };
+  });
+  return { ...intent, steps, runes: runes.map((c) => ({ ch: c.name, tag: RUNE_TAG[c.id] })), notes: [...intent.notes, ...notes] };
+}
+
+/** 按钮咏唱多久（毫秒）：「疾」缩到 ji.chantMs，「重」再乘 zhong.chant @param {string[]} ids 这个按钮认出的字诀 */
+export function runeChantMs(ids) {
+  const R = RUN.runes;
+  return (ids.includes('ji') ? R.ji.chantMs : BUTTON_CHANT_MS) * (ids.includes('zhong') ? R.zhong.chant : 1);
+}
+
+/**
+ * 一键把字诀写进按钮的咒：加在句首，如「疾·怒火炸开」。字诀槽已满、句首又是一键写进的字诀（「X·」），换掉它，不越堆越长。
+ * @param {string} text 按钮上原来那句（没写过咒就给按钮现在的招名，如「火弹」） @param {string} ch @param {boolean} full 这句的字诀槽已满
+ */
+export function writeRune(text, ch, full) {
+  const head = [...text];
+  if (full && head[1] === '·' && RUNES.some((r) => r.name === head[0])) return `${ch}·${head.slice(2).join('')}`;
+  return `${ch}·${text}`;
+}
 
 /**
  * 出现的分量：押过的元素（拿过这个元素的字、或把招式字换进了这个元素的按钮）× RUN.owned，其余 1。

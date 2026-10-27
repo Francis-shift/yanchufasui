@@ -148,8 +148,9 @@ export class SpellFx {
   }
 
   /**
-   * 发一颗飞弹。target() 每帧给出当前目标点（敌人在动）；到达时调用 onHit(落点)。
-   * @param {{ el: string, path: string, delay?: number, target: () => THREE.Vector3, onHit: (p: THREE.Vector3) => void, big?: boolean }} o
+   * 发一颗飞弹。target() 每帧给出当前目标点（敌人在动）；到达时调用 onHit(落点)。from：从哪飞出（默认施法者胸口；字诀「回」从落点飞回来）
+   * @param {{ el: string, path: string, delay?: number, target: () => THREE.Vector3, onHit: (p: THREE.Vector3) => void, big?: boolean,
+   *           from?: THREE.Vector3 }} o
    */
   bolt(o) {
     const pal = PALETTE[o.el];
@@ -188,7 +189,7 @@ export class SpellFx {
     const _up = new THREE.Vector3(0, 1, 0), _q = new THREE.Quaternion(), _spin = new THREE.Quaternion(), _w = new THREE.Vector3();
     orb.visible = false;
     this.scene.add(orb);
-    const start = this.origin.clone();
+    const start = (o.from ?? this.origin).clone();
     const end = o.target().clone();
     const dist = start.distanceTo(end);
     const fly = THREE.MathUtils.clamp(dist / 24, 0.35, 0.95) * (o.path === 'behind' ? 1.5 : 1);
@@ -510,6 +511,32 @@ export class SpellFx {
       darkMat.opacity = Math.min(1, t / 0.3) * (t < 6.5 ? 1 : Math.max(0, 1 - (t - 6.5) / 2.5));
       glowMat.opacity = Math.pow(Math.max(0, 1 - t / 2), 1.5) * (0.75 + 0.25 * Math.sin(t * 23 + r * 7));
       if (k >= 1) this.scorchCount--;
+    });
+  }
+
+  /**
+   * 一片地火（字诀「燎」）：sec 秒里火苗、火星一直从地上往上冒，最后半秒收掉；底下贴一块焦痕。烧谁由 main.js 按半径结算。
+   * @param {THREE.Vector3} p 地面上的点 @param {number} r @param {number} sec
+   */
+  groundFire(p, r, sec) {
+    this.scorch(p, r);
+    let t = 0, acc = 0;
+    this.fx.push({
+      update: (dt) => {
+        t += dt;
+        acc += dt * 70 * r * Math.min(1, (sec - t) / 0.5);
+        for (; acc >= 1; acc--) {
+          const a = Math.random() * Math.PI * 2, rr = Math.sqrt(Math.random()) * r, x = p.x + Math.cos(a) * rr, z = p.z + Math.sin(a) * rr;
+          this.p.emit(x, p.y + 0.05, z, rand(-0.3, 0.3), rand(1.5, 3.5), rand(-0.3, 0.3), rand(0.3, 0.6), rand(0.14, 0.26),
+            [1.4, 0.55, 0.1], [0.35, 0.03, 0.005], { drag: 1.5, grav: 1.5, alpha: 0.5, grow: 0.4 });
+          if (Math.random() < 0.3) {
+            this.p.emit(x, p.y + 0.1, z, rand(-0.6, 0.6), rand(1, 3), rand(-0.6, 0.6), rand(0.6, 1.2), rand(0.035, 0.06),
+              [3.2, 1.8, 0.5], [1.3, 0.18, 0.02], { drag: 0.9, grav: 1.1 });
+          }
+        }
+        return t < sec;
+      },
+      dispose: () => {},
     });
   }
 

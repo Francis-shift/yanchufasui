@@ -19,8 +19,8 @@ import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
 import { maskText } from './rules/safety.js';
 import {
-  BOSS_COUNT, CARDS, KIND_NAMES, artBoost, boostPlan, buttonMove, limitToLearned, moveName, moveTargets, newRun, offer, previewMove, reroll as rerollCards,
-  runFusions, runMods, skip as skipCards, take as takeCard, upLabel,
+  BOSS_COUNT, CARDS, KIND_NAMES, RUNES, applyRunes, artBoost, boostPlan, buttonMove, level, limitToLearned, moveName, moveTargets, newRun, offer,
+  previewMove, reroll as rerollCards, runFusions, runMods, runeChantMs, runeSlots, runesOf, skip as skipCards, take as takeCard, upLabel, writeRune,
 } from './rules/run.js';
 import {
   bindSpell, buttonGaugeGain, combineButtons, defaultIntent, elName, scrollsFor, synergies, talentOpen, toggleTalent,
@@ -170,7 +170,8 @@ export function start(root, opts = {}) {
       if (S.mods.chana) { S.slowT = RUN.arts.slow.sec; floatAt(new THREE.Vector3(CASTER_POS.x, 3.1, CASTER_POS.z), '刹那', '#cfe6ff'); }
       if (S.mods.fanshou) S.counterT = RUN.arts.counter.sec;
     },
-    local: (x, y) => toLocal(x, y), pick: (insight, done) => openPick(insight, done) });
+    local: (x, y) => toLocal(x, y), pick: (insight, done) => openPick(insight, done),
+    strike: (e, dmg, at) => hitEnemy(e, { el: 'earth' }, dmg, new THREE.Vector3(at.x, 1, at.z), {}) });   // 字诀「返」弹回去的冰锥
 
   // ---------------------------------------------------------------- 镜头：第三人称，平时固定；开口时轻推近
   const cam = { base: new THREE.Vector3(), look: new THREE.Vector3(), near: new THREE.Vector3(), nearLook: new THREE.Vector3(), focus: 0 };
@@ -253,8 +254,11 @@ export function start(root, opts = {}) {
     inv: 0,           // 入侵程度（画面用，见 world/invasion.js）：0 目标图的傍晚，1 全暗
     /** 选的天赋（开局界面上选，默认火冰风：三者之间有两种融合、两种反应） */
     talents: /** @type {string[]} */ (['fire', 'ice', 'wind']),
-    /** 给按钮写过的咒：天赋 → 这句话清洗后的意图、名字、原话（重开一局还在，换掉的天赋就丢掉） */
-    binds: /** @type {Record<string, { intent: import('./rules/intent.js').Intent, name: string, text: string }>} */ ({}),
+    /**
+     * 给按钮写过的咒：天赋 → 这句话清洗后的意图、名字、原话（重开一局还在，换掉的天赋就丢掉）。
+     * auto：试炼里一键把字诀写进还没写过咒的按钮生成的（按钮照常放本命招或换过的招，原话只是「疾·火弹」），新开一局就丢掉
+     */
+    binds: /** @type {Record<string, { intent: import('./rules/intent.js').Intent, name: string, text: string, auto?: boolean }>} */ ({}),
     /** 试炼这一局拿过的卡（rules/run.js）与合成的加成；守关一直是原值 */
     run: newRun(), mods: runMods(newRun()),
     /** 心法的三个窗口还剩几秒（玩家的时间）：刹那全场慢放、反手下一招加伤、余威龙落地后加伤 */
@@ -293,6 +297,7 @@ export function start(root, opts = {}) {
     if (walls.clear()) enemies.setObstacles([]);
     fusions.clear();
     dragon.clear();
+    embers.length = 0;
     timers.length = 0;   // 上一局没跑完的延时（第二步法术、收锁定标记）不能带进新的一局
     if (pend) { clearTimeout(pend.t); pend = null; }
     buttonChant = false; frozen = false;
@@ -304,7 +309,7 @@ export function start(root, opts = {}) {
     trial.mods = S.mods;
     barrier.reset();
     S.talents = [...S.talents].sort((a, b) => TALENTS.indexOf(a) - TALENTS.indexOf(b));
-    S.binds = Object.fromEntries(Object.entries(S.binds).filter(([k]) => S.talents.includes(k)));
+    S.binds = Object.fromEntries(Object.entries(S.binds).filter(([k, b]) => S.talents.includes(k) && !b.auto));
     hud.setSkills(S.talents.map((el) => ({ el, ...skillLabel(el) })),
       { cast: pressTalent, pen: openWrite, summon: pressSummon, dash: mode === 'trial' ? () => trial.dash() : undefined });
     hud.setCore(S.core, CORE_HP);
@@ -387,6 +392,8 @@ export function start(root, opts = {}) {
         S.run = takeCard(S.run, c);
         applyMods();
         hud.floatText(hud.root.clientWidth / 2, hud.root.clientHeight * 0.4, `学会「${c.name}」`, '#16202b');
+        if (c.kind === 'rune') { chooseRune(c); return; }
+        if (c.id === 'slot') for (const el of S.talents) { const l = skillLabel(el); hud.setSkillLabel(el, l.label, l.named); }   // 双诀：按钮上多认一个字
         close();
       },
       reroll: () => {
@@ -428,6 +435,28 @@ export function start(root, opts = {}) {
         skip: show,
       });
     };
+    /**
+     * 拿了字诀（已经学会）：选写进哪个按钮——一键加在那句咒的开头（如「疾·怒火炸开」），没写过咒的按钮写成「疾·火弹」；
+     * 元素字诀只列那个元素的按钮。卡上写写完是哪句、会不会把原来的字诀挤出槽。也可以先不写，战前点笔自己写。
+     * @param {import('./rules/run.js').Card} c
+     */
+    const chooseRune = (c) => {
+      const plans = S.talents.filter((el) => !c.el || el === c.el).map((el) => runePlan(el, c));
+      const brief = (/** @type {string} */ t) => ([...t].length > 16 ? `${[...t].slice(0, 15).join('')}…` : t);
+      hud.showPicks(plans.map((p) => ({ kind: `${elName(p.el)}的按钮`, name: `${c.name}·${p.base}`, el: p.el, insight: false,
+        text: `写成「${brief(p.text)}」${p.out.length ? `；${p.out.join('')}挤出字诀槽` : ''}` })), {
+        title: `把「${c.name}」写进哪个按钮`, sub: '写在那句咒的开头；也可以先不写，开战前点按钮上的笔自己写进句子里', rerolls: null, skipText: '先不写',
+        pick: (i) => {
+          const p = plans[i];
+          if (!p) return;
+          writeIn(p);
+          hud.floatText(hud.root.clientWidth / 2, hud.root.clientHeight * 0.4, `${elName(p.el)}的按钮写进「${c.name}」`, '#16202b');
+          close();
+        },
+        reroll: () => {},
+        skip: close,
+      });
+    };
     const close = () => {
       hud.closePicks();
       frozen = false;
@@ -435,6 +464,28 @@ export function start(root, opts = {}) {
       done();
     };
     show();
+  }
+
+  /**
+   * 把字诀 c 一键写进 el 的按钮会怎样：写成哪句、挤掉哪几个原来的字诀、卡上怎么叫这个按钮
+   * @param {string} el @param {import('./rules/run.js').Card} c
+   */
+  function runePlan(el, c) {
+    // 一键写的（auto）原话是「字诀·…·招名」：后来换过招式字的，招名跟着换成现在的
+    const b = S.binds[el], old = b ? (b.auto ? b.text.replace(/[^·]*$/, moveLabel(el)) : b.text) : moveLabel(el);
+    const stepEls = (b?.intent ?? defaultIntent(el)).steps.map((s) => s.el);
+    // 写之前这句已经认出的字诀（刚学会的这个字原本就写在句子里的不算）：槽满了才会挤掉一个
+    const was = runesOf(old, S.run, stepEls).runes.filter((r) => r !== c);
+    const text = writeRune(old, c.name, was.length >= runeSlots(S.run));
+    const now = runesOf(text, S.run, stepEls).runes;
+    return { el, text, out: was.filter((r) => !now.includes(r)).map((r) => `「${r.name}」`), base: b && !b.auto ? b.name : moveLabel(el) };
+  }
+  /** 照 runePlan 写进去：写过咒的只换原话（意图不变，不用再解析）；没写过的记成一键生成的（auto） @param {{ el: string, text: string }} p */
+  function writeIn(p) {
+    const b = S.binds[p.el];
+    S.binds[p.el] = b && !b.auto ? { ...b, text: p.text } : { intent: defaultIntent(p.el), name: moveLabel(p.el), text: p.text, auto: true };
+    const l = skillLabel(p.el);
+    hud.setSkillLabel(p.el, l.label, l.named);
   }
 
   /** 拿了卡：心法的加成写进去（闪避窗口、聚气在试炼里用；召龙要几格换了，气势槽重画） */
@@ -658,12 +709,16 @@ export function start(root, opts = {}) {
       for (const s of plan.steps) stepStats.set(s, stats);
       awardButton(stats);
     }
+    if (plan.steps.some((s) => s.runes?.includes('zhong'))) trial.lockDash(RUN.runes.zhong.lock);   // 字诀「重」：放完一会儿不能闪避
     const { resolved, marks } = lockSteps(plan.steps, m);
     locks.show(castId, marks);
     fx.launchBurst(plan.steps[0].el);
     const go = () => {
       plan.steps.forEach((step, i) => after(i * 0.45, () => runStep(step, resolved[i], m)));
       after((plan.steps.length - 1) * 0.45 + 1.2, () => locks.clear(castId));
+      // 字诀「连」：最后一步放出 lian.sec 秒后，带「连」的几步再放一次
+      const again = plan.steps.filter((s) => s.runes?.includes('lian'));
+      if (again.length) after((plan.steps.length - 1) * 0.45 + RUN.runes.lian.sec, () => castAgain(again, m));
     };
     if (plan.summon?.ghost) {
       // 差一口气：龙影升起、散开，再落雨
@@ -672,6 +727,23 @@ export function start(root, opts = {}) {
     } else go();
     if (m >= 3 && !c.button) hud.bigText('气势如虹', '#16202b', 900);
     S.busy = false;
+  }
+
+  /**
+   * 字诀「连」再放一次：伤害 × lian.mult、不花法力、不会再连；打谁这时重新定（第一次可能已经打死了）。按键的命中照样攒气势
+   * @param {import('./rules/arbiter.js').PlannedStep[]} steps @param {number} m
+   */
+  function castAgain(steps, m) {
+    if (S.phase !== 'playing') return;
+    const half = boostPlan({ steps }, RUN.runes.lian.mult).steps;
+    half.forEach((s, i) => { const st = stepStats.get(steps[i]); if (st) stepStats.set(s, st); });
+    const castId = ++castSeq;
+    const { resolved, marks } = lockSteps(half, m);
+    locks.show(castId, marks);
+    floatAt(new THREE.Vector3(CASTER_POS.x, 2.6, CASTER_POS.z), '连', '#2a8a7a');
+    fx.launchBurst(half[0].el);
+    half.forEach((step, i) => after(i * 0.45, () => runStep(step, resolved[i], m)));
+    after((half.length - 1) * 0.45 + 1.2, () => locks.clear(castId));
   }
 
   // ---------------------------------------------------------------- 天赋按键（设计文档第 4 节"天赋与按键"）
@@ -684,21 +756,29 @@ export function start(root, opts = {}) {
   }
 
   /** @param {string} el */
-  const buttonIntent = (el) => trialLimit(S.binds[el]?.intent ?? defaultIntent(el), el);
-  /** 试炼里按钮只放学会了的招（run.js limitToLearned）；守关全开 @param {import('./rules/intent.js').Intent} it @param {string} el */
-  const trialLimit = (it, el) => (S.mode === 'trial' ? limitToLearned(it, S.run, el) : it);
+  const buttonIntent = (el) => trialLimit(S.binds[el]?.intent ?? defaultIntent(el), el, S.binds[el]?.text ?? '');
+  /**
+   * 试炼里按钮只放学会了的招（run.js limitToLearned），再认写进这句咒的字诀（applyRunes）；守关全开、不认字诀
+   * @param {import('./rules/intent.js').Intent} it @param {string} el @param {string} text 写进按钮的原话
+   */
+  const trialLimit = (it, el, text) => (S.mode === 'trial' ? applyRunes(limitToLearned(it, S.run, el), S.run, text) : it);
+  /** 这个按钮认出的字诀（卡的 id） @param {string} el @returns {string[]} */
+  const buttonRunes = (el) => [...new Set(buttonIntent(el).steps.flatMap((s) => s.runes ?? []))];
   /** 能合成哪些融合：试炼里只有领悟了的合字，守关按默认全开 */
   const castFusions = () => (S.mode === 'trial' ? runFusions(S.run) : undefined);
+  /** 按钮现在的招叫什么（试炼里换过招式字的，如「火爆」） @param {string} el */
+  const moveLabel = (el) => elName(el) + FORMS[buttonMove(S.run, el).form].name;
   /**
-   * 按钮上写什么：写过咒的写咒语名；试炼里换过招式字的写现在的招（如「火爆」）；都没有就是元素名
+   * 按钮上写什么：写过咒的写咒语名；试炼里换过招式字的写现在的招（如「火爆」）；都没有就是元素名。
+   * 试炼里认出了字诀，后面带上（如「火弹·疾」）
    * @param {string} el @returns {{ label: string, named: boolean }}
    */
   function skillLabel(el) {
-    if (S.binds[el]) return { label: S.binds[el].name, named: true };
-    if (S.mode === 'trial' && S.run.moves[el]) {
-      const m = buttonMove(S.run, el);
-      return { label: elName(el) + FORMS[m.form].name, named: true };
-    }
+    const b = S.binds[el];
+    const tag = S.mode === 'trial' ? (buttonIntent(el).runes ?? []).map((r) => r.ch).join('') : '';
+    const plus = tag ? `·${tag}` : '';
+    if (b && !b.auto) return { label: b.name + plus, named: true };
+    if (S.mode === 'trial' && (S.run.moves[el] || tag)) return { label: moveLabel(el) + plus, named: true };
     return { label: elName(el), named: false };
   }
   /** 正在咏唱的按键：0.6 秒里再按另一个天赋，就合成一句（先后是语序） */
@@ -714,7 +794,9 @@ export function start(root, opts = {}) {
     if (S.busy) return;
     S.busy = true;
     const castId = ++castSeq;
-    pend = { els: [el], castId, t: window.setTimeout(fireButtons, BUTTON_CHANT_MS) };
+    // 咏唱多久看先按的这个按钮：字诀「疾」快、「重」慢（守关不认字诀）
+    const ms = S.mode === 'trial' ? runeChantMs(buttonRunes(el)) : BUTTON_CHANT_MS;
+    pend = { els: [el], castId, t: window.setTimeout(fireButtons, ms) };
     hud.setCharging(pend.els);
     buttonChant = true;
     beginChant(el);
@@ -773,10 +855,11 @@ export function start(root, opts = {}) {
     if (!r.ok) { hud.setWriteMsg(r.why); return; }
     const name = r.intent.name || defaultName(r.intent.steps);
     S.binds[el] = { intent: r.intent, name, text };
-    hud.setSkillLabel(el, name, true);
+    const l = skillLabel(el);
+    hud.setSkillLabel(el, l.label, l.named);
     close();
-    // 预览：这一招每次放要花多少、气势几档（不扣法力）；试炼里没学会的字标灰、按现在会的放
-    const shown = trialLimit(r.intent, el);
+    // 预览：这一招每次放要花多少、气势几档（不扣法力）；试炼里没学会的字标灰、按现在会的放，认出的字诀加下划线
+    const shown = trialLimit(r.intent, el, text);
     const plan = planCast(shown, { mana: MANA_MAX, seen: S.seen, text: '', button: true, fusions: castFusions() });
     hud.showCard({ name, text, plan, intent: shown, source: `${fromModel ? '模型解析' : '关键词解析'} · 装进「${elName(el)}」的按钮`, ms: 0 });
   }
@@ -792,8 +875,12 @@ export function start(root, opts = {}) {
     hud.setWriteBusy(false);
     const from = scrollTurn[el] || 0;
     if (!lines.length) scrollTurn[el] = from + 3;   // 每求一次换一批
-    const ideas = lines.length ? lines.map((text) => ({ text, from: '模型现写' }))
-      : scrollsFor(el, S.talents, 3, from).map((text) => ({ text, from: '卷轴' }));
+    // 试炼里学会了字诀：没用上的句子在句首轮着加一个（写进按钮的咒才生效，灵感要带上）
+    const runes = S.mode === 'trial' ? RUNES.filter((c) => level(S.run, c.id) > 0 && (!c.el || c.el === el)) : [];
+    const withRune = (/** @type {string} */ t, /** @type {number} */ i) => (runes.length && !runes.some((c) => t.includes(c.name))
+      ? `${runes[i % runes.length].name}·${t}` : t);
+    const ideas = lines.length ? lines.map((text, i) => ({ text: withRune(text, i), from: '模型现写' }))
+      : scrollsFor(el, S.talents, 3, from).map((text, i) => ({ text: withRune(text, i), from: '卷轴' }));
     hud.setWriteIdeas(ideas);
   }
   /** @type {Record<string, number>} */
@@ -834,7 +921,9 @@ export function start(root, opts = {}) {
   /**
    * 放一发：别的元素是飞弹；雷不飞，是一道闪电——直线就从施法者手上劈过去，从天而降就从头顶劈下来
    * （绕到背后的仍是一颗电球绕过去）。落点与命中结算和飞弹一样走 onHit。
-   * @param {{ el: string, path: string, delay?: number, target: () => THREE.Vector3, onHit: (p: THREE.Vector3) => void, big?: boolean }} o
+   * shatter：带着字诀「引」，闪电劈过的地方冰锥全碎
+   * @param {{ el: string, path: string, delay?: number, target: () => THREE.Vector3, onHit: (p: THREE.Vector3) => void, big?: boolean,
+   *           shatter?: boolean }} o
    */
   function shoot(o) {
     if (o.el !== 'thunder' || o.path === 'behind') { fx.bolt(o); return; }
@@ -843,8 +932,78 @@ export function start(root, opts = {}) {
       const end = o.target().clone();
       const from = o.path === 'sky' ? end.clone().add(new THREE.Vector3((Math.random() - 0.5) * 3, 15, 1.5)) : origin.clone();
       fx.arc(from, end);
+      if (o.shatter) zapShards(from, end);
       o.onHit(end);
     });
+  }
+
+  /** 字诀「引」：一道闪电从 a 劈到 b，两侧的冰锥全碎（试炼），碎了几颗飘在落点上 @param {THREE.Vector3} a @param {THREE.Vector3} b */
+  function zapShards(a, b) {
+    if (S.mode !== 'trial') return;
+    const n = trial.shatter(a, b, RUN.runes.yin.r);
+    if (n) floatAt(b.clone().setY(b.y + 1.2), `碎冰锥 ×${n}`, '#e0a816');
+  }
+
+  /** 离 p 最近的敌人（广场不大，不设上限） @param {{ x: number, z: number }} p */
+  function nearest(p) {
+    let best = null, d = Infinity;
+    for (const e of enemies.list) { const k = (e.pos.x - p.x) ** 2 + (e.pos.z - p.z) ** 2; if (k < d) { d = k; best = e; } }
+    return best;
+  }
+
+  /**
+   * 字诀「随」：盯住一只敌人，它倒了就改盯离上次位置最近的；返回此刻该落的地面点（都没了就停在最后看到的地方）
+   * @param {string | null} id @param {THREE.Vector3} at
+   */
+  function follow(id, at) {
+    const p = at.clone();
+    return () => {
+      let e = id ? enemies.get(id) : null;
+      if (!e) { e = nearest(p); id = e ? e.id : null; }
+      if (e) p.copy(groundPt(e.pos));
+      return p;
+    };
+  }
+
+  /** 字诀「燎」落地留的火：地面上的点、半径、还剩几秒、离下一次烧还有几秒、每次烧多疼 @type {{ p: THREE.Vector3, r: number, t: number, tick: number, dmg: number }[]} */
+  const embers = [];
+  const FIRE = { el: 'fire' };
+  /** @param {THREE.Vector3} p @param {number} r @param {number} dmg */
+  function leaveFire(p, r, dmg) {
+    const L = RUN.runes.liao;
+    if (embers.length >= L.max) return;   // 一场火雨就是六片，再多不留
+    const at = new THREE.Vector3(p.x, groundHeightAt(p.x, p.z) ?? 0, p.z);
+    embers.push({ p: at, r, t: L.sec, tick: L.tick, dmg });
+    fx.groundFire(at, r, L.sec);
+  }
+  /** 每帧：地火里的敌人每 tick 秒烧一下（boss 身子大，碰到火边就算；火照样削冰甲） @param {number} dt */
+  function updateEmbers(dt) {
+    const L = RUN.runes.liao;
+    for (let i = embers.length - 1; i >= 0; i--) {
+      const f = embers[i];
+      f.t -= dt; f.tick -= dt;
+      if (f.tick <= 0) {
+        f.tick += L.tick;
+        for (const e of [...enemies.list]) {
+          if (Math.hypot(e.pos.x - f.p.x, e.pos.z - f.p.z) <= f.r + (e.mode === 'boss' ? 1 : 0)) hitEnemy(e, FIRE, f.dmg, f.p, {});
+        }
+      }
+      if (f.t <= 0) embers.splice(i, 1);
+    }
+  }
+
+  /**
+   * 字诀「回」：风从落点飞回施法者手上；到手时，飞回来那条路两侧 hui.r 米内的敌人再挨一下（伤害 × hui.mult），往外推
+   * @param {any} step @param {THREE.Vector3} from
+   */
+  function windBack(step, from) {
+    if (S.phase !== 'playing') return;
+    const H = RUN.runes.hui, a = from.clone().setY(from.y + 0.6);
+    fx.bolt({ el: step.el, path: 'straight', from: a, target: () => origin,
+      onHit: () => {
+        if (S.phase !== 'playing') return;
+        for (const e of [...enemies.list]) if (distToSegment(e.pos, a, CASTER_POS) <= H.r) hitEnemy(e, step, step.dmgEach * H.mult, CASTER_POS, {});
+      } });
   }
 
   /**
@@ -858,48 +1017,65 @@ export function start(root, opts = {}) {
     const range = (MOMENTUM_RANGE[m] ?? 1) * (step.wide ?? 1), big = MOMENTUM_FX[m] ?? 1;   // wide：试炼里升过级的招式字
     const boom = (p, R, scale) => { fx.burst(p, step.el, R, scale * big); if (m >= 3) fx.hitStop = Math.max(fx.hitStop, 0.12); };
     const dir = { fromAbove: step.path === 'sky', fromBehind: step.path === 'behind' };
+    // 试炼里写进按钮的字诀（run.js applyRunes）：随——追着打；引——闪电劈碎冰锥；燎——落地留火；回——风飞回手上再打一下
+    const rs = step.runes ?? [], sui = rs.includes('sui'), shatter = rs.includes('yin'), hui = rs.includes('hui');
+    const burn = (/** @type {THREE.Vector3} */ p, /** @type {number} */ r) => { if (rs.includes('liao')) leaveFire(p, r, step.dmgEach * RUN.runes.liao.k); };
     if (step.form === 'bolt') {
       for (let i = 0; i < step.count; i++) {
-        const id = res.ids.length ? res.ids[i % res.ids.length] : null;
+        let id = res.ids.length ? res.ids[i % res.ids.length] : null;
         let last = res.point ? groundPt(res.point) : DEFAULT_AIM.clone();
         shoot({
-          el: step.el, path: step.path, delay: i * 0.14, big: m >= 2,
-          target: () => { const e = id && enemies.get(id); if (e) enemies.aimPoint(e, last); return last; },
+          el: step.el, path: step.path, delay: i * 0.14, big: m >= 2, shatter,
+          target: () => {
+            let e = id ? enemies.get(id) : null;
+            if (!e && sui) { e = nearest(last); id = e ? e.id : null; }   // 目标倒了，改追离落点最近的
+            if (e) enemies.aimPoint(e, last);
+            return last;
+          },
           onHit: (p) => {
             boom(p, 1.3, 0.45);
-            const e = id && enemies.get(id);
+            const e = id ? enemies.get(id) : null;
             if (e) hitEnemy(e, step, step.dmgEach, CASTER_POS, dir);
+            burn(p, RUN.runes.liao.r);
+            if (hui) windBack(step, p);
           },
         });
       }
     } else if (step.form === 'rain') {
-      // 雨：2 秒里从天上落 6 次，落点撒在目标周围；从天而降，盾傀儡挡不住
+      // 雨：2 秒里从天上落 6 次，落点撒在目标周围；从天而降，盾傀儡挡不住（「随」：落点围着目标现在的位置撒）
       const c = res.point ? groundPt(res.point) : DEFAULT_AIM.clone();
+      const center = sui ? follow(res.ids[0] ?? null, c) : () => c;
       for (let i = 0; i < FORMS.rain.hits; i++) {
-        const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * RAIN.spread * range;
-        const tp = groundPt({ x: c.x + Math.cos(a) * r, z: c.z + Math.sin(a) * r });
+        const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * RAIN.spread * range, ox = Math.cos(a) * r, oz = Math.sin(a) * r;
+        let tp = groundPt({ x: c.x + ox, z: c.z + oz });
         shoot({
-          el: step.el, path: 'sky', delay: (i * FORMS.rain.sec) / FORMS.rain.hits, target: () => tp,
+          el: step.el, path: 'sky', delay: (i * FORMS.rain.sec) / FORMS.rain.hits, shatter,
+          target: () => { if (sui) { const q = center(); tp = groundPt({ x: q.x + ox, z: q.z + oz }); } return tp; },
           onHit: (p) => {
             boom(p, RAIN.hitR * range, 0.4);
             for (const e of [...enemies.list]) {
               if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) <= RAIN.hitR * range) hitEnemy(e, step, step.dmgEach, p, { fromAbove: true });
             }
+            burn(p, RAIN.hitR * range * 0.6);
           },
         });
       }
+      if (hui) after(FORMS.rain.sec + 0.3, () => windBack(step, center()));
     } else if (step.form === 'wall') {
       raiseWall(step, res);
     } else {
       const pt = res.point ? groundPt(res.point) : DEFAULT_AIM.clone();
+      const aim = sui ? follow(res.ids[0] ?? null, pt) : () => pt;
       const R = FORMS.burst.radius * range;
       shoot({
-        el: step.el, path: 'straight', big: true, target: () => pt,
+        el: step.el, path: 'straight', big: true, target: aim, shatter,
         onHit: (p) => {
           boom(p, R, 1);
           for (const e of [...enemies.list]) {
             if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) <= R) hitEnemy(e, step, step.dmgEach, p, {});
           }
+          burn(p, R * 0.5);
+          if (hui) windBack(step, p);
         },
       });
     }
@@ -926,6 +1102,7 @@ export function start(root, opts = {}) {
     const earth = step.el === 'earth';
     const w = walls.add(step.el, pts, Math.atan2(ux, uz) + Math.PI / 2, earth ? WALL.earthSec : WALL.curtainSec, step);
     fx.burst(groundPt(c), step.el, 1.6, 0.5);
+    if (step.runes?.includes('hui')) after(0.3, () => windBack(step, groundPt(c)));   // 字诀「回」：风墙也飞回来一道
     if (earth) {
       enemies.setObstacles(walls.obstacles());
       for (const e of [...enemies.list]) {
@@ -990,9 +1167,13 @@ export function start(root, opts = {}) {
   }
 
   function hitEnemy(e, step, dmg, from, dir) {
-    const wasFrozen = e.frozen > 0;
+    const wasFrozen = e.frozen > 0, rs = step.runes ?? [];
     let r = damageTo({ type: e.type, frozen: wasFrozen }, { el: step.el, dmg, ...dir });
-    if (e.mode === 'boss') r = trial.hitBoss(e, step.el, r);   // 试炼的 boss：冰甲只怕火
+    if (r.freezeSec && rs.includes('ning')) r = { ...r, freezeSec: r.freezeSec * RUN.runes.ning.freeze };   // 字诀「凝」：冻得更久
+    if (e.mode === 'boss') {
+      r = trial.hitBoss(e, step.el, r, rs.includes('po'));   // 试炼的 boss：冰甲只怕火（字诀「破」什么元素都削甲）
+      if (r.freezeSec > 0 && rs.includes('ning')) trial.chill();   // 「凝」冻住了 boss：下一招预警变慢
+    }
     const at = e.pos.clone();
     enemies.applyHit(e, r, from, step.el);
     if (step.el === 'thunder' && !dir.chain) chain(e, at, wasFrozen, step, dmg);
@@ -1016,13 +1197,15 @@ export function start(root, opts = {}) {
   function chain(e, at, wasFrozen, step, dmg) {
     const views = [{ id: e.id, x: at.x, z: at.z, frozen: wasFrozen },
       ...enemies.list.filter((o) => o !== e).map((o) => ({ id: o.id, x: o.pos.x, z: o.pos.z, frozen: o.frozen > 0 }))];
-    const jumps = chainTargets(e.id, views, dmg);
+    const yin = !!step.runes?.includes('yin');   // 字诀「引」：多跳几下，劈过的地方冰锥全碎
+    const jumps = chainTargets(e.id, views, dmg, yin ? RUN.runes.yin.jumps : 0);
     let prev = at.clone().setY(at.y + 0.8);
     jumps.forEach((j, k) => after(0.08 * (k + 1), () => {
       const o = enemies.get(j.id);
       if (!o || S.phase !== 'playing') return;
       const to = enemies.aimPoint(o);
       fx.arc(prev, to, { jitter: 0.35 });
+      if (yin) zapShards(prev, to);
       hitEnemy(o, step, j.dmg, prev.clone(), { chain: true });
       prev = to.clone();
     }));
@@ -1131,6 +1314,7 @@ export function start(root, opts = {}) {
     updateCubes(dt);
     if (walls.update(dt)) enemies.setObstacles(walls.obstacles());   // 土墙沉下去了，流场重算
     curtainContacts();
+    if (S.phase === 'playing') updateEmbers(dt);
     fusions.update(dt, camera);
     fusionContacts();
     dragon.update(dt);
@@ -1219,16 +1403,21 @@ export function start(root, opts = {}) {
         stage: trial.stage, round: trial.round, waveLeft: trial.waveLeft, runT: Math.round(trial.runT), perfects: trial.perfects,
         run: { picks: S.run.picks, rerolls: S.run.rerolls, have: { ...S.run.have } }, mods: { ...S.mods },
         arts: { slow: +S.slowT.toFixed(2), counter: +S.counterT.toFixed(2), after: +S.afterT.toFixed(2), ghost: +trial.ghostT.toFixed(2) },
-        stamina: +trial.stamina.toFixed(2), pending: trial.pending.length,
+        stamina: +trial.stamina.toFixed(2), pending: trial.pending.length, dashLock: +trial.dashLock.toFixed(2), slowTele: trial.slowTele,
+        teleLen: +trial.teleLen.toFixed(2), embers: embers.length, friendly: trial.bullets.filter((o) => o.friendly).length,
         ghostAt: [+trial.ghost.position.x.toFixed(2), +trial.ghost.position.z.toFixed(2)], shots: trial.bullets.map((o) => [+o.x.toFixed(1), +o.z.toFixed(1)]) };
     },
-    /** 试炼：直接拿一张卡；招式字给 el 就换进那个元素的按钮 */
+    /** 试炼：直接拿一张卡；招式字给 el 就换进那个元素的按钮，字诀给 el 就一键写进那个按钮 */
     give: (id, el) => {
       const c = CARDS.find((x) => x.id === id);
-      if (c) { S.run = takeCard(S.run, c, el); applyMods(); }
-      if (c && el) { const l = skillLabel(el); hud.setSkillLabel(el, l.label, l.named); }
+      if (c) { S.run = takeCard(S.run, c, c.kind === 'move' ? el : undefined); applyMods(); }
+      if (c && el && c.kind === 'rune') writeIn(runePlan(el, c));
+      for (const t of S.talents) { const l = skillLabel(t); hud.setSkillLabel(t, l.label, l.named); }
       return { ...S.mods };
     },
+    /** 试炼：某个按钮现在认出的字诀、放出去每一步带哪些字诀 */
+    runes: (el) => { const it = buttonIntent(el); return { text: S.binds[el]?.text ?? '', label: skillLabel(el).label, runes: it.runes ?? [], notes: it.notes,
+      steps: it.steps.map((s) => ({ el: s.el, form: s.form, runes: s.runes ?? [], dmgK: s.dmgK ?? 1, costK: s.costK ?? 1 })), chantMs: runeChantMs(buttonRunes(el)) }; },
     /** 试炼：把玩家的气血设成 n（测的时候别被打死） */
     hp: (n = TRIAL.hp) => { trial.hp = n; hud.setCore(n, TRIAL.hp); },
     /** 试炼：跳过这一段（小怪潮清场 / boss 直接碎），看下一段 */
@@ -1248,6 +1437,8 @@ export function start(root, opts = {}) {
     wave: (i = 0) => { enemies.clear(); S.phase = 'playing'; startWave(i); },
     lab: () => enterLab(),
     killAll: () => { S.queue.length = 0; for (const e of [...enemies.list]) enemies.kill(e, e.pos); },
+    /** 打碎某一只（看飞弹半路目标没了会怎样） */
+    kill: (id) => { const e = enemies.get(id); if (e) enemies.kill(e, e.pos); },
     gauge: (n = S.mods.ult) => setGauge(n),
     /** 天赋按键：按一个，或在 0.6 秒内按两个（press('wind','fire') 出火卷风）；summonBtn 是金色召唤按钮 */
     press: (...els) => els.forEach((el) => pressTalent(el)),

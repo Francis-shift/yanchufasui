@@ -27,6 +27,19 @@ test('冰甲：甲在时火照常伤害并削甲，别的元素只剩两成、�
   }
 });
 
+test('字诀「破」：甲在时伤害翻倍、不打两成，什么元素都削甲；没有甲就照常', () => {
+  const b = { armor: BOSS.armor, freezeCd: 0 };
+  for (const el of ['ice', 'fire', 'thunder']) {
+    const h = bossHit(b, el, hit(el, 50), true);
+    assert.equal(h.r.dmg, 50 * RUN.runes.po, `${el}`);
+    assert.equal(h.armor, BOSS.armor - 50, `${el} 削掉的按翻倍前算`);
+    assert.equal(h.r.freezeSec, 0, '甲在时照样冻不住');
+  }
+  assert.equal(bossHit(b, 'ice', hit('ice', 50), true).r.reaction, '破甲');
+  assert.equal(bossHit({ armor: 40, freezeCd: 0 }, 'ice', hit('ice', 50), true).broke, true);
+  assert.equal(bossHit({ armor: 0, freezeCd: 0 }, 'ice', hit('ice', 31.5), true).r.dmg, 31.5, '甲碎了不再翻倍');
+});
+
 test('冰甲：火削穿就碎，碎了之后冰能冻、伤害照常', () => {
   const broke = bossHit({ armor: 30, freezeCd: 0 }, 'fire', hit('fire', 58.5));
   assert.equal(broke.armor, 0);

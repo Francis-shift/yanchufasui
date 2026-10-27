@@ -4,10 +4,10 @@ import { test } from 'node:test';
 
 import { planCast, regenMana } from '../game/rules/arbiter.js';
 import { inCharset } from '../game/rules/charset.js';
-import { FUSION_OPEN, MANA_MAX, MANA_REGEN, RUN, TRIAL, ULT_GAUGE } from '../game/rules/numbers.js';
+import { BUTTON_CHANT_MS, FUSION_OPEN, MANA_MAX, MANA_REGEN, RUN, TRIAL, ULT_GAUGE } from '../game/rules/numbers.js';
 import {
-  BOSS_COUNT, CARDS, RUN_STAGES, artBoost, boostPlan, buttonMove, eligible, limitToLearned, moveName, moveTargets, native, newRun, offer,
-  previewMove, reroll, runFusions, runMods, skip, take, upLabel, weight,
+  BOSS_COUNT, CARDS, RUN_STAGES, applyRunes, artBoost, boostPlan, buttonMove, eligible, limitToLearned, moveName, moveTargets, native, newRun,
+  offer, previewMove, reroll, runFusions, runMods, runeChantMs, runesOf, skip, take, upLabel, weight, writeRune,
 } from '../game/rules/run.js';
 import { combineButtons, defaultIntent } from '../game/rules/talents.js';
 import { isPerfect } from '../game/rules/trial.js';
@@ -286,4 +286,54 @@ test('合字：领悟前两个按钮先后按只是组合（各放各的、八�
   // 守关不传 fusions：按 FUSION_OPEN 全开
   assert.equal(planCast(press(run), ctx).steps[0].fusion, 'fire>wind');
   assert.ok(FUSION_OPEN.includes('wind>fire'));
+});
+test('字诀：按出现先后认学会了的字，一句一个槽，多的标灰；没学会的、元素对不上的也标灰；「双诀」多一个槽', () => {
+  const learn = (ids) => ids.reduce((r, id) => take(r, byId(id)), newRun());
+  const run = learn(['ji', 'lian', 'liao']);
+  const names = (t, r = run, els = ['fire']) => runesOf(t, r, els).runes.map((c) => c.name);
+  assert.deepEqual(names('疾风连连，火弹'), ['疾'], '先出现的占槽');
+  assert.deepEqual(runesOf('疾风连连，火弹', run, ['fire']).notes, ['字诀槽已满，「连」不生效'], '同一个字写两遍只记一次');
+  assert.deepEqual(runesOf('再引天雷', run, ['thunder']).notes, ['尚未领悟字诀「引」']);
+  // 元素字诀只对那个元素：这句里没有火，「燎」不占槽，让给后面的「疾」
+  const wind = runesOf('燎原疾风', run, ['wind']);
+  assert.deepEqual(wind.runes.map((c) => c.name), ['疾']);
+  assert.deepEqual(wind.notes, ['字诀「燎」只对火起作用']);
+  assert.deepEqual(names('火弹'), []);
+  // 双诀：要先学会一个字诀才出；拿了一句认两个
+  assert.equal(eligible(byId('slot'), newRun(), ELS), false);
+  assert.equal(eligible(byId('slot'), run, ELS), true);
+  assert.deepEqual(names('疾风连连，火弹', take(run, byId('slot'))), ['疾', '连']);
+});
+
+test('字诀写进步里：元素字诀只给那个元素的步；「重」伤害 ×1.6、「疾」法力 ×1.3 由裁决器照乘；咏唱时间；没写字诀原样不动', () => {
+  const run = ['zhong', 'ji', 'liao', 'slot'].reduce((r, id) => take(r, byId(id)), newRun());
+  const two = { ...defaultIntent('fire'), steps: [defaultIntent('wind').steps[0], defaultIntent('fire').steps[0]] };
+  const it = applyRunes(two, run, '重燎：先用狂风卷起它们，再以烈火焚之');
+  assert.deepEqual(it.steps.map((s) => s.runes), [['zhong'], ['zhong', 'liao']]);
+  assert.deepEqual(it.runes?.map((r) => r.ch), ['重', '燎']);
+  const plain = defaultIntent('fire');
+  assert.equal(applyRunes(plain, run, '火弹'), plain, '没写字诀原样返回');
+  const ctx = { mana: MANA_MAX, button: true, seen: ['fire+bolt'] };
+  const base = planCast(plain, ctx);
+  const heavy = planCast(applyRunes(plain, run, '重·火弹'), ctx);
+  assert.ok(Math.abs(heavy.steps[0].dmgTotal - base.steps[0].dmgTotal * RUN.runes.zhong.dmg) < 1e-9);
+  assert.equal(heavy.cost, base.cost);
+  const quick = planCast(applyRunes(plain, run, '疾·火弹'), ctx);
+  assert.equal(quick.cost, Math.round(base.cost * RUN.runes.ji.cost));
+  assert.ok(Math.abs(quick.steps[0].dmgTotal - base.steps[0].dmgTotal) < 1e-9);
+  // 两个按钮合成一句：字诀跟着各自的步走
+  const combo = combineButtons([applyRunes(plain, run, '疾·火弹'), defaultIntent('ice')]);
+  assert.deepEqual(combo.steps.map((s) => s.runes), [['ji'], undefined]);
+  assert.equal(runeChantMs([]), BUTTON_CHANT_MS);
+  assert.equal(runeChantMs(['ji']), RUN.runes.ji.chantMs);
+  assert.equal(runeChantMs(['zhong']), BUTTON_CHANT_MS * RUN.runes.zhong.chant);
+  assert.equal(runeChantMs(['ji', 'zhong']), RUN.runes.ji.chantMs * RUN.runes.zhong.chant);
+});
+
+test('一键写进按钮：加在句首；槽满了、句首又是一键写进的字诀就换掉；句中自己写的字不动', () => {
+  assert.equal(writeRune('火弹', '疾', false), '疾·火弹');
+  assert.equal(writeRune('疾·怒火炸开', '连', true), '连·怒火炸开');
+  assert.equal(writeRune('疾·怒火炸开', '连', false), '连·疾·怒火炸开', '双诀还有空槽：两个都留着');
+  assert.equal(writeRune('疾风·怒火', '连', true), '连·疾风·怒火');
+  assert.equal(writeRune('火·弹', '连', true), '连·火·弹', '句首不是字诀不算');
 });

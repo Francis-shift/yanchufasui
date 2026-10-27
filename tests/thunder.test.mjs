@@ -19,6 +19,14 @@ test('连锁：每次跳到 3 米内最近的、没打过的，最多跳 2 次�
   assert.deepEqual(chainTargets('far', list, 100), [], '3 米内没人就不跳');
 });
 
+test('字诀「引」：连锁多跳几次，范围和衰减照旧', () => {
+  const line = ['a', 'b', 'c', 'd', 'e', 'f'].map((id, i) => E(id, i * 2, 0));
+  assert.deepEqual(chainTargets('a', line, 100).map((x) => x.id), ['b', 'c']);
+  const j = chainTargets('a', line, 100, 2);
+  assert.deepEqual(j.map((x) => x.id), ['b', 'c', 'd', 'e']);
+  assert.ok(Math.abs(j[3].dmg - 100 * 0.6 ** 4) < 1e-9);
+});
+
 test('导电：从冻住的跳到冻住的不衰减，有一头没冻就照常衰减', () => {
   const j = chainTargets('a', [E('a', 0, 0, true), E('b', 2, 0, true), E('c', 4, 0)], 100);
   assert.equal(j[0].conduct, true);

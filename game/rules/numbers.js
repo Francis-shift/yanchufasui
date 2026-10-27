@@ -151,12 +151,20 @@ export const TRIAL = { hp: 100, speed: 4.2, dash: { dist: 3.6, sec: 0.18, gap: 0
  * 刹那：完美闪避后 slow.sec 秒（现实时间）全场慢到 slow.scale 倍，自己照常快；反手：完美闪避后 counter.sec 秒内下一招 × counter.mult；
  * 残影：闪避处留一个残影 ghost.sec 秒，追踪冰锥改追它、撞上就碎（ghost.r 是它的身宽）；余威：龙落地后 after.sec 秒内所有招 × after.mult。
  * 招式字升级（「爆·二」「墙·二」「雨·二」）：范围 × up（墙按段数算，5 段变 7 段）、伤害 × upDmg（10-27 本人：只加范围不够）。
+ * 字诀（写进按钮的咒才生效，见 run.js runesOf）：破——打有甲的目标伤害 × po、不是火也削甲；连——放完 lian.sec 秒再放一次，伤害 × lian.mult、不花法力；
+ * 重——伤害 × zhong.dmg、咏唱 × zhong.chant、放完 zhong.lock 秒不能闪避；疾——咏唱只要 ji.chantMs 毫秒、法力 × ji.cost；
+ * 燎——落地留一片火 liao.sec 秒，每 liao.tick 秒烧一下（这一下伤害的 liao.k），同时最多 liao.max 片；凝——冻住的时间 × ning.freeze，
+ * boss 被冻住后下一招预警 × ning.tele；回——风飞回施法者手上，路线两侧 hui.r 米内再挨一下（伤害 × hui.mult）；
+ * 返——土墙把冰锥弹回 boss（快 fan.speed 倍、伤害 × fan.mult）；引——雷链多跳 yin.jumps 下，闪电两侧 yin.r 米内的冰锥打碎。
  */
 export const RUN = {
   wave: { n: [16, 22, 28], first: 1.2, gap: [1.2, 2.8], batch: [2, 3], away: 5, warn: 0.8, alive: 10 }, rest: 1.6, rerolls: 1, owned: 2,
   up: 1.35, upDmg: 1.3,
   arts: { window: 0.45, gauge: 2, regen: 1.3, ult: 6, slow: { sec: 1, scale: 0.3 }, counter: { sec: 1.5, mult: 1.5 },
     ghost: { sec: 1.5, r: 0.45 }, after: { sec: 4, mult: 1.3 } },
+  runes: { po: 2, lian: { sec: 0.5, mult: 0.5 }, zhong: { dmg: 1.6, chant: 2, lock: 0.5 }, ji: { chantMs: 200, cost: 1.3 },
+    liao: { sec: 3, r: 1.3, tick: 0.5, k: 0.1, max: 10 }, ning: { freeze: 1.5, tele: 1.5 }, hui: { mult: 0.6, r: 1.1 },
+    fan: { speed: 1.3, mult: 2 }, yin: { jumps: 2, r: 0.9 } },
 };
 
 /** 元素反应（只在程序里判断）：先中的元素 + 后来的元素 */

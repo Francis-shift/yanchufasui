@@ -15,12 +15,12 @@ export function sentenceKey(text) {
   return String(text).replace(/[\s\p{P}\p{S}]/gu, '').toLowerCase();
 }
 
-/** @param {{ form: string, power: number, count: number }} s */
+/** costK：字诀「疾」多花的法力（试炼，见 run.js applyRunes） @param {{ form: string, power: number, count: number, costK?: number }} s */
 export function stepCost(s) {
-  return FORMS[s.form].cost * powerFactor(s.power) * (s.form === 'bolt' ? boltCostFactor(s.count) : 1);
+  return FORMS[s.form].cost * powerFactor(s.power) * (s.form === 'bolt' ? boltCostFactor(s.count) : 1) * (s.costK ?? 1);
 }
 
-/** @param {{ form: string, power: number, count: number }[]} steps */
+/** @param {{ form: string, power: number, count: number, costK?: number }[]} steps */
 export function totalCost(steps) {
   const sum = steps.reduce((a, s) => a + stepCost(s), 0);
   return Math.round(sum * (steps.length > 1 ? COMBO_DISCOUNT : 1));
@@ -97,7 +97,8 @@ export function planCast(intent, ctx) {
     const first = !seen.has(key);
     if (first) { seen.add(key); newlySeen.push(key); }
     const base = FORMS[s.form].dmg * (s.form === 'bolt' ? boltTotalDmgFactor(s.count) : 1);
-    const dmgTotal = base * ELEMENTS[s.el].mult * powerFactor(s.power) * mm * repeat * (first ? FIRST_DISCOVERY_MULT : 1) * (s.upDmg ?? 1);
+    const dmgTotal = base * ELEMENTS[s.el].mult * powerFactor(s.power) * mm * repeat * (first ? FIRST_DISCOVERY_MULT : 1) * (s.upDmg ?? 1)
+      * (s.dmgK ?? 1);
     planned.push({ ...s, cost: Math.round(stepCost(s)), dmgTotal, dmgEach: s.form === 'bolt' ? dmgTotal / s.count : dmgTotal,
       first, repeat });
   }
@@ -257,15 +258,16 @@ export function damageTo(enemy, hit) {
  * @param {string} fromId 先被打中的那只
  * @param {{ id: string, x: number, z: number, frozen?: boolean }[]} enemies 活着的敌人
  * @param {number} dmg 先被打中那一下的伤害（结算前）
+ * @param {number} [extra] 多跳几次（试炼字诀「引」）
  * @returns {{ id: string, from: string, dmg: number, conduct: boolean }[]}
  */
-export function chainTargets(fromId, enemies, dmg) {
+export function chainTargets(fromId, enemies, dmg, extra = 0) {
   const { jumps, range, decay } = ELEMENTS.thunder.chain;
   const done = new Set([fromId]);
   /** @type {{ id: string, from: string, dmg: number, conduct: boolean }[]} */
   const out = [];
   let cur = enemies.find((e) => e.id === fromId), d = dmg;
-  for (let k = 0; k < jumps && cur; k++) {
+  for (let k = 0; k < jumps + extra && cur; k++) {
     let next = null, best = Infinity;
     for (const e of enemies) {
       if (done.has(e.id)) continue;

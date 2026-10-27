@@ -266,7 +266,7 @@ export class Hud {
     /** @type {{ pick: (i: number) => void, reroll: () => void, skip: () => void } | null} */
     this.pickOn = null;
     /** 精力最近一次画到几格（setStamina） */
-    this.stamina = { v: 0, max: 0 };
+    this.stamina = { v: 0, max: 0, locked: false };
     /** @type {HTMLElement} */ (this.picks.querySelector('[data-reroll]')).addEventListener('click', () => this.pickOn?.reroll());
     /** @type {HTMLElement} */ (this.picks.querySelector('[data-skip]')).addEventListener('click', () => this.pickOn?.skip());
     this.root.append(this.floats, this.stick, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay);
@@ -324,7 +324,7 @@ export class Hud {
       const d = el(`<button class="yc-dash" aria-label="闪避">闪<span class="yc-key">空格</span><span class="yc-pips"></span></button>`);
       d.addEventListener('pointerdown', (e) => { e.preventDefault(); on.dash?.(); });
       bar.append(d);
-      if (this.stamina.max) this.setStamina(this.stamina.v, this.stamina.max);
+      if (this.stamina.max) this.setStamina(this.stamina.v, this.stamina.max, this.stamina.locked);
     }
     skills.forEach((s, i) => {
       const w = el(`<div class="yc-skill" style="--c:${elColor(s.el)}" data-el="${s.el}"><button class="yc-cast"></button>
@@ -419,12 +419,15 @@ export class Hud {
     this.stick.style.top = at ? `${at.y}px` : '';
     this.knob.style.transform = `translate(${kx}px, ${ky}px)`;
   }
-  /** 精力：闪避按钮上方的格子填到几成，不够 1 格时按钮变淡（按钮栏重画后照上次的数补画） @param {number} v @param {number} max */
-  setStamina(v, max) {
-    this.stamina = { v, max };
+  /**
+   * 精力：闪避按钮上方的格子填到几成，不够 1 格、或被锁住（字诀「重」放完那一会儿）时按钮变淡（按钮栏重画后照上次的数补画）
+   * @param {number} v @param {number} max @param {boolean} [locked]
+   */
+  setStamina(v, max, locked = false) {
+    this.stamina = { v, max, locked };
     const d = this.root.querySelector('.yc-dash');
     if (!d) return;
-    d.classList.toggle('cd', v < 1);
+    d.classList.toggle('cd', v < 1 || locked);
     const pips = /** @type {HTMLElement} */ (d.querySelector('.yc-pips'));
     if (pips.children.length !== max) pips.innerHTML = '<i></i>'.repeat(max);
     [...pips.children].forEach((p, i) => /** @type {HTMLElement} */ (p).style.setProperty('--f', String(Math.max(0, Math.min(1, v - i)))));
@@ -500,6 +503,7 @@ export class Hud {
       for (const [k, w] of Object.entries(s.words)) marks.push({ w, color: elColor(s.el), tag: wordTag(k, s) });
     }
     for (const w of intent.unknown) marks.push({ w, gray: true, tag: '超出法则，未生效' });
+    for (const r of intent.runes ?? []) marks.push({ w: r.ch, color: KIND_COLOR['字诀'], tag: `字诀·${r.tag}` });   // 试炼里写进按钮的字诀
     const sm = intent.summon ? SUMMONS[intent.summon] : null;
     if (sm && c.text.includes(sm.name)) marks.unshift({ w: sm.name, color: elColor(intent.summon || ''), tag: plan.summon?.cast ? '召唤' : '未至' });
     let html = esc(c.text);

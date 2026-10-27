@@ -36,10 +36,12 @@ const WORD_MAX = 12;
 
 /**
  * @typedef {{ el: string, form: string, target: string, power: number, count: number, path: string,
- *             words: Record<string, string>, wide?: number, upDmg?: number }} Step
+ *             words: Record<string, string>, wide?: number, upDmg?: number, runes?: string[], dmgK?: number, costK?: number }} Step
  *   wide、upDmg：范围倍数、伤害倍数（试炼里招式字升级，如「爆·二」，见 run.js limitToLearned；没有就是 1）
+ *   runes：作用在这一步上的字诀（卡的 id）；dmgK、costK：字诀「重」「疾」的伤害、法力倍数（见 run.js applyRunes；没有就是 1）
  * @typedef {{ steps: Step[], momentum: number, name: string, unknown: string[], overreach: boolean,
- *             notes: string[], summon?: string | null }} Intent summon 是点名召唤的龙（按元素，如 ice = 冰龙），没有为 null
+ *             notes: string[], summon?: string | null, runes?: { ch: string, tag: string }[] }} Intent
+ *   summon 是点名召唤的龙（按元素，如 ice = 冰龙），没有为 null；runes：原话里认出的字诀（咒语卡上加下划线）
  */
 
 /** @param {unknown} v @returns {v is Record<string, any>} */
