@@ -76,7 +76,7 @@ export class Trial {
     // 完美闪避：按闪避的时刻与位置（招落下时回头核对）；一次闪避只算一次
     this.clock = 0; this.dashAt = -Infinity; this.dashFrom = new THREE.Vector3(); this.perfectUsed = true; this.glow = 0;
     // 冰锥：位置、速度、飞了多久；homing 的会追人
-    /** @type {{ x: number, y: number, z: number, vx: number, vz: number, t: number, life: number, homing: boolean, dmg: number, r: number }[]} */
+    /** @type {{ x: number, y: number, z: number, vx: number, vz: number, t: number, life: number, homing: boolean, dmg: number, r: number, fooled?: boolean }[]} */
     this.bullets = [];
     this.emitT = 0; this.a0 = 0; this.chT = 0;   // 旋转弹幕：下一轮还有多久、起始角、已经转了几秒
     // 冰锥要在十几米外的镜头里一眼看见：0.2 米那版在截图里只剩一个白点（10-27），放大、自发光压过泛光阈值
@@ -90,6 +90,14 @@ export class Trial {
     for (const m of [this.shards, this.dots]) { m.count = 0; m.frustumCulled = false; scene.add(m); }
     this.shards.castShadow = true;
     this.dots.renderOrder = 2;
+    // 心法残影：闪避处留下一个半透明的人影，追踪冰锥改追它、撞上就碎；ghostT 是它还剩几秒
+    // 淡蓝 0xbfe2ff 在白石地上和白袍分不开（10-27 截图），压成冷蓝
+    this.ghostMat = new THREE.MeshBasicMaterial({ color: 0x5aa8ff, transparent: true, opacity: 0.55, depthWrite: false });
+    this.ghost = d.caster.clone();
+    this.ghost.traverse((o) => { if (o instanceof THREE.Mesh) { o.material = this.ghostMat; o.castShadow = false; } });
+    this.ghost.visible = false;
+    scene.add(this.ghost);
+    this.ghostT = 0;
     this._q = new THREE.Quaternion(); this._m4 = new THREE.Matrix4(); this._s = new THREE.Vector3(1, 1, 1);
     this._bp = new THREE.Vector3(); this._bd = new THREE.Vector3(); this._hv = { x: 0, z: 0 };   // _r 是镜头右方，闪避随时要用，冰锥另用一组
 
@@ -294,6 +302,7 @@ export class Trial {
     this.dashAt = -Infinity; this.perfectUsed = true; this.glow = 0; this.lastMove = '';
     this.keys.clear(); this.ptr = null; this.stick.x = this.stick.y = 0;
     this.dashT = 0; this.dashCd = 0; this.hurtT = 0; this.flash = 0;
+    this.ghostT = 0; this.ghost.visible = false;
     this.p.copy(HOME); this.face.set(0, 0, -1);
     this.sync();
     this.d.caster.visible = true;
@@ -308,6 +317,7 @@ export class Trial {
   dispose() {
     this.stop(); this.unbind();
     for (const x of [this.circle, this.sector]) this.scene.remove(x.g);
+    this.scene.remove(this.ghost); this.ghostMat.dispose();
     for (const m of [this.shards, this.dots]) { this.scene.remove(m); m.geometry.dispose(); /** @type {THREE.Material} */ (m.material).dispose(); m.dispose(); }
   }
 
@@ -319,6 +329,12 @@ export class Trial {
     this.dashT = TRIAL.dash.sec; this.dashCd = TRIAL.dash.cd;
     this.dashAt = this.clock; this.dashFrom.copy(this.p); this.perfectUsed = false;
     this.d.hud.setDashReady(false);
+    if (this.mods.canying && this.fighting) {   // 残影留在闪避起点
+      this.ghostT = RUN.arts.ghost.sec;
+      this.ghost.position.set(this.p.x, 0, this.p.z);
+      this.ghost.quaternion.copy(this.d.caster.quaternion);
+      this.ghost.visible = true;
+    }
     // 冰锥眼看就要撞上（正朝人飞、window 秒内到）才闪：当场算完美闪避
     const W = this.mods.perfectWindow;
     for (const b of this.bullets) {
@@ -520,12 +536,16 @@ export class Trial {
   /** 冰锥飞一帧：追人的转弯；撞上土墙、场上的石物件就碎；撞上人就伤人 @param {number} dt */
   updateBullets(dt) {
     const { particles } = this.d, walls = this.d.blockers(), H = BOSS.homing;
+    const ghost = this.ghostT > 0 ? this.ghost.position : null;   // 残影在：追踪的改追它
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];
       b.t += dt;
-      if (b.homing && b.t > 0.35) {   // 甩出去先直飞一小段再拐
+      // 甩出去先直飞一小段再拐。追过残影的算被骗过：残影散了也不再回头，直飞到化掉
+      // （转向有上限，两侧的冰锥 1.5 秒里拐不到残影跟前；不这样，残影一散它们又掉头追人，10-27 预览实测）
+      if (b.homing && ghost) b.fooled = true;
+      if (b.homing && b.t > 0.35 && (ghost || !b.fooled)) {
         const v = this._hv; v.x = b.vx; v.z = b.vz;
-        homingTurn(v, b, this.p, H.turn, dt);
+        homingTurn(v, b, ghost ?? this.p, H.turn, dt);
         b.vx = v.x; b.vz = v.z;
       }
       b.x += b.vx * dt; b.z += b.vz * dt;
@@ -534,6 +554,7 @@ export class Trial {
       if (!gone) {
         for (const o of walls) if ((b.x - o.x) ** 2 + (b.z - o.z) ** 2 < (o.r + b.r) ** 2) { gone = true; break; }
         if (!gone) for (const o of BLOCK) if ((b.x - o.x) ** 2 + (b.z - o.z) ** 2 < (o.r + b.r) ** 2) { gone = true; break; }
+        if (!gone && ghost && b.y < 1.6 && inCircle(b, ghost, b.r, RUN.arts.ghost.r)) gone = true;
         if (gone) {   // 撞碎：溅几片冰
           for (let k = 0; k < 10; k++) {
             particles.emit(b.x, b.y, b.z, rand(-3, 3), rand(0.5, 3), rand(-3, 3), rand(0.25, 0.5), rand(0.05, 0.1), [1.4, 1.8, 2.2], [0.3, 0.55, 0.9], { drag: 2, grav: -8 });
@@ -614,11 +635,19 @@ export class Trial {
     }
   }
 
-  /** 每帧（游戏时间） @param {number} dt @param {THREE.Camera} camera */
-  update(dt, camera) {
+  /**
+   * 每帧。dt 是游戏时间，pdt 是玩家的时间（心法刹那：全场慢下来时玩家照常快，走位、闪避冷却按 pdt 走）
+   * @param {number} dt @param {THREE.Camera} camera @param {number} [pdt]
+   */
+  update(dt, camera, pdt = dt) {
     if (!this.on) return;
     this.clock += dt;
-    if (this.hp > 0) this.movePlayer(dt, camera);
+    if (this.hp > 0) this.movePlayer(pdt, camera);
+    if (this.ghostT > 0) {   // 残影慢慢淡掉
+      this.ghostT -= dt;
+      this.ghostMat.opacity = 0.15 + 0.4 * Math.max(0, this.ghostT / RUN.arts.ghost.sec);
+      if (this.ghostT <= 0) this.ghost.visible = false;
+    }
     if (!this.fighting) return;
     this.runT += dt;
     if (this.state === 'wave') { this.updateWave(dt); return; }

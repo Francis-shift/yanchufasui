@@ -19,15 +19,15 @@ import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
 import { maskText } from './rules/safety.js';
 import {
-  BOSS_COUNT, KIND_NAMES, buttonMove, limitToLearned, moveTargets, newRun, offer, previewMove, reroll as rerollCards, runFusions, runMods,
-  skip as skipCards, take as takeCard, upLabel,
+  BOSS_COUNT, CARDS, KIND_NAMES, artBoost, boostPlan, buttonMove, limitToLearned, moveTargets, newRun, offer, previewMove, reroll as rerollCards,
+  runFusions, runMods, skip as skipCards, take as takeCard, upLabel,
 } from './rules/run.js';
 import {
   bindSpell, buttonGaugeGain, combineButtons, defaultIntent, elName, scrollsFor, synergies, talentOpen, toggleTalent,
 } from './rules/talents.js';
 import {
   BEAM, BUTTON_CHANT_MS, CHANT_MIN_MS, CORE_HP, ENEMIES, FORMS, INPUT_MAX_CHARS, MANA_MAX, MOMENTUM_FX, MOMENTUM_RANGE, PARSE_TIMEOUT_MS, RAIN,
-  SLOWMO_MAX_SEC, SLOWMO_SCALE, TALENTS, TORNADO, TRIAL, WALL,
+  RUN, SLOWMO_MAX_SEC, SLOWMO_SCALE, TALENTS, TORNADO, TRIAL, WALL,
 } from './rules/numbers.js';
 import { Enemies } from './actors/enemies.js';
 import { Trial } from './modes/trial.js';
@@ -165,7 +165,11 @@ export function start(root, opts = {}) {
   const trial = new Trial(scene, { enemies, fx, particles, hud, caster: layout.caster, origins: [origin, fx.origin],
     canvas: renderer.domElement, mobile, floatText: floatAt, win: trialWon, lose: trialLost,
     blockers: () => walls.obstacles(),   // 土墙挡得住冰锥
-    reward: (mana, gauge) => { S.mana = Math.min(MANA_MAX, S.mana + mana); setGauge(Math.min(S.mods.ult, S.gauge + gauge)); },
+    reward: (mana, gauge) => {   // 完美闪避：回法力、加气势；拿了刹那、反手的开窗口
+      S.mana = Math.min(MANA_MAX, S.mana + mana); setGauge(Math.min(S.mods.ult, S.gauge + gauge));
+      if (S.mods.chana) { S.slowT = RUN.arts.slow.sec; floatAt(new THREE.Vector3(CASTER_POS.x, 3.1, CASTER_POS.z), '刹那', '#cfe6ff'); }
+      if (S.mods.fanshou) S.counterT = RUN.arts.counter.sec;
+    },
     local: (x, y) => toLocal(x, y), pick: (insight, done) => openPick(insight, done) });
 
   // ---------------------------------------------------------------- 镜头：第三人称，平时固定；开口时轻推近
@@ -253,6 +257,8 @@ export function start(root, opts = {}) {
     binds: /** @type {Record<string, { intent: import('./rules/intent.js').Intent, name: string, text: string }>} */ ({}),
     /** 试炼这一局拿过的卡（rules/run.js）与合成的加成；守关一直是原值 */
     run: newRun(), mods: runMods(newRun()),
+    /** 心法的三个窗口还剩几秒（玩家的时间）：刹那全场慢放、反手下一招加伤、余威龙落地后加伤 */
+    slowT: 0, counterT: 0, afterT: 0,
   };
   /** 按游戏时间延后执行（慢放、顿帧时一起变慢） */
   const timers = [];
@@ -293,7 +299,7 @@ export function start(root, opts = {}) {
     hud.closeWrite();
     hud.closePicks();
     Object.assign(S, { mode, phase: 'playing', mana: MANA_MAX, core: CORE_HP, gauge: 0, lastCombo: null, seen: [], said: new Set(),
-      wave: 0, queue: [], busy: false, restT: 0, inv: 0, run: newRun() });   // 新的一局天先放晴，再随第一波慢慢压上来
+      wave: 0, queue: [], busy: false, restT: 0, inv: 0, run: newRun(), slowT: 0, counterT: 0, afterT: 0 });   // 新的一局天先放晴，再随第一波慢慢压上来
     S.mods = runMods(S.run);
     trial.mods = S.mods;
     barrier.reset();
@@ -606,8 +612,16 @@ export function start(root, opts = {}) {
     if (S.phase !== 'playing') { fx.endChant(); buttonChant = false; locks.clear(castId); S.busy = false; return; }
     const firstEl = intent.summon && intent.summon !== 'thunder' ? intent.summon : intent.steps[0]?.el;
     if (firstEl) fx.retint(firstEl);
-    const plan = planCast(intent, { mana: S.mana, lastCombo: S.lastCombo, seen: S.seen, said: S.said, text: c.button ? '' : text,
+    let plan = planCast(intent, { mana: S.mana, lastCombo: S.lastCombo, seen: S.seen, said: S.said, text: c.button ? '' : text,
       gauge: S.gauge, ult: S.mods.ult, button: !!c.button, fusions: castFusions() });
+    // 心法反手、余威：窗口里放出去的这一招加伤（按放出那一刻算，飞到时窗口关了也照样加）；反手只管一招
+    const boost = plan.ok ? artBoost({ counter: S.counterT, after: S.afterT }) : null;
+    if (boost && boost.k !== 1) {
+      plan = boostPlan(plan, boost.k);
+      if (boost.counter) S.counterT = 0;
+      const tag = [boost.counter ? '反手' : '', boost.after ? '余威' : ''].filter(Boolean).join('·');
+      floatAt(new THREE.Vector3(CASTER_POS.x, 2.6, CASTER_POS.z), `${tag} ×${+boost.k.toFixed(2)}`, '#ffd76a');
+    }
     S.mana -= plan.cost;
     setGauge(plan.gaugeSpent ? 0 : Math.min(S.mods.ult, S.gauge + plan.gaugeGain));
     if (intent.summon) dragon.preload();
@@ -806,6 +820,10 @@ export function start(root, opts = {}) {
       if (S.phase !== 'playing') return;
       for (const e of [...enemies.list]) {
         if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) <= sm.radius) hitEnemy(e, { el: sm.el }, sm.dmg, p, { fromAbove: true });
+      }
+      if (S.mods.yuwei) {   // 心法余威：龙落地后一段时间所有招加伤
+        S.afterT = RUN.arts.after.sec;
+        floatAt(new THREE.Vector3(CASTER_POS.x, 2.6, CASTER_POS.z), '余威', '#ffd76a');
       }
     }, ids.length ? follow : undefined);
   }
@@ -1094,12 +1112,16 @@ export function start(root, opts = {}) {
     timeScale += ((slow ? SLOWMO_SCALE : 1) - timeScale) * Math.min(1, realDt * 10);
     let dt = frozen ? 0 : realDt * timeScale * lab.speed;   // 写咒对话框开着：游戏停住，画面照画；试验场可放慢、定格
     if (fx.hitStop > 0) { fx.hitStop -= realDt; dt *= 0.06; }
+    // 心法刹那：完美闪避后全场慢下来，玩家自己照常快。pdt 是玩家的时间：走位、闪避冷却、回法力、心法窗口都按它走
+    const pdt = dt;
+    if (S.slowT > 0) { S.slowT -= pdt; dt *= RUN.arts.slow.scale; }
+    S.counterT = Math.max(0, S.counterT - pdt); S.afterT = Math.max(0, S.afterT - pdt);
     idleT += dt;
 
     for (let i = timers.length - 1; i >= 0; i--) { timers[i].t -= dt; if (timers[i].t <= 0) { const t = timers.splice(i, 1)[0]; t.fn(); } }
     if (S.phase === 'playing' || S.phase === 'rest') {
-      S.mana = regenMana(S.mana, dt, S.mods.manaRegen);
-      if (S.mode === 'trial') trial.update(dt, camera);   // 试炼：走位、小怪潮与 boss 轮换（三选一时停住）
+      S.mana = regenMana(S.mana, pdt, S.mods.manaRegen);
+      if (S.mode === 'trial') trial.update(dt, camera, pdt);   // 试炼：走位、小怪潮与 boss 轮换（三选一时停住）
       else updateWave(dt);
     }
     world.step(1 / 60, dt, 3);
@@ -1115,7 +1137,7 @@ export function start(root, opts = {}) {
     const live = particles.update(dt);
     const inkLive = ink.update(dt);
     // 压暗世界：大招（fx.dimLevel）或开口咏唱时轻压一点；试验场可以锁定
-    const dimTarget = lab.dim >= 0 ? lab.dim : Math.max(fx.dimLevel, fx.chanting > 0 && !buttonChant ? 0.18 : 0);
+    const dimTarget = lab.dim >= 0 ? lab.dim : Math.max(fx.dimLevel, fx.chanting > 0 && !buttonChant ? 0.18 : 0, S.slowT > 0 ? 0.22 : 0);
     worldDim += (dimTarget - worldDim) * Math.min(1, realDt * 6);
     env.setDim(worldDim);
     // 入侵：天色跟波次走、守住散开、输了全暗；试验场可以锁定某一档
@@ -1192,8 +1214,12 @@ export function start(root, opts = {}) {
         boss: b && { hp: Math.round(b.hp), at: [+b.pos.x.toFixed(2), +b.pos.z.toFixed(2)], frozen: +b.frozen.toFixed(2) },
         minions: enemies.list.filter((o) => o.chase).length, bullets: trial.bullets.length,
         stage: trial.stage, round: trial.round, waveLeft: trial.waveLeft, runT: Math.round(trial.runT), perfects: trial.perfects,
-        run: { picks: S.run.picks, rerolls: S.run.rerolls, have: { ...S.run.have } }, mods: { ...S.mods } };
+        run: { picks: S.run.picks, rerolls: S.run.rerolls, have: { ...S.run.have } }, mods: { ...S.mods },
+        arts: { slow: +S.slowT.toFixed(2), counter: +S.counterT.toFixed(2), after: +S.afterT.toFixed(2), ghost: +trial.ghostT.toFixed(2) },
+        ghostAt: [+trial.ghost.position.x.toFixed(2), +trial.ghost.position.z.toFixed(2)], shots: trial.bullets.map((o) => [+o.x.toFixed(1), +o.z.toFixed(1)]) };
     },
+    /** 试炼：直接拿一张卡（心法、领悟这类不用选按钮的），测心法用 */
+    give: (id) => { const c = CARDS.find((x) => x.id === id); if (c) { S.run = takeCard(S.run, c); applyMods(); } return { ...S.mods }; },
     /** 试炼：把玩家的气血设成 n（测的时候别被打死） */
     hp: (n = TRIAL.hp) => { trial.hp = n; hud.setCore(n, TRIAL.hp); },
     /** 试炼：跳过这一段（小怪潮清场 / boss 直接碎），看下一段 */

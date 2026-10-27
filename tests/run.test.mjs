@@ -6,8 +6,8 @@ import { planCast, regenMana } from '../game/rules/arbiter.js';
 import { inCharset } from '../game/rules/charset.js';
 import { FUSION_OPEN, MANA_MAX, MANA_REGEN, RUN, TRIAL, ULT_GAUGE } from '../game/rules/numbers.js';
 import {
-  BOSS_COUNT, CARDS, RUN_STAGES, buttonMove, eligible, limitToLearned, moveName, moveTargets, native, newRun, offer, previewMove, reroll,
-  runFusions, runMods, skip, take, upLabel, weight,
+  BOSS_COUNT, CARDS, RUN_STAGES, artBoost, boostPlan, buttonMove, eligible, limitToLearned, moveName, moveTargets, native, newRun, offer,
+  previewMove, reroll, runFusions, runMods, skip, take, upLabel, weight,
 } from '../game/rules/run.js';
 import { combineButtons, defaultIntent } from '../game/rules/talents.js';
 import { isPerfect } from '../game/rules/trial.js';
@@ -139,7 +139,8 @@ test('拿了：记一级、再出带「·二」（招式字不在卡上标，选
 
 test('心法加成：没拿是原值；见切放宽完美闪避窗口、聚气多加气势、回元回得快、龙吟召龙格数变少', () => {
   const base = runMods(newRun());
-  assert.deepEqual(base, { perfectWindow: TRIAL.perfect.window, perfectGauge: TRIAL.perfect.gauge, manaRegen: 1, ult: ULT_GAUGE });
+  assert.deepEqual(base, { perfectWindow: TRIAL.perfect.window, perfectGauge: TRIAL.perfect.gauge, manaRegen: 1, ult: ULT_GAUGE,
+    chana: false, fanshou: false, canying: false, yuwei: false });
   let run = newRun();
   for (const id of ['jianqie', 'juqi', 'huiyuan', 'longyin']) run = take(run, byId(id));
   const m = runMods(run);
@@ -159,6 +160,32 @@ test('心法加成：没拿是原值；见切放宽完美闪避窗口、聚气�
   const ctx = { mana: MANA_MAX, gauge: RUN.arts.ult, button: true };
   assert.equal(planCast(summon, ctx).summon?.cast, false);
   assert.equal(planCast(summon, { ...ctx, ult: m.ult }).summon?.cast, true);
+});
+
+test('心法刹那、反手、残影、余威：拿了才开；反手余威的加伤按窗口算、两个都在相乘，每步每颗和龙都乘上', () => {
+  let run = newRun();
+  for (const id of ['chana', 'fanshou', 'canying', 'yuwei']) run = take(run, byId(id));
+  const m = runMods(run);
+  assert.deepEqual([m.chana, m.fanshou, m.canying, m.yuwei], [true, true, true, true]);
+  assert.equal(m.perfectWindow, TRIAL.perfect.window, '这四个不动闪避窗口');
+  // 窗口
+  assert.deepEqual(artBoost({ counter: 0, after: 0 }), { k: 1, counter: false, after: false });
+  assert.equal(artBoost({ counter: 0.2, after: 0 }).k, RUN.arts.counter.mult);
+  assert.equal(artBoost({ counter: 0, after: 3 }).k, RUN.arts.after.mult);
+  assert.equal(artBoost({ counter: 1, after: 1 }).k, RUN.arts.counter.mult * RUN.arts.after.mult);
+  // 加伤：三颗火弹每颗和总数都乘 1.5，消耗不变；k = 1 原样返回
+  const bolt = { steps: [{ el: 'fire', form: 'bolt', target: 'nearest', power: 2, count: 3, path: 'straight', words: {} }],
+    momentum: 0, name: '', unknown: [], overreach: false, notes: [], summon: null };
+  const plan = planCast(bolt, { mana: MANA_MAX, button: true });
+  const up = boostPlan(plan, 1.5);
+  assert.equal(up.steps[0].dmgTotal, plan.steps[0].dmgTotal * 1.5);
+  assert.equal(up.steps[0].dmgEach, plan.steps[0].dmgEach * 1.5);
+  assert.equal(up.cost, plan.cost);
+  assert.equal(plan.steps[0].dmgTotal, planCast(bolt, { mana: MANA_MAX, button: true }).steps[0].dmgTotal, '原计划不被改');
+  assert.equal(boostPlan(plan, 1), plan);
+  const dragon = planCast({ ...bolt, steps: [], summon: 'ice' }, { mana: MANA_MAX, gauge: ULT_GAUGE, button: true });
+  assert.ok(dragon.summon?.cast && dragon.summon.dmg > 0);
+  assert.equal(boostPlan(dragon, 1.3).summon?.dmg, /** @type {any} */ (dragon.summon).dmg * 1.3);
 });
 
 /** 一步法术（按钮写的咒清洗后长这样） */

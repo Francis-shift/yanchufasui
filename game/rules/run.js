@@ -52,13 +52,13 @@ export const CARDS = [
   { id: 'yin', kind: 'rune', name: '引', el: 'thunder', text: '雷链多跳两次，能打碎冰锥', max: 1, ready: false },
   // 心法：拿了就生效
   { id: 'jianqie', kind: 'art', name: '见切', text: `完美闪避的窗口 ${TRIAL.perfect.window} → ${RUN.arts.window} 秒`, max: 1, ready: true },
-  { id: 'chana', kind: 'art', name: '刹那', text: '完美闪避后 1 秒全场慢到三成，自己照常快', max: 1, ready: false },
-  { id: 'fanshou', kind: 'art', name: '反手', text: '完美闪避后 1.5 秒内，下一招 ×1.5', max: 1, ready: false },
-  { id: 'canying', kind: 'art', name: '残影', text: '闪避处留下残影，追踪冰锥改追它', max: 1, ready: false },
+  { id: 'chana', kind: 'art', name: '刹那', text: `完美闪避后 ${RUN.arts.slow.sec} 秒全场慢到三成，自己照常快`, max: 1, ready: true },
+  { id: 'fanshou', kind: 'art', name: '反手', text: `完美闪避后 ${RUN.arts.counter.sec} 秒内，下一招 ×${RUN.arts.counter.mult}`, max: 1, ready: true },
+  { id: 'canying', kind: 'art', name: '残影', text: '闪避处留下残影：追踪冰锥改追它，撞上就碎，骗过的不再回头', max: 1, ready: true },
   { id: 'juqi', kind: 'art', name: '聚气', text: `完美闪避加 ${RUN.arts.gauge} 格气势（原 ${TRIAL.perfect.gauge} 格）`, max: 1, ready: true },
   { id: 'huiyuan', kind: 'art', name: '回元', text: `法力回复 +${Math.round((RUN.arts.regen - 1) * 100)}%`, max: 1, ready: true },
   { id: 'longyin', kind: 'art', name: '龙吟', text: `召龙只要 ${RUN.arts.ult} 格气势（原 ${ULT_GAUGE} 格）`, max: 1, ready: true },
-  { id: 'yuwei', kind: 'art', name: '余威', text: '龙落地后 4 秒内，所有招 ×1.3', max: 1, ready: false },
+  { id: 'yuwei', kind: 'art', name: '余威', text: `龙落地后 ${RUN.arts.after.sec} 秒内，所有招 ×${RUN.arts.after.mult}`, max: 1, ready: true },
   // 领悟：打完 boss 才出
   { id: 'he-fire-wind', kind: 'insight', name: '火借风威', need: ['fire', 'wind'], fuse: 'fire>wind',
     text: '先按火、再按风，两招合成豪火灭却', max: 1, ready: true },
@@ -268,8 +268,10 @@ export const upLabel = (run, c) => (c.kind !== 'move' && level(run, c.id) > 0 ? 
 /**
  * 这一局拿过的心法合成的加成（守关、没拿的时候就是原值）。
  * @param {Run} run
- * @returns {{ perfectWindow: number, perfectGauge: number, manaRegen: number, ult: number }}
- *   perfectWindow：完美闪避窗口（秒）；perfectGauge：完美闪避加几格气势；manaRegen：法力回复倍数；ult：召龙要几格气势
+ * @returns {{ perfectWindow: number, perfectGauge: number, manaRegen: number, ult: number,
+ *             chana: boolean, fanshou: boolean, canying: boolean, yuwei: boolean }}
+ *   perfectWindow：完美闪避窗口（秒）；perfectGauge：完美闪避加几格气势；manaRegen：法力回复倍数；ult：召龙要几格气势；
+ *   chana / fanshou / canying / yuwei：拿没拿刹那、反手、残影、余威（怎么生效在 main.js 与 modes/trial.js）
  */
 export function runMods(run) {
   const has = (/** @type {string} */ id) => level(run, id) > 0;
@@ -278,5 +280,28 @@ export function runMods(run) {
     perfectGauge: has('juqi') ? RUN.arts.gauge : TRIAL.perfect.gauge,
     manaRegen: has('huiyuan') ? RUN.arts.regen : 1,
     ult: has('longyin') ? RUN.arts.ult : ULT_GAUGE,
+    chana: has('chana'), fanshou: has('fanshou'), canying: has('canying'), yuwei: has('yuwei'),
   };
+}
+
+/**
+ * 这一招吃不吃反手、余威：反手窗口里 × counter.mult（用掉这次窗口），余威窗口里 × after.mult，两个都在就相乘。
+ * 窗口只在拿了对应心法时才会开（main.js），这里只看还剩几秒。
+ * @param {{ counter: number, after: number }} t 两个窗口各还剩几秒
+ * @returns {{ k: number, counter: boolean, after: boolean }}
+ */
+export function artBoost(t) {
+  const counter = t.counter > 0, after = t.after > 0;
+  return { k: (counter ? RUN.arts.counter.mult : 1) * (after ? RUN.arts.after.mult : 1), counter, after };
+}
+
+/**
+ * 一招的伤害乘 k：每一步的总伤害、每颗伤害，召出来的龙也算。k 为 1 原样返回。
+ * @template {{ steps: { dmgTotal: number, dmgEach: number }[], summon?: { dmg: number } }} P
+ * @param {P} plan @param {number} k @returns {P}
+ */
+export function boostPlan(plan, k) {
+  if (k === 1) return plan;
+  const steps = plan.steps.map((s) => ({ ...s, dmgTotal: s.dmgTotal * k, dmgEach: s.dmgEach * k }));
+  return { ...plan, steps, ...(plan.summon ? { summon: { ...plan.summon, dmg: plan.summon.dmg * k } } : {}) };
 }
