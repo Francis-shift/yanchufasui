@@ -11,7 +11,8 @@ import * as THREE from 'three';
 import { BOSS, ENEMIES, RUN, TRIAL } from '../rules/numbers.js';
 import { BOSS_COUNT, RUN_STAGES, newRun, runMods } from '../rules/run.js';
 import {
-  bossHit, bossPhase, homingTurn, inCircle, inSector, isPerfect, keepInArena, pickMove, recoverSec, slamCount, spiralAngles, teleSec,
+  bossHit, bossPhase, canDash, homingTurn, inCircle, inSector, isPerfect, keepInArena, nextBatch, pickMove, recoverSec, regenStamina, slamCount,
+  spawnSpot, spiralAngles, teleSec,
 } from '../rules/trial.js';
 import { CASTER_POS, CORE_POS, OBSTACLES, PLAZA_R } from '../world/layout.js';
 import { rand } from '../fx/common.js';
@@ -61,7 +62,11 @@ export class Trial {
     this.stick = { x: 0, y: 0 };
     /** @type {{ id: number, x: number, y: number, t: number, moved: boolean } | null} */
     this.ptr = null;
-    this.dashT = 0; this.dashCd = 0; this.dashDir = new THREE.Vector3(); this.hurtT = 0; this.flash = 0;
+    this.dashT = 0; this.dashDir = new THREE.Vector3(); this.hurtT = 0; this.flash = 0;
+    // 精力：还剩几格（攒到一半也算数）、离上次按闪避过了几秒；shownSta 是闪避按钮上画到几格（变了才重画）
+    this.stamina = TRIAL.stamina.max; this.sinceDash = Infinity; this.shownSta = -1;
+    /** 小怪潮里冒着紫烟、还没出来的小傀儡：落点与还要几秒 @type {{ x: number, z: number, t: number }[]} */
+    this.pending = [];
     /** @type {any} */
     this.boss = null;
     this.armor = 0; this.phase = 1; this.freezeCd = 0;
@@ -197,7 +202,7 @@ export class Trial {
     hud.setHint(this.d.mobile
       ? `一局：小怪潮与 ${BOSS_COUNT} 个 boss 交替；开局只会本命招，每打完一段三选一学字。战前点按钮右上角的笔写一句咒（开战后不能写）；左手拖动走位，右手点「闪」闪避；准备好了点「开战」`
       : `一局：小怪潮与 ${BOSS_COUNT} 个 boss 交替；开局只会本命招，每打完一段三选一学字。战前点按钮右上角的笔写一句咒（开战后不能写）；WASD / 方向键走位，空格闪避；准备好了点「开战」或按回车`);
-    hud.setDashReady(true);
+    this.showStamina();
   }
 
   /** 开战：从第一段小怪潮打起 */
@@ -218,12 +223,12 @@ export class Trial {
     else { this.state = 'pick'; this.d.pick(!!st.insight, () => this.next()); }
   }
 
-  /** 一段小怪潮：小傀儡隔一会儿从广场边上冒一只，追着人自爆；冒完、清空了这一段就过了 */
+  /** 一段小怪潮：小傀儡隔一会儿成批冒出来（落点随机、先冒紫烟），追着人自爆；冒完、清空了这一段就过了 */
   startWave() {
     const W = RUN.wave;
     this.round++;
     this.waveLeft = this.waveN = W.n[Math.min(this.round, W.n.length) - 1];
-    this.spawnT = W.first; this.state = 'wave';
+    this.spawnT = W.first; this.state = 'wave'; this.pending.length = 0;
     const { hud } = this.d;
     hud.bigText(`第 ${this.round} 波`, '#16202b', 1400);
     hud.setHint(this.d.mobile ? '小傀儡追着人自爆：边走边打，别让它们贴身' : '小傀儡追着人自爆：边走边打，别让它们贴身。1、2、3 放天赋，4 召唤，空格闪避');
@@ -232,25 +237,33 @@ export class Trial {
 
   /** @param {number} dt */
   updateWave(dt) {
-    if (this.waveLeft > 0 && (this.spawnT -= dt) <= 0) {
-      this.spawnT = RUN.wave.every;
-      this.waveLeft--;
-      this.spawnChaser();
+    const W = RUN.wave, alive = this.d.enemies.list.filter((o) => o.chase).length;
+    // 到点冒下一批；场上（连同正冒烟的）已经满了就先等着
+    if (this.waveLeft > 0 && (this.spawnT -= dt) <= 0 && alive + this.pending.length < W.alive) {
+      const b = nextBatch(Math.min(this.waveLeft, W.alive - alive - this.pending.length), Math.random);
+      this.spawnT = b.gap;
+      this.waveLeft -= b.n;
+      for (let i = 0; i < b.n; i++) {
+        const at = spawnSpot(Math.random, this.p, ARENA_R - 0.8, W.away, [...BLOCK, ...this.pending.map((q) => ({ x: q.x, z: q.z, r: 0.9 }))]);
+        this.pending.push({ x: at.x, z: at.z, t: W.warn });
+      }
     }
-    if (this.waveLeft <= 0 && !this.d.enemies.list.some((o) => o.chase)) { this.state = 'rest'; this.t = RUN.rest; }
+    for (let i = this.pending.length - 1; i >= 0; i--) {
+      const q = this.pending[i];
+      q.t -= dt;
+      // 冒紫烟：越到出来越浓
+      if (Math.random() < dt * (14 + 30 * (1 - q.t / W.warn))) {
+        this.d.particles.emit(q.x + rand(-0.4, 0.4), rand(0.05, 0.3), q.z + rand(-0.4, 0.4), rand(-0.4, 0.4), rand(0.6, 1.6), rand(-0.4, 0.4),
+          rand(0.5, 0.9), rand(0.15, 0.3), [1.0, 0.5, 1.6], [0.3, 0.1, 0.5], { alpha: 0.4, drag: 2 });
+      }
+      if (q.t <= 0) { this.pending.splice(i, 1); this.spawnChaser(q); }
+    }
+    if (this.waveLeft <= 0 && !this.pending.length && !alive) { this.state = 'rest'; this.t = RUN.rest; }
     this.showWave();
   }
 
-  /** 广场边上、离玩家够远的地方冒一只追人的小傀儡（冒紫烟） */
-  spawnChaser() {
-    const R = ARENA_R - 0.8;
-    let at = { x: 0, z: -R };
-    for (let i = 0; i < 12; i++) {
-      const a = rand(0, Math.PI * 2);
-      at = { x: Math.cos(a) * R, z: Math.sin(a) * R };
-      if (Math.hypot(at.x - this.p.x, at.z - this.p.z) >= RUN.wave.away) break;
-    }
-    keepInArena(at, BLOCK, ARENA_R, 0.3);
+  /** 紫烟里冒出一只追人的小傀儡 @param {{ x: number, z: number }} at */
+  spawnChaser(at) {
     this.d.enemies.spawnAt('grunt', at.x, at.z, 'chase');
     for (let i = 0; i < 24; i++) {
       this.d.particles.emit(at.x + rand(-0.4, 0.4), rand(0.1, 0.9), at.z + rand(-0.4, 0.4), rand(-1.5, 1.5), rand(1, 3), rand(-1.5, 1.5),
@@ -260,7 +273,7 @@ export class Trial {
 
   /** 左上角：第几轮、这段小怪还剩几只（数变了才改界面） */
   showWave() {
-    const left = this.waveLeft + this.d.enemies.list.filter((o) => o.chase).length;
+    const left = this.waveLeft + this.pending.length + this.d.enemies.list.filter((o) => o.chase).length;
     const key = `w${this.round}|${left}`;
     if (key === this.shown) return;
     this.shown = key;
@@ -301,7 +314,9 @@ export class Trial {
     this.clearBullets();
     this.dashAt = -Infinity; this.perfectUsed = true; this.glow = 0; this.lastMove = '';
     this.keys.clear(); this.ptr = null; this.stick.x = this.stick.y = 0;
-    this.dashT = 0; this.dashCd = 0; this.hurtT = 0; this.flash = 0;
+    this.dashT = 0; this.hurtT = 0; this.flash = 0;
+    this.stamina = TRIAL.stamina.max; this.sinceDash = Infinity; this.shownSta = -1;
+    this.pending.length = 0;
     this.ghostT = 0; this.ghost.visible = false;
     this.p.copy(HOME); this.face.set(0, 0, -1);
     this.sync();
@@ -323,12 +338,13 @@ export class Trial {
 
   // ---------------------------------------------------------------- 玩家
   dash() {
-    if (!this.on || this.dashCd > 0 || this.hp <= 0) return;
+    if (!this.on || !canDash(this.stamina, this.sinceDash) || this.hp <= 0) return;
     const mv = this.input();
     this.dashDir.copy(mv.lengthSq() > 0.01 ? mv.normalize() : this.face);
-    this.dashT = TRIAL.dash.sec; this.dashCd = TRIAL.dash.cd;
+    this.dashT = TRIAL.dash.sec;
+    this.stamina -= 1; this.sinceDash = 0;
     this.dashAt = this.clock; this.dashFrom.copy(this.p); this.perfectUsed = false;
-    this.d.hud.setDashReady(false);
+    this.showStamina();
     if (this.mods.canying && this.fighting) {   // 残影留在闪避起点
       this.ghostT = RUN.arts.ghost.sec;
       this.ghost.position.set(this.p.x, 0, this.p.z);
@@ -343,7 +359,7 @@ export class Trial {
     }
   }
 
-  /** 完美闪避：周身爆一圈白光、顿帧；回法力、加气势、闪避冷却清零 */
+  /** 完美闪避：周身爆一圈白光、顿帧；回法力、加气势、回精力 */
   perfect() {
     if (this.perfectUsed || !this.fighting) return;
     this.perfectUsed = true;
@@ -361,7 +377,7 @@ export class Trial {
     }
     this.glow = 1;
     this.d.floatText(new THREE.Vector3(p.x, 2.4, p.z), '完美闪避', '#ffffff');
-    this.dashCd = 0; hud.setDashReady(true);
+    this.stamina = Math.min(TRIAL.stamina.max, this.stamina + P.stamina); this.showStamina();
     this.perfects++;
     this.d.reward(P.mana, this.mods.perfectGauge);
   }
@@ -397,7 +413,9 @@ export class Trial {
       const mv = this.input();
       if (mv.lengthSq() > 0.0025) { this.p.addScaledVector(mv, TRIAL.speed * dt); this.face.copy(mv).normalize(); }
     }
-    if (this.dashCd > 0) { this.dashCd -= dt; if (this.dashCd <= 0) this.d.hud.setDashReady(true); }
+    this.sinceDash += dt;
+    this.stamina = regenStamina(this.stamina, dt);
+    this.showStamina();
     const block = this.boss ? [...BLOCK, { x: this.boss.pos.x, z: this.boss.pos.z, r: BOSS_BODY }] : BLOCK;
     keepInArena(this.p, block, ARENA_R, BODY);
     this.sync();
@@ -407,6 +425,14 @@ export class Trial {
     this.flash = Math.max(0, this.flash - dt * 3);
     this.glow = Math.max(0, this.glow - dt * 1.5);   // 完美闪避：袍子亮白一下
     this.robe.emissive.setRGB(0.9 * this.flash + 0.8 * this.glow, 0.08 * this.flash + 0.8 * this.glow, 0.04 * this.flash + 0.9 * this.glow);
+  }
+
+  /** 闪避按钮上的精力格（攒到几成画几成；变化不到 2% 不重画） */
+  showStamina() {
+    const s = Math.round(this.stamina * 50) / 50;
+    if (s === this.shownSta) return;
+    this.shownSta = s;
+    this.d.hud.setStamina(s, TRIAL.stamina.max);
   }
 
   /** 施法者、脚下法阵、法术起点都挪到玩家的位置 */

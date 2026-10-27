@@ -4,7 +4,7 @@
  * 完美闪避、追踪冰锥怎么转弯、旋转弹幕朝哪喷。
  * 数值全在 numbers.js 的 BOSS、TRIAL。画面和 boss 的动作在 game/modes/trial.js。
  */
-import { BOSS, TRIAL } from './numbers.js';
+import { BOSS, RUN, TRIAL } from './numbers.js';
 
 /** @typedef {'slam' | 'sweep' | 'summon' | 'homing' | 'spiral'} Move */
 
@@ -81,6 +81,15 @@ export function teleSec(move, phase) {
 export const isPerfect = (dashAgo, wasInside, win = TRIAL.perfect.window) => wasInside && dashAgo <= win;
 
 /**
+ * 精力（10-27 本人提议）：够 1 格、离上次按闪避过了 gap 秒才闪得出。
+ * @param {number} stamina 现在几格（可以是小数，攒到一半） @param {number} sinceDash 离上次按闪避过了几秒（玩家的时间）
+ */
+export const canDash = (stamina, sinceDash) => stamina >= 1 && sinceDash >= TRIAL.dash.gap;
+
+/** 精力回一帧：每 regen 秒回 1 格，不超过上限 @param {number} stamina @param {number} dt */
+export const regenStamina = (stamina, dt) => Math.min(TRIAL.stamina.max, stamina + dt / TRIAL.stamina.regen);
+
+/**
  * 追踪冰锥转一帧：速度方向朝目标转，每秒最多 turn 弧度，快慢不变。改的是 v 本身。
  * 转弯半径 = 速度 / turn：比闪避的距离大，贴脸时侧着一闪它就拐不过来。
  * @param {P} v 速度 @param {P} from 冰锥位置 @param {P} to 目标 @param {number} turn @param {number} dt
@@ -138,4 +147,31 @@ export function keepInArena(p, obstacles, R, body = 0.35) {
   const d = Math.hypot(p.x, p.z);
   if (d > R) { p.x *= R / d; p.z *= R / d; }
   return p;
+}
+
+/**
+ * 小怪潮的下一批：冒几只（batch 区间里随机，不超过还剩的）、再过几秒冒下一批（gap 区间里随机）。
+ * @param {number} left 这一段还剩几只没冒 @param {() => number} rnd
+ */
+export function nextBatch(left, rnd) {
+  const [a, b] = RUN.wave.batch, [g0, g1] = RUN.wave.gap;
+  return { n: Math.min(left, a + Math.floor(rnd() * (b - a + 1))), gap: g0 + rnd() * (g1 - g0) };
+}
+
+/**
+ * 小傀儡冒在哪：广场上均匀随机一点（不在障碍里），离玩家至少 away 米；试 12 次都太近，就取试过的里面离玩家最远的。
+ * @param {() => number} rnd @param {P} me 玩家 @param {number} R 能走的半径 @param {number} away
+ * @param {{ x: number, z: number, r: number }[]} obstacles
+ * @returns {P}
+ */
+export function spawnSpot(rnd, me, R, away, obstacles) {
+  let best = { x: 0, z: 0 }, far = -1;
+  for (let i = 0; i < 12; i++) {
+    const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * R;
+    const p = keepInArena({ x: Math.cos(a) * r, z: Math.sin(a) * r }, obstacles, R, 0.3);
+    const d = Math.hypot(p.x - me.x, p.z - me.z);
+    if (d >= away) return p;
+    if (d > far) { best = p; far = d; }
+  }
+  return best;
 }

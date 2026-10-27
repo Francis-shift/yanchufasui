@@ -143,6 +143,11 @@ const CSS = FONT_CSS + `
 .yc-dash { width: 54px; height: 54px; border-radius: 50%; border: 2px solid #5d6b7a; background: rgba(255,255,255,0.9); color: #3b4856;
   font-family: ${BRUSH}; font-size: 26px; line-height: 1; padding: 0; cursor: pointer; touch-action: manipulation; position: relative; }
 .yc-dash.cd { opacity: 0.45; }
+/* 精力格：闪避按钮上方一排短条，攒到几成填几成 */
+.yc-pips { position: absolute; left: 50%; top: -11px; transform: translateX(-50%); display: flex; gap: 3px; pointer-events: none; }
+.yc-pips > i { width: 13px; height: 5px; border-radius: 3px; box-shadow: 0 0 0 1px rgba(255,255,255,0.7);
+  background: linear-gradient(90deg, #2f8fd8 calc(var(--f, 1) * 100%), rgba(60,72,86,0.3) 0); }
+.yc-pad .yc-pips { top: -13px; } .yc-pad .yc-pips > i { width: 18px; height: 6px; }
 .yc-dash .yc-key { white-space: nowrap; font: 10px/1 system-ui, sans-serif; }
 .yc-go { align-self: center; margin-top: 2px; }
 .yc-go[hidden], .yc-input[hidden] { display: none; }
@@ -260,6 +265,8 @@ export class Hud {
       <div class="yc-picks-btns"><button class="yc-btn ghost" data-reroll></button><button class="yc-btn ghost" data-skip>不拿，回满气血与法力</button></div></div></div>`);
     /** @type {{ pick: (i: number) => void, reroll: () => void, skip: () => void } | null} */
     this.pickOn = null;
+    /** 精力最近一次画到几格（setStamina） */
+    this.stamina = { v: 0, max: 0 };
     /** @type {HTMLElement} */ (this.picks.querySelector('[data-reroll]')).addEventListener('click', () => this.pickOn?.reroll());
     /** @type {HTMLElement} */ (this.picks.querySelector('[data-skip]')).addEventListener('click', () => this.pickOn?.skip());
     this.root.append(this.floats, this.stick, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay);
@@ -314,9 +321,10 @@ export class Hud {
     const bar = this.q('.yc-skills');
     bar.innerHTML = '';
     if (on.dash) {
-      const d = el(`<button class="yc-dash" aria-label="闪避">闪<span class="yc-key">空格</span></button>`);
+      const d = el(`<button class="yc-dash" aria-label="闪避">闪<span class="yc-key">空格</span><span class="yc-pips"></span></button>`);
       d.addEventListener('pointerdown', (e) => { e.preventDefault(); on.dash?.(); });
       bar.append(d);
+      if (this.stamina.max) this.setStamina(this.stamina.v, this.stamina.max);
     }
     skills.forEach((s, i) => {
       const w = el(`<div class="yc-skill" style="--c:${elColor(s.el)}" data-el="${s.el}"><button class="yc-cast"></button>
@@ -411,8 +419,16 @@ export class Hud {
     this.stick.style.top = at ? `${at.y}px` : '';
     this.knob.style.transform = `translate(${kx}px, ${ky}px)`;
   }
-  /** 闪避冷却中：按钮变淡 @param {boolean} ready */
-  setDashReady(ready) { this.root.querySelector('.yc-dash')?.classList.toggle('cd', !ready); }
+  /** 精力：闪避按钮上方的格子填到几成，不够 1 格时按钮变淡（按钮栏重画后照上次的数补画） @param {number} v @param {number} max */
+  setStamina(v, max) {
+    this.stamina = { v, max };
+    const d = this.root.querySelector('.yc-dash');
+    if (!d) return;
+    d.classList.toggle('cd', v < 1);
+    const pips = /** @type {HTMLElement} */ (d.querySelector('.yc-pips'));
+    if (pips.children.length !== max) pips.innerHTML = '<i></i>'.repeat(max);
+    [...pips.children].forEach((p, i) => /** @type {HTMLElement} */ (p).style.setProperty('--f', String(Math.max(0, Math.min(1, v - i)))));
+  }
 
   /**
    * boss 血条（null 收起）：名字、第几阶段、血、冰甲。

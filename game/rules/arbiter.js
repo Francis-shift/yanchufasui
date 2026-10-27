@@ -97,7 +97,7 @@ export function planCast(intent, ctx) {
     const first = !seen.has(key);
     if (first) { seen.add(key); newlySeen.push(key); }
     const base = FORMS[s.form].dmg * (s.form === 'bolt' ? boltTotalDmgFactor(s.count) : 1);
-    const dmgTotal = base * ELEMENTS[s.el].mult * powerFactor(s.power) * mm * repeat * (first ? FIRST_DISCOVERY_MULT : 1);
+    const dmgTotal = base * ELEMENTS[s.el].mult * powerFactor(s.power) * mm * repeat * (first ? FIRST_DISCOVERY_MULT : 1) * (s.upDmg ?? 1);
     planned.push({ ...s, cost: Math.round(stepCost(s)), dmgTotal, dmgEach: s.form === 'bolt' ? dmgTotal / s.count : dmgTotal,
       first, repeat });
   }

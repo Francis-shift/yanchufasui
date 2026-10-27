@@ -70,6 +70,11 @@ export class Enemies {
     /** 广场上的寻路：石阶、索桥仍是仅有的两个入口，上了广场就跟着流场走 */
     this.field = new FlowField({ radius: PLAZA_R - 0.4, goal: { x: CORE_POS.x, z: CORE_POS.z, r: CORE_REACH - 0.2 } });
     this.field.setObstacles(STATIC_OBSTACLES);
+    // 试炼：追人的小傀儡另用一张以玩家为目标的流场（玩家走动就重算，见 chaseDir）。只看身边的绕法出不了凹口：
+    // 石兽和牌坊柱子挨着，顺着一根滑又撞上另一根（10-27 预览：玩家站到牌坊下，一只卡在两者之间不动）
+    this.chaseField = new FlowField({ radius: PLAZA_R - 0.4, goal: { x: CASTER_POS.x, z: CASTER_POS.z, r: 1.0 } });
+    this.chaseField.setObstacles(OBSTACLES);
+    this.chaseAt = { x: CASTER_POS.x, z: CASTER_POS.z };
     this.geo = {
       torso: new THREE.BoxGeometry(0.62, 0.7, 0.4), head: new THREE.BoxGeometry(0.42, 0.42, 0.42),
       arm: new THREE.BoxGeometry(0.16, 0.6, 0.16), leg: new THREE.BoxGeometry(0.18, 0.42, 0.18),
@@ -145,7 +150,30 @@ export class Enemies {
    * 场景里多出（或撤掉）挡路的东西时调用：土墙立起、华表倒地……流场重算，敌人马上改道。
    * @param {{ x: number, z: number, r: number }[]} list 固定障碍之外的临时障碍
    */
-  setObstacles(list) { this.temp = list; this.field.setObstacles([...STATIC_OBSTACLES, ...list]); }
+  setObstacles(list) {
+    this.temp = list; this.field.setObstacles([...STATIC_OBSTACLES, ...list]);
+    this.chaseField.setObstacles([...OBSTACLES, ...list]);
+  }
+
+  /**
+   * 追人的小傀儡往哪走：到施法者的直线上没有障碍就直走，挡着就跟流场绕。施法者挪了 0.4 米以上，流场重算（两千来格，不到一毫秒）。
+   * @param {THREE.Vector3} p 小傀儡的位置 @param {number} dx @param {number} dz 到施法者的向量 @param {number} d 距离 @param {THREE.Vector3} out
+   */
+  chaseDir(p, dx, dz, d, out) {
+    out.set(dx / d, 0, dz / d);
+    const obs = this.chaseField.obstacles;
+    const blocked = obs.some((o) => {
+      const t = Math.max(0, Math.min(1, ((o.x - p.x) * dx + (o.z - p.z) * dz) / (d * d)));
+      return (p.x + dx * t - o.x) ** 2 + (p.z + dz * t - o.z) ** 2 < (o.r + 0.35) ** 2;
+    });
+    if (!blocked) return out;
+    if (Math.hypot(CASTER_POS.x - this.chaseAt.x, CASTER_POS.z - this.chaseAt.z) > 0.4) {
+      this.chaseAt.x = this.chaseField.goal.x = CASTER_POS.x; this.chaseAt.z = this.chaseField.goal.z = CASTER_POS.z;
+      this.chaseField.rebuild();
+    }
+    const f = this.chaseField.dirAt(p.x, p.z);
+    return f ? out.set(f.x, 0, f.z) : out;
+  }
 
   /** 石阶、索桥上沿固定路线走的敌人不看流场：前面有土墙就原地等（等墙沉下去再走） */
   blockedAt(x, z) { return (this.temp || []).some((o) => (x - o.x) ** 2 + (z - o.z) ** 2 < (o.r + 0.4) ** 2); }
@@ -348,7 +376,7 @@ export class Enemies {
         if (!held) {
           const dx = CASTER_POS.x - e.pos.x, dz = CASTER_POS.z - e.pos.z, d = Math.hypot(dx, dz);
           if (d <= TOUCH_REACH) { this.hooks.touch?.(e); this.remove(e, 'touch'); continue; }
-          const want = this._p.set(dx / d, 0, dz / d);
+          const want = this.chaseDir(e.pos, dx, dz, d, this._p);
           e.dir.lerp(want, 1 - Math.exp(-8 * dt)).setY(0).normalize();
           let sx = 0, sz = 0;   // 同伴之间挤开一点
           for (const o of this.list) {

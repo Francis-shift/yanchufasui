@@ -135,24 +135,26 @@ export const BOSS = {
   spiral: { tele: 0.7, arms: [3, 3, 4], spin: 1.5, every: 0.14, sec: 2.4, speed: 5, dmg: 10, r: 0.3, weight: 2 },
 };
 /**
- * 试炼模式的玩家：气血、走速（米/秒）、闪避（冲多远、多少秒冲完、冷却；冲刺中不受伤）、挨打后多少秒不再受伤；
- * 小傀儡贴身自爆的伤害。
+ * 试炼模式的玩家：气血、走速（米/秒）、闪避（冲多远、多少秒冲完；冲刺中不受伤）、挨打后多少秒不再受伤；小傀儡贴身自爆的伤害。
+ * 精力（10-27 本人提议）：满 max 格，闪一次花 1 格，每 regen 秒回 1 格；两次闪避之间至少隔 gap 秒（从按下算）。
  * 完美闪避：招落下前 window 秒内才闪、而且闪之前本来站在打得到的地方（或冲刺中被冰锥穿过）——周身爆白光、顿帧 stop 秒，
- * 回 mana 点法力、加 gauge 点气势，闪避冷却清零。
+ * 回 mana 点法力、加 gauge 点气势、回 stamina 格精力。
  */
-export const TRIAL = { hp: 100, speed: 4.2, dash: { dist: 3.6, sec: 0.18, cd: 0.9 }, hurtGrace: 0.7, touchDmg: 8,
-  perfect: { window: 0.3, stop: 0.2, mana: 10, gauge: 1 } };
+export const TRIAL = { hp: 100, speed: 4.2, dash: { dist: 3.6, sec: 0.18, gap: 0.35 }, stamina: { max: 3, regen: 1.2 },
+  hurtGrace: 0.7, touchDmg: 8, perfect: { window: 0.3, stop: 0.2, mana: 10, gauge: 1, stamina: 1 } };
 /**
  * 试炼的一局（设计文档第 4 节"试炼模式：一局与奖励"，10-27 定；初值，试玩再调）：
- * 小怪潮第几段出几只小傀儡（n）、开打后 first 秒冒第一只、之后每 every 秒冒一只，从广场边上离玩家至少 away 米处冒出；
+ * 小怪潮第几段出几只小傀儡（n）；开打后 first 秒冒第一批，之后隔 gap 秒（区间里随机）冒一批 batch 只（随机），
+ * 每只落在广场上随机一处、离玩家至少 away 米，先冒 warn 秒紫烟再出来；场上同时最多 alive 只，满了等打掉再冒（10-27 本人：数量少、要随机刷新）；
  * 一段打完（小怪清空、boss 碎了）喘 rest 秒再选卡；每局重抽 rerolls 次；已经押过的元素，带这个元素的卡出现的分量 × owned。
  * 心法的数：见切把完美闪避窗口放到 window 秒，聚气完美闪避加 gauge 格，回元法力回复 × regen，龙吟召龙只要 ult 格；
  * 刹那：完美闪避后 slow.sec 秒（现实时间）全场慢到 slow.scale 倍，自己照常快；反手：完美闪避后 counter.sec 秒内下一招 × counter.mult；
  * 残影：闪避处留一个残影 ghost.sec 秒，追踪冰锥改追它、撞上就碎（ghost.r 是它的身宽）；余威：龙落地后 after.sec 秒内所有招 × after.mult。
- * 招式字升级（「爆·二」「墙·二」「雨·二」）：范围 × up（墙按段数算，5 段变 7 段）。
+ * 招式字升级（「爆·二」「墙·二」「雨·二」）：范围 × up（墙按段数算，5 段变 7 段）、伤害 × upDmg（10-27 本人：只加范围不够）。
  */
 export const RUN = {
-  wave: { n: [8, 10, 12], first: 1.2, every: 2.2, away: 6 }, rest: 1.6, rerolls: 1, owned: 2, up: 1.35,
+  wave: { n: [16, 22, 28], first: 1.2, gap: [1.2, 2.8], batch: [2, 3], away: 5, warn: 0.8, alive: 10 }, rest: 1.6, rerolls: 1, owned: 2,
+  up: 1.35, upDmg: 1.3,
   arts: { window: 0.45, gauge: 2, regen: 1.3, ult: 6, slow: { sec: 1, scale: 0.3 }, counter: { sec: 1.5, mult: 1.5 },
     ghost: { sec: 1.5, r: 0.45 }, after: { sec: 4, mult: 1.3 } },
 };

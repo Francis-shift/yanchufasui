@@ -40,7 +40,8 @@ test('一局：小怪潮开头，小怪潮与三个 boss 交替，每段之间�
     if (b.kind === 'pick') assert.equal(!!b.insight, a.kind === 'boss', `第 ${i + 1} 段：只有打完 boss 那次是领悟`);
   }
   const W = RUN.wave;
-  assert.ok(W.first + (W.n[0] - 1) * W.every < 30, '第一段小怪 30 秒内冒完，第一次选卡赶得上 1 分钟');
+  // 最慢的情形：每批都只冒最少的只数、每次都隔最久
+  assert.ok(W.first + (Math.ceil(W.n[0] / W.batch[0]) - 1) * W.gap[1] + W.warn < 30, '第一段小怪 30 秒内冒完，第一次选卡赶得上 1 分钟');
 });
 
 test('卡池：编号不重复，名字每个字都在书法字表里，说明不空', () => {
@@ -230,7 +231,7 @@ test('招式字能换进哪几个按钮：形态哪个都行（升过级的同�
   assert.deepEqual(moveTargets(sky, byId('sky'), ELS), ['ice'], '火已经天降');
 });
 
-test('换进按钮：按钮的招跟着变，写过咒的按钮这个元素的那一步也换；学过的形态再换进来是升级，范围 × RUN.up', () => {
+test('换进按钮：按钮的招跟着变，写过咒的按钮这个元素的那一步也换；学过的形态再换进来是升级，范围 × RUN.up、伤害 × RUN.upDmg', () => {
   let run = take(newRun(), byId('rain'), 'fire');
   assert.equal(buttonMove(run, 'fire').form, 'rain');
   assert.deepEqual(run.invest, ['fire']);
@@ -241,10 +242,15 @@ test('换进按钮：按钮的招跟着变，写过咒的按钮这个元素的�
   assert.equal(limitToLearned(spell(step('fire', 'rain')), run, 'ice').steps[0].form, 'rain', '火学会了雨，装在别的按钮上的火雨也放得出');
   assert.equal(limitToLearned(spell(step('ice', 'rain')), run, 'fire').steps[0].form, 'bolt', '冰没学过雨');
   // 再拿一次雨换进火：升级
-  assert.deepEqual(previewMove(run, byId('rain'), 'fire'), { name: '火雨·二', up: true });
+  assert.deepEqual(previewMove(run, byId('rain'), 'fire'), { name: '火雨·二', up: true, lost: [] });
+  const before = planCast(limitToLearned(defaultIntent('fire'), run, 'fire'), { mana: MANA_MAX, button: true, seen: ['fire+rain'] });
   run = take(run, byId('rain'), 'fire');
-  assert.equal(limitToLearned(defaultIntent('fire'), run, 'fire').steps[0].wide, RUN.up);
+  const upFire = limitToLearned(defaultIntent('fire'), run, 'fire');
+  assert.equal(upFire.steps[0].wide, RUN.up);
   assert.equal(limitToLearned(defaultIntent('ice'), run, 'ice').steps[0].wide, undefined);
+  const after = planCast(upFire, { mana: MANA_MAX, button: true, seen: ['fire+rain'] });
+  assert.ok(Math.abs(after.steps[0].dmgTotal - before.steps[0].dmgTotal * RUN.upDmg) < 1e-9, '升级后伤害 × upDmg');
+  assert.equal(after.cost, before.cost, '消耗不变');
   // 风本命就是爆，换一张爆进去直接升级
   const wind = take(newRun(), byId('burst'), 'wind');
   assert.equal(limitToLearned(defaultIntent('wind'), wind, 'wind').steps[0].wide, RUN.up);
@@ -252,6 +258,10 @@ test('换进按钮：按钮的招跟着变，写过咒的按钮这个元素的�
   // 弹的轨迹、颗数叠在一起；换成别的形态后就没有了
   let bolt = take(take(newRun(), byId('sky'), 'ice'), byId('three'), 'ice');
   assert.equal(moveName(bolt, 'ice', buttonMove(bolt, 'ice')), '冰弹×3·天降');
+  // 选按钮时提醒：弹换成墙，天降、三颗不再生效；换绕后顶掉天降；没学过轨迹、颗数的不提醒
+  assert.deepEqual(previewMove(bolt, byId('wall'), 'ice').lost, ['天降', '三颗']);
+  assert.deepEqual(previewMove(bolt, byId('behind'), 'ice').lost, ['天降']);
+  assert.deepEqual(previewMove(newRun(), byId('wall'), 'ice').lost, []);
   bolt = take(bolt, byId('wall'), 'ice');
   assert.deepEqual(buttonMove(bolt, 'ice'), { form: 'wall', path: 'straight', count: 1 });
 });

@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { damageTo } from '../game/rules/arbiter.js';
-import { BOSS, ENEMIES, TRIAL } from '../game/rules/numbers.js';
+import { BOSS, ENEMIES, RUN, TRIAL } from '../game/rules/numbers.js';
 import {
-  bossHit, bossPhase, homingTurn, inCircle, inSector, isPerfect, keepInArena, pickMove, recoverSec, slamCount, spiralAngles, teleSec,
+  bossHit, bossPhase, canDash, homingTurn, inCircle, inSector, isPerfect, keepInArena, nextBatch, pickMove, recoverSec, regenStamina, slamCount,
+  spawnSpot, spiralAngles, teleSec,
 } from '../game/rules/trial.js';
 
 const MAX = ENEMIES.boss.hp;
@@ -150,4 +151,54 @@ test('走位：撞进障碍推到边上，走出广场拉回来', () => {
   const q = keepInArena({ x: 30, z: 40 }, [], 10);
   assert.ok(Math.abs(Math.hypot(q.x, q.z) - 10) < 1e-9);
   assert.ok(q.x > 0 && q.z > 0, '方向不变');
+});
+
+test('精力：够 1 格、离上次按闪避过了间隙才闪得出；每 regen 秒回 1 格，不超过上限', () => {
+  const S = TRIAL.stamina, G = TRIAL.dash.gap;
+  assert.equal(canDash(S.max, Infinity), true);
+  assert.equal(canDash(0.99, Infinity), false, '差一点不到 1 格闪不出');
+  assert.equal(canDash(S.max, G - 0.01), false, '连按太快：间隙没到');
+  // 满格狂按 6 秒（每 0.05 秒按一下）：前 max 下隔着间隙连着闪出来，之后要等精力回上来，大约每 regen 秒一下
+  const dt = 0.05, at = /** @type {number[]} */ ([]);
+  let s = S.max;
+  for (let i = 0; i < 120; i++) {
+    const t = i * dt;
+    if (canDash(s, at.length ? t - at[at.length - 1] + 1e-9 : Infinity)) { s -= 1; at.push(t); }
+    s = regenStamina(s, dt);
+  }
+  for (let i = 1; i < S.max; i++) assert.ok(at[i] - at[i - 1] <= G + dt + 1e-9, `第 ${i + 1} 下跟着间隙连上`);
+  assert.ok(at[S.max] - at[S.max - 1] > G + dt, '满格用完要等精力');
+  const tail = at.slice(S.max), avg = (tail[tail.length - 1] - tail[0]) / (tail.length - 1);
+  assert.ok(Math.abs(avg - S.regen) <= dt + 1e-9, `用完之后平均 ${avg.toFixed(2)} 秒一下`);
+  assert.equal(regenStamina(0, S.regen), 1);
+  assert.equal(regenStamina(S.max - 0.1, 10), S.max);
+  // 完美闪避回的精力不比闪一次花的多：冲刺中被打到也算完美，不能靠它无限闪
+  assert.ok(TRIAL.perfect.stamina <= 1);
+  assert.ok(G > TRIAL.dash.sec, '两次闪避之间有一段不是无敌的');
+});
+
+/** 固定种子的随机数 @param {number} seed */
+const seeded = (seed) => () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+
+test('小怪潮：每批冒的只数、间隔在设定的区间里，不超过还剩的；落点在广场上、离玩家够远', () => {
+  const W = RUN.wave, rnd = seeded(7);
+  for (let i = 0; i < 200; i++) {
+    const b = nextBatch(10, rnd);
+    assert.ok(b.n >= W.batch[0] && b.n <= W.batch[1]);
+    assert.ok(b.gap >= W.gap[0] && b.gap <= W.gap[1]);
+  }
+  assert.equal(nextBatch(1, rnd).n, 1, '只剩一只就冒一只');
+  const R = 8, me = { x: 2, z: 1 }, block = [{ x: 0, z: 0, r: 1.5 }];
+  const spots = Array.from({ length: 300 }, () => spawnSpot(rnd, me, R, W.away, block));
+  for (const p of spots) {
+    assert.ok(Math.hypot(p.x, p.z) <= R + 1e-9, '在广场上');
+    assert.ok(Math.hypot(p.x, p.z) >= 1.5 + 0.3 - 1e-9, '不在障碍里');
+    assert.ok(Math.hypot(p.x - me.x, p.z - me.z) >= W.away, '离玩家够远');
+  }
+  // 随机：落点散在四个象限里，不是只在一条边上
+  const quads = new Set(spots.map((p) => `${p.x > 0}${p.z > 0}`));
+  assert.equal(quads.size, 4);
+  // 广场太小、离谁都近：取试过里最远的，不卡死
+  const p = spawnSpot(rnd, { x: 0, z: 0 }, 2, 10, []);
+  assert.ok(Math.hypot(p.x, p.z) <= 2 + 1e-9);
 });

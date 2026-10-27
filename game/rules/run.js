@@ -149,15 +149,17 @@ export function moveName(run, el, m) {
  * @param {Run} run @param {Card} c @param {string} el
  */
 export function previewMove(run, c, el) {
-  const next = take(run, c, el);
-  return { name: moveName(next, el, buttonMove(next, el)), up: !!MOVE_SET[c.id]?.form && knows(run, el, c.id) };
+  const next = take(run, c, el), now = buttonMove(run, el), after = buttonMove(next, el);
+  // 弹换成别的形态：学过的轨迹、颗数从此不起作用（卡池里没有「弹」，换不回来），卡上要提醒
+  const lost = [...(now.path !== after.path && CHAR[now.path] ? [CHAR[now.path]] : []), ...(now.count > after.count ? ['三颗'] : [])];
+  return { name: moveName(next, el, after), up: !!MOVE_SET[c.id]?.form && knows(run, el, c.id), lost };
 }
 
 /**
  * 试炼里按钮放出去之前过一遍（守关不过这一遍，所有招全开）：
  *   - 装在 btn 这个按钮上的，这个元素的步换成按钮现在的招（换过的那几栏）；
  *   - 每一步写了没学会的形态、轨迹、颗数，按这个元素按钮现在的招放（轨迹按直线、颗数按学会的），notes 里记一句（咒语卡标灰）；
- *   - 升过级的形态带上范围倍数 wide。
+ *   - 升过级的形态带上范围倍数 wide、伤害倍数 upDmg。
  * @param {import('./intent.js').Intent} intent @param {Run} run @param {string} [btn]
  * @returns {import('./intent.js').Intent}
  */
@@ -173,7 +175,7 @@ export function limitToLearned(intent, run, btn) {
     if (s.path !== 'straight' && !knows(run, s.el, s.path)) { note(`尚未领悟「${CHAR[s.path] ?? s.path}」，按直线放`); s.path = 'straight'; }
     const most = knows(run, s.el, 'three') ? 3 : 1;
     if (s.count > most) { note('尚未领悟「三颗」，按一颗放'); s.count = most; }
-    if (upgraded(run, s.el, s.form)) s.wide = RUN.up; else delete s.wide;
+    if (upgraded(run, s.el, s.form)) { s.wide = RUN.up; s.upDmg = RUN.upDmg; } else { delete s.wide; delete s.upDmg; }
     return s;
   });
   return { ...intent, steps, notes: [...intent.notes, ...notes] };

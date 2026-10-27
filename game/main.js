@@ -19,7 +19,7 @@ import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
 import { maskText } from './rules/safety.js';
 import {
-  BOSS_COUNT, CARDS, KIND_NAMES, artBoost, boostPlan, buttonMove, limitToLearned, moveTargets, newRun, offer, previewMove, reroll as rerollCards,
+  BOSS_COUNT, CARDS, KIND_NAMES, artBoost, boostPlan, buttonMove, limitToLearned, moveName, moveTargets, newRun, offer, previewMove, reroll as rerollCards,
   runFusions, runMods, skip as skipCards, take as takeCard, upLabel,
 } from './rules/run.js';
 import {
@@ -407,8 +407,11 @@ export function start(root, opts = {}) {
       const els = moveTargets(S.run, c, S.talents);
       hud.showPicks(els.map((el) => {
         const now = buttonMove(S.run, el), next = previewMove(S.run, c, el);
+        // 弹换成别的：学过的天降、绕后、三颗从此不起作用（换不回弹），写明（10-27 本人要的提醒）
+        const lost = next.lost.length ? `。换掉后，${next.lost.join('、')}不再生效` : '';
         return { kind: `${elName(el)}的按钮`, name: next.name, el, insight: false,
-          text: next.up ? `「${c.name}」升级：范围更大` : `现在是${elName(el)}${FORMS[now.form].name}${now.count > 1 ? `×${now.count}` : ''}，换成「${c.name}」` };
+          text: next.up ? `「${c.name}」升级：范围 ×${RUN.up}、伤害 ×${RUN.upDmg}`
+            : `现在是${moveName(S.run, el, now)}，换成「${c.name}」${lost}` };
       }), {
         title: `把哪个按钮换成「${c.name}」`, sub: '点一下就换好；写过咒的按钮，这个元素的那一步也跟着换', rerolls: null, skipText: '返回',
         pick: (i) => {
@@ -1216,15 +1219,21 @@ export function start(root, opts = {}) {
         stage: trial.stage, round: trial.round, waveLeft: trial.waveLeft, runT: Math.round(trial.runT), perfects: trial.perfects,
         run: { picks: S.run.picks, rerolls: S.run.rerolls, have: { ...S.run.have } }, mods: { ...S.mods },
         arts: { slow: +S.slowT.toFixed(2), counter: +S.counterT.toFixed(2), after: +S.afterT.toFixed(2), ghost: +trial.ghostT.toFixed(2) },
+        stamina: +trial.stamina.toFixed(2), pending: trial.pending.length,
         ghostAt: [+trial.ghost.position.x.toFixed(2), +trial.ghost.position.z.toFixed(2)], shots: trial.bullets.map((o) => [+o.x.toFixed(1), +o.z.toFixed(1)]) };
     },
-    /** 试炼：直接拿一张卡（心法、领悟这类不用选按钮的），测心法用 */
-    give: (id) => { const c = CARDS.find((x) => x.id === id); if (c) { S.run = takeCard(S.run, c); applyMods(); } return { ...S.mods }; },
+    /** 试炼：直接拿一张卡；招式字给 el 就换进那个元素的按钮 */
+    give: (id, el) => {
+      const c = CARDS.find((x) => x.id === id);
+      if (c) { S.run = takeCard(S.run, c, el); applyMods(); }
+      if (c && el) { const l = skillLabel(el); hud.setSkillLabel(el, l.label, l.named); }
+      return { ...S.mods };
+    },
     /** 试炼：把玩家的气血设成 n（测的时候别被打死） */
     hp: (n = TRIAL.hp) => { trial.hp = n; hud.setCore(n, TRIAL.hp); },
     /** 试炼：跳过这一段（小怪潮清场 / boss 直接碎），看下一段 */
     skipStage: () => {
-      trial.waveLeft = 0;
+      trial.waveLeft = 0; trial.pending.length = 0;
       for (const e of [...enemies.list]) if (e.chase) enemies.kill(e, e.pos);
       if (trial.boss) enemies.kill(trial.boss, trial.boss.pos);
     },
