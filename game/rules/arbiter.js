@@ -30,9 +30,11 @@ export function totalCost(steps) {
  * @typedef {import('./intent.js').Intent} Intent
  * @typedef {import('./intent.js').Step} Step
  * @typedef {{ mana: number, lastCombo?: { key: string, streak: number } | null,
- *             seen?: Iterable<string>, said?: Iterable<string>, text?: string, gauge?: number, ult?: number, button?: boolean }} CastContext
+ *             seen?: Iterable<string>, said?: Iterable<string>, text?: string, gauge?: number, ult?: number, button?: boolean,
+ *             fusions?: string[] }} CastContext
  *   button：按天赋按钮放的——不按描写加气势槽（按键的气势看打法，见 talents.js buttonGaugeGain）
  *   ult：召龙要几格气势（默认 ULT_GAUGE；试炼拿了心法「龙吟」变少，见 run.js runMods）
+ *   fusions：能合成哪些融合（默认 FUSION_OPEN；试炼里只有领悟了的合字，见 run.js runFusions）
  * @typedef {Step & { cost: number, dmgTotal: number, dmgEach: number, first: boolean, repeat: number,
  *             fusion?: string, fusionName?: string, idiom?: string }} PlannedStep fusion 是融合的键（如 wind>fire）
  * @typedef {{ el: string, name: string, target: string, dmg: number, radius: number, cast: boolean, ghost: boolean,
@@ -99,7 +101,7 @@ export function planCast(intent, ctx) {
     planned.push({ ...s, cost: Math.round(stepCost(s)), dmgTotal, dmgEach: s.form === 'bolt' ? dmgTotal / s.count : dmgTotal,
       first, repeat });
   }
-  fuse(planned, seen, newlySeen);
+  fuse(planned, seen, newlySeen, ctx.fusions);
   return {
     ok, steps: planned, cost: ok ? totalCost(steps) : 0, momentum, momentumHalved, downgrades,
     backlash: intent.overreach, gaugeGain: ok && !ctx.button ? momentum : 0,
@@ -155,13 +157,13 @@ function planSummon(intent, ctx) {
  * 合成后的一步按"爆"的样子结算范围（具体怎么演由 fusion 键决定），伤害 = 两步之和 × 1.2，
  * 第一次用出这种融合再 × 1.2（图鉴单独一格）。消耗不变：总价本来就是两步之和打八折。
  * @param {PlannedStep[]} planned 会被就地修改
- * @param {Set<string>} seen @param {string[]} newlySeen
+ * @param {Set<string>} seen @param {string[]} newlySeen @param {string[]} [open] 能合成的融合（试炼里是领悟了的合字）
  */
-export function fuse(planned, seen, newlySeen) {
+export function fuse(planned, seen, newlySeen, open = FUSION_OPEN) {
   for (let i = 0; i + 1 < planned.length; i++) {
     const a = planned[i], b = planned[i + 1];
     const key = `${a.el}>${b.el}`;
-    if (a.el === b.el || a.target !== b.target || !FUSION_OPEN.includes(key)) continue;
+    if (a.el === b.el || a.target !== b.target || !open.includes(key)) continue;
     const f = FUSIONS[/** @type {keyof typeof FUSIONS} */ (key)];
     const seenKey = `融合:${key}`;
     const first = !seen.has(seenKey);

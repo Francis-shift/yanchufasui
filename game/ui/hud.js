@@ -537,10 +537,14 @@ export class Hud {
   /**
    * 试炼的三选一。卡：种类（招式字、心法……）、书法名字（再拿是升级，名字后带「·二」）、说明、颜色（带元素的用元素色）。
    * 点卡、或按 1～3 拿那一张（按键由 main.js 转给 pickOn）；重抽每局有限，用完按钮灰掉。
+   * 拿了招式字接着用同一个框选"换哪个按钮"：换标题，不给重抽（rerolls 为 null），下面那个按钮改成"返回"。
    * @param {{ kind: string, name: string, text: string, el?: string, insight: boolean }[]} cards
-   * @param {{ sub: string, rerolls: number, pick: (i: number) => void, reroll: () => void, skip: () => void }} on
+   * @param {{ title?: string, sub: string, rerolls: number | null, skipText?: string,
+   *           pick: (i: number) => void, reroll: () => void, skip: () => void }} on
    */
   showPicks(cards, on) {
+    this.q('.yc-picks-title').textContent = on.title ?? '三选一';
+    /** @type {HTMLElement} */ (this.picks.querySelector('[data-skip]')).textContent = on.skipText ?? '不拿，回满气血与法力';
     const row = this.q('.yc-pick-row');
     row.innerHTML = '';
     cards.forEach((c, i) => {
@@ -552,8 +556,9 @@ export class Hud {
     });
     this.q('.yc-picks-sub').textContent = on.sub;
     const rr = /** @type {HTMLButtonElement} */ (this.picks.querySelector('[data-reroll]'));
+    rr.hidden = on.rerolls === null;
     rr.textContent = `重抽（还剩 ${on.rerolls} 次）`;
-    rr.disabled = on.rerolls <= 0 || !cards.length;
+    rr.disabled = !on.rerolls || !cards.length;
     this.pickOn = on;
     this.picks.hidden = false;
   }

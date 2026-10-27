@@ -4,10 +4,12 @@ import { test } from 'node:test';
 
 import { planCast, regenMana } from '../game/rules/arbiter.js';
 import { inCharset } from '../game/rules/charset.js';
-import { MANA_MAX, MANA_REGEN, RUN, TRIAL, ULT_GAUGE } from '../game/rules/numbers.js';
+import { FUSION_OPEN, MANA_MAX, MANA_REGEN, RUN, TRIAL, ULT_GAUGE } from '../game/rules/numbers.js';
 import {
-  BOSS_COUNT, CARDS, RUN_STAGES, eligible, newRun, offer, reroll, runMods, skip, take, upLabel, weight,
+  BOSS_COUNT, CARDS, RUN_STAGES, buttonMove, eligible, limitToLearned, moveName, moveTargets, native, newRun, offer, previewMove, reroll,
+  runFusions, runMods, skip, take, upLabel, weight,
 } from '../game/rules/run.js';
+import { combineButtons, defaultIntent } from '../game/rules/talents.js';
 import { isPerfect } from '../game/rules/trial.js';
 
 /** 固定种子的随机数，结果可复现 @param {number} seed */
@@ -88,10 +90,10 @@ test('出卡：只出效果做好的；某一类抽不出就从别的能出的�
   assert.ok(cards.length > 0 && cards.length <= 3);
   for (const c of cards) assert.ok(c.ready, `${c.name} 还没做好，不该出`);
   assert.ok(cards.every((c) => c.kind !== 'insight' || c.ready));
-  // 心法全拿完、别的又都没做好：一张也出不了
+  // 做好的卡全拿满、别的又都没做好：一张也出不了
   let full = newRun();
-  for (const c of CARDS.filter((x) => x.ready)) full = take(full, c);
-  assert.deepEqual(offer(full, { els: ELS, insight: false }, rng(3)), []);
+  for (const c of CARDS.filter((x) => x.ready)) for (let i = 0; i < c.max; i++) full = take(full, c);
+  assert.deepEqual(offer(full, { els: ELS, insight: true }, rng(3)), []);
 });
 
 test('押过的元素：带这个元素的卡出现的分量 × RUN.owned，抽到的次数约是两倍', () => {
@@ -111,14 +113,16 @@ test('押过的元素：带这个元素的卡出现的分量 × RUN.owned，抽�
   assert.ok(Math.abs(liao / N - 2 / 3) < 0.04, `抽到燎 ${liao}/${N}`);
 });
 
-test('拿了：记一级、再出带「·二」；不拿记一次；重抽每局一次、尽量不出刚才那几张', () => {
+test('拿了：记一级、再出带「·二」（招式字不在卡上标，选按钮时标）；不拿记一次；重抽每局一次、尽量不出刚才那几张', () => {
   let run = newRun();
   const b = byId('burst');
-  assert.equal(upLabel(run, b), '');
+  const twice = { ...byId('po'), max: 2 };
+  assert.equal(upLabel(run, twice), '');
+  assert.equal(upLabel(take(run, twice), twice), '·二');
   run = take(run, b, 'ice');
   assert.equal(run.picks, 1);
   assert.equal(run.have.burst, 1);
-  assert.equal(upLabel(run, b), '·二');
+  assert.equal(upLabel(run, b), '');
   const s = skip(run);
   assert.equal(s.picks, 2);
   assert.equal(s.skips, 1);
@@ -155,4 +159,94 @@ test('心法加成：没拿是原值；见切放宽完美闪避窗口、聚气�
   const ctx = { mana: MANA_MAX, gauge: RUN.arts.ult, button: true };
   assert.equal(planCast(summon, ctx).summon?.cast, false);
   assert.equal(planCast(summon, { ...ctx, ult: m.ult }).summon?.cast, true);
+});
+
+/** 一步法术（按钮写的咒清洗后长这样） */
+const step = (el, form, o = {}) => ({ el, form, target: 'front', power: 2, count: 1, path: 'straight', words: {}, ...o });
+const spell = (...steps) => ({ steps, momentum: 0, name: '', unknown: [], overreach: false, notes: [], summon: null });
+
+test('开局只会本命招：火、冰、雷是弹，风是爆，土是墙，单颗、直线', () => {
+  const run = newRun();
+  assert.deepEqual(native('fire'), { form: 'bolt', path: 'straight', count: 1 });
+  for (const [el, form] of [['fire', 'bolt'], ['ice', 'bolt'], ['thunder', 'bolt'], ['wind', 'burst'], ['earth', 'wall']]) {
+    assert.equal(buttonMove(run, el).form, form, el);
+    assert.deepEqual(limitToLearned(defaultIntent(el), run, el).steps.map((s) => s.form), [form], `${el} 的默认招照常放`);
+  }
+});
+
+test('写了没学会的形态、轨迹、颗数：按这个元素按钮现在的招放，标灰「尚未领悟」', () => {
+  const run = newRun();
+  const rain = limitToLearned(spell(step('fire', 'rain')), run, 'fire');
+  assert.equal(rain.steps[0].form, 'bolt');
+  assert.deepEqual(rain.notes, ['尚未领悟「雨」，按「弹」放']);
+  const fancy = limitToLearned(spell(step('fire', 'bolt', { count: 3, path: 'sky' })), run, 'fire');
+  assert.equal(fancy.steps[0].count, 1);
+  assert.equal(fancy.steps[0].path, 'straight');
+  assert.deepEqual(fancy.notes, ['尚未领悟「天降」，按直线放', '尚未领悟「三颗」，按一颗放']);
+  // 装在火按钮上的句子里有一步冰爆：冰没学过爆，按冰的弹放
+  const mixed = limitToLearned(spell(step('fire', 'bolt'), step('ice', 'burst')), run, 'fire');
+  assert.deepEqual(mixed.steps.map((s) => s.form), ['bolt', 'bolt']);
+  assert.deepEqual(mixed.notes, ['尚未领悟「爆」，按「弹」放']);
+  // 风本来就会爆
+  assert.deepEqual(limitToLearned(spell(step('wind', 'burst')), run, 'wind').notes, []);
+});
+
+test('招式字能换进哪几个按钮：形态哪个都行（升过级的同形态除外）；天降、绕后、三颗只换得了弹', () => {
+  const run = newRun();
+  assert.deepEqual(moveTargets(run, byId('burst'), ELS), ['fire', 'ice', 'wind'], '风已是爆：换进去是升级');
+  assert.deepEqual(moveTargets(run, byId('sky'), ['fire', 'wind', 'earth']), ['fire']);
+  assert.deepEqual(moveTargets(run, byId('three'), ['wind', 'earth']), []);
+  assert.equal(eligible(byId('three'), run, ['wind', 'earth']), false, '没有弹的按钮，不出「三颗」');
+  const up = take(run, byId('burst'), 'wind');
+  assert.deepEqual(moveTargets(up, byId('burst'), ELS), ['fire', 'ice'], '风的爆升过级了');
+  const sky = take(run, byId('sky'), 'fire');
+  assert.deepEqual(moveTargets(sky, byId('sky'), ELS), ['ice'], '火已经天降');
+});
+
+test('换进按钮：按钮的招跟着变，写过咒的按钮这个元素的那一步也换；学过的形态再换进来是升级，范围 × RUN.up', () => {
+  let run = take(newRun(), byId('rain'), 'fire');
+  assert.equal(buttonMove(run, 'fire').form, 'rain');
+  assert.deepEqual(run.invest, ['fire']);
+  assert.equal(limitToLearned(defaultIntent('fire'), run, 'fire').steps[0].form, 'rain', '没写咒的火按钮放火雨');
+  const bound = limitToLearned(spell(step('fire', 'bolt', { target: 'strongest' })), run, 'fire');
+  assert.equal(bound.steps[0].form, 'rain', '写了「火弹」的火按钮也换成雨');
+  assert.equal(bound.steps[0].target, 'strongest', '打谁照原话');
+  assert.equal(limitToLearned(spell(step('fire', 'rain')), run, 'ice').steps[0].form, 'rain', '火学会了雨，装在别的按钮上的火雨也放得出');
+  assert.equal(limitToLearned(spell(step('ice', 'rain')), run, 'fire').steps[0].form, 'bolt', '冰没学过雨');
+  // 再拿一次雨换进火：升级
+  assert.deepEqual(previewMove(run, byId('rain'), 'fire'), { name: '火雨·二', up: true });
+  run = take(run, byId('rain'), 'fire');
+  assert.equal(limitToLearned(defaultIntent('fire'), run, 'fire').steps[0].wide, RUN.up);
+  assert.equal(limitToLearned(defaultIntent('ice'), run, 'ice').steps[0].wide, undefined);
+  // 风本命就是爆，换一张爆进去直接升级
+  const wind = take(newRun(), byId('burst'), 'wind');
+  assert.equal(limitToLearned(defaultIntent('wind'), wind, 'wind').steps[0].wide, RUN.up);
+  assert.equal(moveName(wind, 'wind', buttonMove(wind, 'wind')), '风爆·二');
+  // 弹的轨迹、颗数叠在一起；换成别的形态后就没有了
+  let bolt = take(take(newRun(), byId('sky'), 'ice'), byId('three'), 'ice');
+  assert.equal(moveName(bolt, 'ice', buttonMove(bolt, 'ice')), '冰弹×3·天降');
+  bolt = take(bolt, byId('wall'), 'ice');
+  assert.deepEqual(buttonMove(bolt, 'ice'), { form: 'wall', path: 'straight', count: 1 });
+});
+
+test('合字：领悟前两个按钮先后按只是组合（各放各的、八折），领悟后同样的按法合成融合；守关照常全开', () => {
+  const run = newRun();
+  assert.deepEqual(runFusions(run), []);
+  const press = (r) => combineButtons(['fire', 'wind'].map((el) => limitToLearned(defaultIntent(el), r, el)));
+  const ctx = { mana: MANA_MAX, button: true };
+  const before = planCast(press(run), { ...ctx, fusions: runFusions(run) });
+  assert.equal(before.steps.length, 2);
+  assert.ok(before.steps.every((s) => !s.fusion));
+  const learned = take(run, byId('he-fire-wind'));
+  assert.deepEqual(runFusions(learned), ['fire>wind']);
+  const after = planCast(press(learned), { ...ctx, fusions: runFusions(learned) });
+  assert.equal(after.steps.length, 1);
+  assert.equal(after.steps[0].fusionName, '豪火灭却');
+  assert.equal(after.cost, before.cost, '消耗不变');
+  // 只领悟了先火后风：先风后火仍是组合
+  const wf = combineButtons(['wind', 'fire'].map((el) => limitToLearned(defaultIntent(el), learned, el)));
+  assert.ok(planCast(wf, { ...ctx, fusions: runFusions(learned) }).steps.every((s) => !s.fusion));
+  // 守关不传 fusions：按 FUSION_OPEN 全开
+  assert.equal(planCast(press(run), ctx).steps[0].fusion, 'fire>wind');
+  assert.ok(FUSION_OPEN.includes('wind>fire'));
 });

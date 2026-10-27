@@ -36,7 +36,8 @@ const WORD_MAX = 12;
 
 /**
  * @typedef {{ el: string, form: string, target: string, power: number, count: number, path: string,
- *             words: Record<string, string> }} Step
+ *             words: Record<string, string>, wide?: number }} Step
+ *   wide：范围倍数（试炼里招式字升级，如「爆·二」，见 run.js limitToLearned；没有就是 1）
  * @typedef {{ steps: Step[], momentum: number, name: string, unknown: string[], overreach: boolean,
  *             notes: string[], summon?: string | null }} Intent summon 是点名召唤的龙（按元素，如 ice = 冰龙），没有为 null
  */

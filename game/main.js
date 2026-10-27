@@ -19,7 +19,8 @@ import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
 import { maskText } from './rules/safety.js';
 import {
-  BOSS_COUNT, KIND_NAMES, newRun, offer, reroll as rerollCards, runMods, skip as skipCards, take as takeCard, upLabel,
+  BOSS_COUNT, KIND_NAMES, buttonMove, limitToLearned, moveTargets, newRun, offer, previewMove, reroll as rerollCards, runFusions, runMods,
+  skip as skipCards, take as takeCard, upLabel,
 } from './rules/run.js';
 import {
   bindSpell, buttonGaugeGain, combineButtons, defaultIntent, elName, scrollsFor, synergies, talentOpen, toggleTalent,
@@ -298,7 +299,7 @@ export function start(root, opts = {}) {
     barrier.reset();
     S.talents = [...S.talents].sort((a, b) => TALENTS.indexOf(a) - TALENTS.indexOf(b));
     S.binds = Object.fromEntries(Object.entries(S.binds).filter(([k]) => S.talents.includes(k)));
-    hud.setSkills(S.talents.map((el) => ({ el, label: S.binds[el]?.name || elName(el), named: !!S.binds[el] })),
+    hud.setSkills(S.talents.map((el) => ({ el, ...skillLabel(el) })),
       { cast: pressTalent, pen: openWrite, summon: pressSummon, dash: mode === 'trial' ? () => trial.dash() : undefined });
     hud.setCore(S.core, CORE_HP);
     if (mode === 'trial') trial.prepare();   // 试炼：战前先写咒、试招，点"开战"boss 才出来
@@ -376,6 +377,7 @@ export function start(root, opts = {}) {
       pick: (i) => {
         const c = cards[i];
         if (!c) return;
+        if (c.kind === 'move') { chooseButton(c); return; }
         S.run = takeCard(S.run, c);
         applyMods();
         hud.floatText(hud.root.clientWidth / 2, hud.root.clientHeight * 0.4, `学会「${c.name}」`, '#16202b');
@@ -394,6 +396,29 @@ export function start(root, opts = {}) {
         close();
       },
     });
+    /** 拿了招式字：选把哪个按钮换掉（卡上写换完是什么招；同一个形态再换进来是升级）；"返回"回到三张卡 @param {import('./rules/run.js').Card} c */
+    const chooseButton = (c) => {
+      const els = moveTargets(S.run, c, S.talents);
+      hud.showPicks(els.map((el) => {
+        const now = buttonMove(S.run, el), next = previewMove(S.run, c, el);
+        return { kind: `${elName(el)}的按钮`, name: next.name, el, insight: false,
+          text: next.up ? `「${c.name}」升级：范围更大` : `现在是${elName(el)}${FORMS[now.form].name}${now.count > 1 ? `×${now.count}` : ''}，换成「${c.name}」` };
+      }), {
+        title: `把哪个按钮换成「${c.name}」`, sub: '点一下就换好；写过咒的按钮，这个元素的那一步也跟着换', rerolls: null, skipText: '返回',
+        pick: (i) => {
+          const el = els[i];
+          if (!el) return;
+          S.run = takeCard(S.run, c, el);
+          applyMods();
+          const l = skillLabel(el);
+          hud.setSkillLabel(el, l.label, l.named);
+          hud.floatText(hud.root.clientWidth / 2, hud.root.clientHeight * 0.4, `${elName(el)}的按钮学会「${c.name}」`, '#16202b');
+          close();
+        },
+        reroll: () => {},
+        skip: show,
+      });
+    };
     const close = () => {
       hud.closePicks();
       frozen = false;
@@ -507,21 +532,23 @@ export function start(root, opts = {}) {
   const groundPt = (pt) => new THREE.Vector3(pt.x, (groundHeightAt(pt.x, pt.z) ?? 0) + 0.4, pt.z);
   let castSeq = 0;
 
+  /** 墙有几段：升过级的（「墙·二」）按范围倍数加长 @param {{ wide?: number }} s */
+  const wallSegments = (s) => Math.round(FORMS.wall.segments * (s.wide ?? 1));
+
   /**
    * 每一步打谁，在放出之前就定下来：锁定标记亮的就是之后真正打的。
-   * @param {{ el: string, form: string, target: string, count: number }[]} steps
+   * @param {{ el: string, form: string, target: string, count: number, wide?: number }[]} steps
    * @param {number} [m] 气势档（范围随气势变大，圈也跟着大）
    */
   function lockSteps(steps, m = 0) {
     const views = enemies.views();
     const resolved = steps.map((s) => resolveTarget(s.target, views, { count: s.count, caster: CASTER_POS, objects: OBJECTS }));
-    const k = MOMENTUM_RANGE[m] ?? 1;
     const marks = steps.map((s, i) => {
-      const res = resolved[i];
+      const res = resolved[i], k = (MOMENTUM_RANGE[m] ?? 1) * (s.wide ?? 1);
       const heads = s.form === 'bolt' ? res.ids.slice(0, s.count) : [];
       const ring = !heads.length && res.point
         ? { x: res.point.x, y: groundHeightAt(res.point.x, res.point.z) ?? 0, z: res.point.z,
-            r: { bolt: 0.8, burst: FORMS.burst.radius * k, rain: RAIN.spread * k, wall: ((FORMS.wall.segments - 1) / 2) * WALL.gap + 0.5 }[s.form] ?? 1 }
+            r: { bolt: 0.8, burst: FORMS.burst.radius * k, rain: RAIN.spread * k, wall: ((wallSegments(s) - 1) / 2) * WALL.gap + 0.5 }[s.form] ?? 1 }
         : null;
       return { el: s.el, ids: heads, ring };
     });
@@ -580,7 +607,7 @@ export function start(root, opts = {}) {
     const firstEl = intent.summon && intent.summon !== 'thunder' ? intent.summon : intent.steps[0]?.el;
     if (firstEl) fx.retint(firstEl);
     const plan = planCast(intent, { mana: S.mana, lastCombo: S.lastCombo, seen: S.seen, said: S.said, text: c.button ? '' : text,
-      gauge: S.gauge, ult: S.mods.ult, button: !!c.button });
+      gauge: S.gauge, ult: S.mods.ult, button: !!c.button, fusions: castFusions() });
     S.mana -= plan.cost;
     setGauge(plan.gaugeSpent ? 0 : Math.min(S.mods.ult, S.gauge + plan.gaugeGain));
     if (intent.summon) dragon.preload();
@@ -640,7 +667,23 @@ export function start(root, opts = {}) {
   }
 
   /** @param {string} el */
-  const buttonIntent = (el) => S.binds[el]?.intent ?? defaultIntent(el);
+  const buttonIntent = (el) => trialLimit(S.binds[el]?.intent ?? defaultIntent(el), el);
+  /** 试炼里按钮只放学会了的招（run.js limitToLearned）；守关全开 @param {import('./rules/intent.js').Intent} it @param {string} el */
+  const trialLimit = (it, el) => (S.mode === 'trial' ? limitToLearned(it, S.run, el) : it);
+  /** 能合成哪些融合：试炼里只有领悟了的合字，守关按默认全开 */
+  const castFusions = () => (S.mode === 'trial' ? runFusions(S.run) : undefined);
+  /**
+   * 按钮上写什么：写过咒的写咒语名；试炼里换过招式字的写现在的招（如「火爆」）；都没有就是元素名
+   * @param {string} el @returns {{ label: string, named: boolean }}
+   */
+  function skillLabel(el) {
+    if (S.binds[el]) return { label: S.binds[el].name, named: true };
+    if (S.mode === 'trial' && S.run.moves[el]) {
+      const m = buttonMove(S.run, el);
+      return { label: elName(el) + FORMS[m.form].name, named: true };
+    }
+    return { label: elName(el), named: false };
+  }
   /** 正在咏唱的按键：0.6 秒里再按另一个天赋，就合成一句（先后是语序） */
   let pend = /** @type {{ els: string[], castId: number, t: number } | null} */ (null);
 
@@ -692,7 +735,7 @@ export function start(root, opts = {}) {
     hud.openWrite(elName(el), el, {
       ok: (t) => bindButton(el, t, close),
       cancel: close,
-      reset: () => { delete S.binds[el]; hud.setSkillLabel(el, elName(el), false); close(); },
+      reset: () => { delete S.binds[el]; const l = skillLabel(el); hud.setSkillLabel(el, l.label, l.named); close(); },
       inspire: () => inspire(el),
     });
   }
@@ -715,9 +758,10 @@ export function start(root, opts = {}) {
     S.binds[el] = { intent: r.intent, name, text };
     hud.setSkillLabel(el, name, true);
     close();
-    // 预览：这一招每次放要花多少、气势几档（不扣法力）
-    const plan = planCast(r.intent, { mana: MANA_MAX, seen: S.seen, text: '', button: true });
-    hud.showCard({ name, text, plan, intent: r.intent, source: `${fromModel ? '模型解析' : '关键词解析'} · 装进「${elName(el)}」的按钮`, ms: 0 });
+    // 预览：这一招每次放要花多少、气势几档（不扣法力）；试炼里没学会的字标灰、按现在会的放
+    const shown = trialLimit(r.intent, el);
+    const plan = planCast(shown, { mana: MANA_MAX, seen: S.seen, text: '', button: true, fusions: castFusions() });
+    hud.showCard({ name, text, plan, intent: shown, source: `${fromModel ? '模型解析' : '关键词解析'} · 装进「${elName(el)}」的按钮`, ms: 0 });
   }
 
   /** 求灵感：先请模型看着天赋和眼前的敌人现写 3 句；连不上就从写好的卷轴里挑 @param {string} el */
@@ -790,7 +834,7 @@ export function start(root, opts = {}) {
   function runStep(step, res, m = 0) {
     if (S.phase !== 'playing') return;
     if (step.fusion) { runFusion(step, res); return; }
-    const range = MOMENTUM_RANGE[m] ?? 1, big = MOMENTUM_FX[m] ?? 1;
+    const range = (MOMENTUM_RANGE[m] ?? 1) * (step.wide ?? 1), big = MOMENTUM_FX[m] ?? 1;   // wide：试炼里升过级的招式字
     const boom = (p, R, scale) => { fx.burst(p, step.el, R, scale * big); if (m >= 3) fx.hitStop = Math.max(fx.hitStop, 0.12); };
     const dir = { fromAbove: step.path === 'sky', fromBehind: step.path === 'behind' };
     if (step.form === 'bolt') {
@@ -856,7 +900,7 @@ export function start(root, opts = {}) {
     let dx = c.x - CASTER_POS.x, dz = c.z - CASTER_POS.z, len = Math.hypot(dx, dz);
     if (len < 2.2) { c = { x: CASTER_POS.x, z: CASTER_POS.z - 2.6 }; dx = 0; dz = -1; len = 1; }   // 「自己脚下」：立在身前，别把自己围住
     const ux = -dz / len, uz = dx / len;   // 墙沿这个方向排开
-    const n = FORMS.wall.segments, half = (n - 1) / 2;
+    const n = wallSegments(step), half = (n - 1) / 2;
     const pts = Array.from({ length: n }, (_, k) => ({ x: c.x + ux * (k - half) * WALL.gap, z: c.z + uz * (k - half) * WALL.gap }));
     const earth = step.el === 'earth';
     const w = walls.add(step.el, pts, Math.atan2(ux, uz) + Math.PI / 2, earth ? WALL.earthSec : WALL.curtainSec, step);
