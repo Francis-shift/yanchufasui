@@ -102,13 +102,13 @@ test('只差一个词，结果必须不同（关键词模式）', () => {
 });
 
 // ---------------------------------------------------------------- 裁决
-test('融合：先风后火出火卷风、先火后风出烈焰冲击；目标不同或先冰后火不融合', () => {
+test('融合：先风后火出火卷风、先火后风出豪火灭却；目标不同或先冰后火不融合', () => {
   const step = (el, target = 'densest') => ({ el, form: 'burst', target, power: 2, count: 1, path: 'straight', words: {} });
   const plan = (steps) => planCast({ steps, momentum: 0, name: '', unknown: [], overreach: false, notes: [] }, ctx());
   const wf = plan([step('wind'), step('fire')]);
   assert.equal(wf.steps.length, 1);
   assert.equal(wf.steps[0].fusionName, '火卷风');
-  assert.equal(plan([step('fire'), step('wind')]).steps[0].fusionName, '烈焰冲击', '顺序决定结果');
+  assert.equal(plan([step('fire'), step('wind')]).steps[0].fusionName, '豪火灭却', '顺序决定结果');
   assert.equal(plan([step('wind', 'left'), step('fire', 'right')]).steps.length, 2, '目标不同各放各的');
   assert.equal(plan([step('ice'), step('fire')]).steps.length, 2, '先控后打走反应，不融合');
   // 伤害 = 两步之和 × 1.2，第一次再 × 1.2；消耗不变（两步之和八折）

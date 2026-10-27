@@ -30,7 +30,7 @@ const PATHS = [['straight', '直线'], ['sky', '天降'], ['behind', '绕后']];
 /** 招牌特效：直接给模型格式的原始意图（见 rules/intent.js），走同一套清洗与裁决 */
 export const LAB_PRESETS = [
   ['火卷风', { s: [{ e: 'wind', f: 'burst', t: 'densest' }, { e: 'fire', f: 'bolt', t: 'densest' }], m: 2 }],
-  ['烈焰冲击', { s: [{ e: 'fire', f: 'bolt', t: 'front' }, { e: 'wind', f: 'burst', t: 'front' }], m: 2 }],
+  ['豪火灭却', { s: [{ e: 'fire', f: 'bolt', t: 'front' }, { e: 'wind', f: 'burst', t: 'front' }], m: 2 }],
   ['蒸汽爆', { s: [{ e: 'ice', f: 'bolt', t: 'front' }, { e: 'fire', f: 'bolt', t: 'front' }], m: 1 }],
   ['碎冰', { s: [{ e: 'ice', f: 'bolt', t: 'front' }, { e: 'wind', f: 'bolt', t: 'front' }], m: 1 }],
   ['导电', { s: [{ e: 'ice', f: 'burst', t: 'densest' }, { e: 'thunder', f: 'bolt', t: 'densest' }], m: 1 }],

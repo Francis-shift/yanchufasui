@@ -2,7 +2,7 @@
 /**
  * 融合法术的样子（伤害在 main.js 结算）：
  *   - 火卷风（先风后火）：一根燃烧的旋风柱，从目标处往外卷 3 秒，碰到的敌人被点着、卷起来甩出去；
- *   - 烈焰冲击（先火后风）：从施法者身前喷出一道又宽又长的火柱（龟派气功那种），一路烧穿。
+ *   - 豪火灭却（先火后风，10-27 由"烈焰冲击"改名）：从施法者身前喷出一道又宽又长的火柱，一路烧穿。
  */
 import * as THREE from 'three';
 import { col, easeOutCubic, glowShellMat, PALETTE, rand, scaleArr } from './common.js';
@@ -34,7 +34,7 @@ export class FusionFx {
   }
 
   /**
-   * 烈焰冲击：只管样子，0.7 秒。
+   * 豪火灭却：只管样子，0.7 秒。
    * @param {THREE.Vector3} from 施法者胸口 @param {THREE.Vector3} dir 水平单位向量
    */
   beam(from, dir) {

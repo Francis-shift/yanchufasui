@@ -1,9 +1,12 @@
 // @ts-check
 /**
- * 试炼模式的规则（纯函数，有单测）：boss 挨打怎么算冰甲、什么时候换阶段、下一招出什么、站在哪算被打中、玩家走到哪被挡住。
+ * 试炼模式的规则（纯函数，有单测）：boss 挨打怎么算冰甲、什么时候换阶段、下一招出什么、站在哪算被打中、玩家走到哪被挡住、
+ * 完美闪避、追踪冰锥怎么转弯、旋转弹幕朝哪喷。
  * 数值全在 numbers.js 的 BOSS、TRIAL。画面和 boss 的动作在 game/modes/trial.js。
  */
-import { BOSS } from './numbers.js';
+import { BOSS, TRIAL } from './numbers.js';
+
+/** @typedef {'slam' | 'sweep' | 'summon' | 'homing' | 'spiral'} Move */
 
 /**
  * 血量 → 第几阶段（1～3）：降到 70% 进第 2 阶段，降到 30% 进第 3 阶段（狂暴）。
@@ -43,26 +46,57 @@ export function bossHit(b, el, r) {
 }
 
 /**
- * 下一招。召唤优先（场上小傀儡不超过 keep 只、离上次召过了冷却）；玩家在扫得到的距离内多半横扫，远了砸红圈。
+ * 下一招。召唤优先（场上小傀儡不超过 keep 只、离上次召过了冷却）；其余在这一阶段放得出的招里按分量随机：
+ * 玩家离得远时不横扫；刚出过的那招不连着出（只剩一招时除外）。
  * @param {number} phase 1～3
- * @param {{ dist: number, minions: number, sinceSummon: number }} s dist：boss 到玩家的距离
+ * @param {{ dist: number, minions: number, sinceSummon: number, last?: string }} s dist：boss 到玩家的距离；last：上一招
  * @param {number} roll 0～1 的随机数（测试里给定）
- * @returns {'slam' | 'sweep' | 'summon'}
+ * @returns {Move}
  */
 export function pickMove(phase, s, roll) {
-  const sm = BOSS.summon;
-  if (s.sinceSummon >= sm.cd * BOSS.pace[phase - 1] && s.minions <= sm.keep) return 'summon';
-  if (s.dist <= BOSS.sweep.reach && roll < 0.6) return 'sweep';
-  return 'slam';
+  const sm = BOSS.summon, pool = /** @type {Move[]} */ (BOSS.moves[phase - 1]);
+  if (pool.includes('summon') && s.sinceSummon >= sm.cd * BOSS.pace[phase - 1] && s.minions <= sm.keep) return 'summon';
+  let c = pool.filter((m) => m !== 'summon' && (m !== 'sweep' || s.dist <= BOSS.sweep.reach));
+  if (c.length > 1) c = c.filter((m) => m !== s.last);
+  const w = (/** @type {Move} */ m) => /** @type {any} */ (BOSS)[m].weight;
+  let x = roll * c.reduce((a, m) => a + w(m), 0);
+  for (const m of c) { x -= w(m); if (x < 0) return m; }
+  return c[c.length - 1];
 }
 
 /** 狂暴时红圈连砸两下（第二下落在玩家那时站的地方） @param {number} phase */
 export const slamCount = (phase) => (phase >= 3 ? 2 : 1);
 
-/** 这一招预警多久（秒），阶段越后越快 @param {'slam' | 'sweep' | 'summon'} move @param {number} phase */
+/** 这一招预警多久（秒），阶段越后越快 @param {Move} move @param {number} phase */
 export function teleSec(move, phase) {
   return BOSS[move].tele * BOSS.pace[phase - 1];
 }
+
+/**
+ * 算不算完美闪避：招落下（或冰锥穿身）前 window 秒内才按的闪避，而且按的那一刻本来站在打得到的地方。
+ * 早早走开不算。
+ * @param {number} dashAgo 离上次按闪避过了几秒（没闪过给 Infinity） @param {boolean} wasInside 按闪避那一刻在不在范围里
+ */
+export const isPerfect = (dashAgo, wasInside) => wasInside && dashAgo <= TRIAL.perfect.window;
+
+/**
+ * 追踪冰锥转一帧：速度方向朝目标转，每秒最多 turn 弧度，快慢不变。改的是 v 本身。
+ * 转弯半径 = 速度 / turn：比闪避的距离大，贴脸时侧着一闪它就拐不过来。
+ * @param {P} v 速度 @param {P} from 冰锥位置 @param {P} to 目标 @param {number} turn @param {number} dt
+ */
+export function homingTurn(v, from, to, turn, dt) {
+  const sp = Math.hypot(v.x, v.z);
+  if (sp < 1e-9) return v;
+  const a = Math.atan2(v.z, v.x);
+  let d = Math.atan2(to.z - from.z, to.x - from.x) - a;
+  d = Math.atan2(Math.sin(d), Math.cos(d));
+  const na = a + Math.max(-turn * dt, Math.min(turn * dt, d));
+  v.x = Math.cos(na) * sp; v.z = Math.sin(na) * sp;
+  return v;
+}
+
+/** 旋转弹幕第 t 秒各条臂朝哪（弧度，从 +x 往 +z 量） @param {number} t @param {number} arms @param {number} a0 起始角 */
+export const spiralAngles = (t, arms, a0) => Array.from({ length: arms }, (_, i) => a0 + t * BOSS.spiral.spin + (i * 2 * Math.PI) / arms);
 
 /** 出完一招喘多久（秒） @param {number} phase @param {number} roll 0～1 */
 export function recoverSec(phase, roll) {

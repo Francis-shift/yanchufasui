@@ -158,7 +158,9 @@ export function start(root, opts = {}) {
     floatText: floatAt,
   });
   const trial = new Trial(scene, { enemies, fx, particles, hud, caster: layout.caster, origins: [origin, fx.origin],
-    canvas: renderer.domElement, mobile, floatText: floatAt, win: trialWon, lose: trialLost });
+    canvas: renderer.domElement, mobile, floatText: floatAt, win: trialWon, lose: trialLost,
+    blockers: () => walls.obstacles(),   // 土墙挡得住冰锥
+    reward: (mana, gauge) => { S.mana = Math.min(MANA_MAX, S.mana + mana); setGauge(Math.min(ULT_GAUGE, S.gauge + gauge)); } });
 
   // ---------------------------------------------------------------- 镜头：第三人称，平时固定；开口时轻推近
   const cam = { base: new THREE.Vector3(), look: new THREE.Vector3(), near: new THREE.Vector3(), nearLook: new THREE.Vector3(), focus: 0 };
@@ -759,7 +761,7 @@ export function start(root, opts = {}) {
   }
 
   /**
-   * 融合法术。方向一律是"从施法者看向目标"：火卷风从目标身前起、往外卷；烈焰冲击从施法者身前喷出去。
+   * 融合法术。方向一律是"从施法者看向目标"：火卷风从目标身前起、往外卷；豪火灭却从施法者身前喷出去。
    * 两种都把敌人往外甩（远离阵眼），靠近悬崖的会被甩下云海。
    */
   function runFusion(step, res) {
@@ -1024,12 +1026,14 @@ export function start(root, opts = {}) {
     engage: () => trial.engage(),
     walk: (x = 0, z = 5.2) => { trial.p.set(x, 0, z); trial.sync(); },
     bossHp: (n) => { if (trial.boss) trial.boss.hp = n; },
+    /** 让 boss 马上出这一招（slam / sweep / summon / homing / spiral），看招用 */
+    bossMove: (m) => trial.force(m),
     trialState: () => {
       const b = trial.boss;
       return { on: trial.on, fighting: trial.fighting, hp: trial.hp, at: [+trial.p.x.toFixed(2), +trial.p.z.toFixed(2)], phase: trial.phase,
         armor: Math.round(trial.armor), state: trial.state, move: trial.move, t: +trial.t.toFixed(2),
         boss: b && { hp: Math.round(b.hp), at: [+b.pos.x.toFixed(2), +b.pos.z.toFixed(2)], frozen: +b.frozen.toFixed(2) },
-        minions: enemies.list.filter((o) => o.chase).length };
+        minions: enemies.list.filter((o) => o.chase).length, bullets: trial.bullets.length };
     },
     cast: (text) => submit(text),
     spawn: (/** @type {any} */ type = 'grunt', path = 0) => enemies.spawn(type, path),

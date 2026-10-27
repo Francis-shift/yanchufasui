@@ -7,7 +7,9 @@
  */
 import * as THREE from 'three';
 import { BOSS, ENEMIES, TRIAL } from '../rules/numbers.js';
-import { bossHit, bossPhase, inCircle, inSector, keepInArena, pickMove, recoverSec, slamCount, teleSec } from '../rules/trial.js';
+import {
+  bossHit, bossPhase, homingTurn, inCircle, inSector, isPerfect, keepInArena, pickMove, recoverSec, slamCount, spiralAngles, teleSec,
+} from '../rules/trial.js';
 import { CASTER_POS, CORE_POS, OBSTACLES, PLAZA_R } from '../world/layout.js';
 import { rand } from '../fx/common.js';
 
@@ -22,6 +24,9 @@ const BOSS_BODY = 1.0;
 const RED = 0xff3b2f;
 const PHASE_NAME = ['', '第一阶段', '第二阶段', '第三阶段 · 狂暴'];
 const SWEEP_HALF = (BOSS.sweep.halfDeg * Math.PI) / 180;
+/** 同时在飞的冰锥最多这么多（旋转弹幕狂暴时一轮约 70 颗） */
+const MAX_BULLETS = 200;
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
 /** @type {Record<string, [number, number]>} 键 → 屏幕上的方向（右、上） */
 const MOVE_KEYS = { KeyW: [0, 1], ArrowUp: [0, 1], KeyS: [0, -1], ArrowDown: [0, -1], KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0] };
 
@@ -31,8 +36,9 @@ export class Trial {
    * @param {{ enemies: import('../actors/enemies.js').Enemies, fx: import('../fx/spells.js').SpellFx,
    *           particles: import('../fx/particles.js').Particles, hud: import('../ui/hud.js').Hud,
    *           caster: THREE.Object3D, origins: THREE.Vector3[], canvas: HTMLElement, mobile: boolean,
-   *           floatText: (p: THREE.Vector3, text: string, color: string) => void, win: () => void, lose: () => void }} d
-   *   origins：法术起点（施法者胸口高度），跟着玩家走
+   *           floatText: (p: THREE.Vector3, text: string, color: string) => void, win: () => void, lose: () => void,
+   *           blockers: () => { x: number, z: number, r: number }[], reward: (mana: number, gauge: number) => void }} d
+   *   origins：法术起点（施法者胸口高度），跟着玩家走；blockers：此刻的土墙（挡冰锥）；reward：完美闪避回法力、加气势
    */
   constructor(scene, d) {
     this.scene = scene; this.d = d;
@@ -50,14 +56,33 @@ export class Trial {
     /** @type {any} */
     this.boss = null;
     this.armor = 0; this.phase = 1; this.freezeCd = 0;
-    this.state = 'idle'; this.t = 0; this.teleLen = 1; this.move = /** @type {'slam' | 'sweep' | 'summon'} */ ('slam');
+    this.state = 'idle'; this.t = 0; this.teleLen = 1; this.move = /** @type {import('../rules/trial.js').Move} */ ('slam');
     this.left = 0; this.sinceSummon = 0; this.spinFrom = 0;
     this.target = new THREE.Vector3(); this.sweepDir = new THREE.Vector3();
     /** @type {{ x: number, z: number }[]} */
     this.spots = [];
-    this.leanTo = 0; this.kick = 0; this.shown = '';
+    this.leanTo = 0; this.kick = 0; this.shown = ''; this.lastMove = '';
     this.robe = /** @type {THREE.MeshStandardMaterial} */ (/** @type {THREE.Mesh} */ (d.caster.children[0]).material);
     this._f = new THREE.Vector3(); this._r = new THREE.Vector3(); this._m = new THREE.Vector3();
+    // 完美闪避：按闪避的时刻与位置（招落下时回头核对）；一次闪避只算一次
+    this.clock = 0; this.dashAt = -Infinity; this.dashFrom = new THREE.Vector3(); this.perfectUsed = true; this.glow = 0;
+    // 冰锥：位置、速度、飞了多久；homing 的会追人
+    /** @type {{ x: number, y: number, z: number, vx: number, vz: number, t: number, life: number, homing: boolean, dmg: number, r: number }[]} */
+    this.bullets = [];
+    this.emitT = 0; this.a0 = 0; this.chT = 0;   // 旋转弹幕：下一轮还有多久、起始角、已经转了几秒
+    // 冰锥要在十几米外的镜头里一眼看见：0.2 米那版在截图里只剩一个白点（10-27），放大、自发光压过泛光阈值
+    const shard = new THREE.OctahedronGeometry(0.3, 0);
+    shard.scale(1, 1, 2.4);   // 顺着飞的方向拉长
+    this.shards = new THREE.InstancedMesh(shard, new THREE.MeshStandardMaterial({ color: 0xe4f6ff, emissive: 0x6cc4ff, emissiveIntensity: 1.8,
+      roughness: 0.15 }), MAX_BULLETS);
+    // 冰锥底下的红点：飞在齐腰高，看地上的点才知道会不会撞上
+    this.dots = new THREE.InstancedMesh(new THREE.CircleGeometry(0.34, 16).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: RED,
+      transparent: true, opacity: 0.6, depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }), MAX_BULLETS);
+    for (const m of [this.shards, this.dots]) { m.count = 0; m.frustumCulled = false; scene.add(m); }
+    this.shards.castShadow = true;
+    this.dots.renderOrder = 2;
+    this._q = new THREE.Quaternion(); this._m4 = new THREE.Matrix4(); this._s = new THREE.Vector3(1, 1, 1);
+    this._bp = new THREE.Vector3(); this._bd = new THREE.Vector3(); this._hv = { x: 0, z: 0 };   // _r 是镜头右方，闪避随时要用，冰锥另用一组
 
     // 地上的预警：底（淡）、由内向外长满的填充、外边一圈
     this.circle = this.decal(new THREE.CircleGeometry(1, 48), new THREE.RingGeometry(0.95, 1, 48));
@@ -158,6 +183,8 @@ export class Trial {
   stop() {
     this.on = false; this.fighting = false; this.boss = null;
     this.circle.g.visible = this.sector.g.visible = false;
+    this.clearBullets();
+    this.dashAt = -Infinity; this.perfectUsed = true; this.glow = 0; this.lastMove = '';
     this.keys.clear(); this.ptr = null; this.stick.x = this.stick.y = 0;
     this.dashT = 0; this.dashCd = 0; this.hurtT = 0; this.flash = 0;
     this.p.copy(HOME); this.face.set(0, 0, -1);
@@ -170,7 +197,11 @@ export class Trial {
     this.shown = '';
   }
 
-  dispose() { this.stop(); this.unbind(); for (const x of [this.circle, this.sector]) this.scene.remove(x.g); }
+  dispose() {
+    this.stop(); this.unbind();
+    for (const x of [this.circle, this.sector]) this.scene.remove(x.g);
+    for (const m of [this.shards, this.dots]) { this.scene.remove(m); m.geometry.dispose(); /** @type {THREE.Material} */ (m.material).dispose(); m.dispose(); }
+  }
 
   // ---------------------------------------------------------------- 玩家
   dash() {
@@ -178,7 +209,41 @@ export class Trial {
     const mv = this.input();
     this.dashDir.copy(mv.lengthSq() > 0.01 ? mv.normalize() : this.face);
     this.dashT = TRIAL.dash.sec; this.dashCd = TRIAL.dash.cd;
+    this.dashAt = this.clock; this.dashFrom.copy(this.p); this.perfectUsed = false;
     this.d.hud.setDashReady(false);
+    // 冰锥眼看就要撞上（正朝人飞、window 秒内到）才闪：当场算完美闪避
+    const W = TRIAL.perfect.window;
+    for (const b of this.bullets) {
+      const rx = this.p.x - b.x, rz = this.p.z - b.z, d = Math.hypot(rx, rz), sp = Math.hypot(b.vx, b.vz);
+      if (d < b.r + BODY + sp * W && rx * b.vx + rz * b.vz > 0.7 * d * sp) { this.perfect(); break; }
+    }
+  }
+
+  /** 完美闪避：周身爆一圈白光、顿帧；回法力、加气势、闪避冷却清零 */
+  perfect() {
+    if (this.perfectUsed || !this.fighting) return;
+    this.perfectUsed = true;
+    const { fx, particles, hud } = this.d, P = TRIAL.perfect, p = this.p;
+    fx.hitStop = Math.max(fx.hitStop, P.stop);
+    fx.pulseDim(0.3, 0.3);
+    for (let i = 0; i < 90; i++) {   // 一圈往外散
+      const a = rand(0, Math.PI * 2), s = rand(2.5, 6);
+      particles.emit(p.x + Math.cos(a) * 0.4, rand(0.1, 1.7), p.z + Math.sin(a) * 0.4, Math.cos(a) * s, rand(-0.5, 1.5), Math.sin(a) * s,
+        rand(0.35, 0.7), rand(0.05, 0.11), [2.2, 2.2, 2.4], [0.8, 0.85, 1.0], { drag: 3 });
+    }
+    for (let i = 0; i < 30; i++) {   // 几缕往上飘
+      particles.emit(p.x + rand(-0.5, 0.5), rand(0.2, 1.2), p.z + rand(-0.5, 0.5), rand(-0.3, 0.3), rand(1.5, 3), rand(-0.3, 0.3),
+        rand(0.6, 1.1), rand(0.08, 0.16), [1.6, 1.6, 1.8], [0.6, 0.65, 0.8], { alpha: 0.5, drag: 1.5 });
+    }
+    this.glow = 1;
+    this.d.floatText(new THREE.Vector3(p.x, 2.4, p.z), '完美闪避', '#ffffff');
+    this.dashCd = 0; hud.setDashReady(true);
+    this.d.reward(P.mana, P.gauge);
+  }
+
+  /** 招落下没打中：闪避按得够晚、按的时候本来在范围里，就是完美闪避 @param {(q: { x: number, z: number }) => boolean} inside */
+  checkPerfect(inside) {
+    if (!this.perfectUsed && isPerfect(this.clock - this.dashAt, inside(this.dashFrom))) this.perfect();
   }
 
   /** 这一帧想往哪走（世界坐标，长度 0～1）：键盘和拖动按屏幕方向算，W / 往上拖是朝屏幕里走 */
@@ -215,7 +280,8 @@ export class Trial {
     if (this.hurtT > 0) this.hurtT -= dt;
     this.d.caster.visible = this.hurtT <= 0 || Math.floor(this.hurtT * 16) % 2 === 0;
     this.flash = Math.max(0, this.flash - dt * 3);
-    this.robe.emissive.setRGB(0.9 * this.flash, 0.08 * this.flash, 0.04 * this.flash);
+    this.glow = Math.max(0, this.glow - dt * 1.5);   // 完美闪避：袍子亮白一下
+    this.robe.emissive.setRGB(0.9 * this.flash + 0.8 * this.glow, 0.08 * this.flash + 0.8 * this.glow, 0.04 * this.flash + 0.9 * this.glow);
   }
 
   /** 施法者、脚下法阵、法术起点都挪到玩家的位置 */
@@ -230,7 +296,7 @@ export class Trial {
   hurt(dmg) {
     if (!this.fighting || this.hp <= 0) return false;
     const at = new THREE.Vector3(this.p.x, 2.2, this.p.z);
-    if (this.dashT > 0) { this.d.floatText(at, '闪', '#cfe8ff'); return false; }
+    if (this.dashT > 0) { this.perfect(); return false; }   // 冲刺中硬吃过去：也是完美闪避
     if (this.hurtT > 0) return false;
     this.hp = Math.max(0, this.hp - dmg);
     this.hurtT = TRIAL.hurtGrace; this.flash = 1;
@@ -274,6 +340,7 @@ export class Trial {
   end(won) {
     this.fighting = false;
     this.circle.g.visible = this.sector.g.visible = false;
+    this.clearBullets();
     if (won) for (const o of [...this.d.enemies.list]) if (o.chase) this.d.enemies.kill(o, o.pos);
     this.d.hud.setBoss(null);
     (won ? this.d.win : this.d.lose)();
@@ -290,6 +357,13 @@ export class Trial {
     else this.d.hud.bigText('狂暴', '#b3261e', 1300);
     this.d.hud.setWave('试炼', PHASE_NAME[ph]);
     this.d.fx.burst(new THREE.Vector3(b.pos.x, 1.2, b.pos.z), 'ice', 3.2, 0.9);
+  }
+
+  /** 调试：马上出这一招 @param {import('../rules/trial.js').Move} m */
+  force(m) {
+    if (!this.fighting || !this.boss) return;
+    this.move = m; this.lastMove = m; this.left = m === 'slam' ? slamCount(this.phase) : 1;
+    this.startTele();
   }
 
   recover() {
@@ -316,12 +390,67 @@ export class Trial {
       this.sector.g.scale.set(BOSS.sweep.r, 1, BOSS.sweep.r);
       this.sector.g.visible = true;
       this.leanTo = -0.12;
-    } else {
+    } else if (this.move === 'summon') {
       const n = BOSS.summon.n[this.phase - 1], a0 = Math.atan2(this.p.z - b.pos.z, this.p.x - b.pos.x);
       this.spots = Array.from({ length: n }, (_, i) => keepInArena(
         { x: b.pos.x + Math.cos(a0 + (i - (n - 1) / 2) * 0.8) * 2.4, z: b.pos.z + Math.sin(a0 + (i - (n - 1) / 2) * 0.8) * 2.4 }, BLOCK, ARENA_R, 0.3));
       this.leanTo = -0.32;
+    } else {
+      this.leanTo = this.move === 'homing' ? -0.3 : -0.15;   // 冰锥：后仰蓄力；旋转弹幕：微微后仰，原地转起来
     }
+  }
+
+  /** 放一颗冰锥 @param {number} x @param {number} y @param {number} z @param {number} vx @param {number} vz @param {{ life: number, dmg: number, r: number, homing?: boolean }} o */
+  fire(x, y, z, vx, vz, o) {
+    if (this.bullets.length >= MAX_BULLETS) return;
+    this.bullets.push({ x, y, z, vx, vz, t: 0, life: o.life, homing: !!o.homing, dmg: o.dmg, r: o.r });
+  }
+
+  clearBullets() { this.bullets.length = 0; this.shards.count = this.dots.count = 0; }
+
+  /** 冰锥飞一帧：追人的转弯；撞上土墙、场上的石物件就碎；撞上人就伤人 @param {number} dt */
+  updateBullets(dt) {
+    const { particles } = this.d, walls = this.d.blockers(), H = BOSS.homing;
+    for (let i = this.bullets.length - 1; i >= 0; i--) {
+      const b = this.bullets[i];
+      b.t += dt;
+      if (b.homing && b.t > 0.35) {   // 甩出去先直飞一小段再拐
+        const v = this._hv; v.x = b.vx; v.z = b.vz;
+        homingTurn(v, b, this.p, H.turn, dt);
+        b.vx = v.x; b.vz = v.z;
+      }
+      b.x += b.vx * dt; b.z += b.vz * dt;
+      b.y += (1.0 - b.y) * Math.min(1, dt * 4);   // 追踪冰锥从高处甩出，落到齐腰高
+      let gone = b.t > b.life || Math.hypot(b.x, b.z) > PLAZA_R + 3;
+      if (!gone) {
+        for (const o of walls) if ((b.x - o.x) ** 2 + (b.z - o.z) ** 2 < (o.r + b.r) ** 2) { gone = true; break; }
+        if (!gone) for (const o of BLOCK) if ((b.x - o.x) ** 2 + (b.z - o.z) ** 2 < (o.r + b.r) ** 2) { gone = true; break; }
+        if (gone) {   // 撞碎：溅几片冰
+          for (let k = 0; k < 10; k++) {
+            particles.emit(b.x, b.y, b.z, rand(-3, 3), rand(0.5, 3), rand(-3, 3), rand(0.25, 0.5), rand(0.05, 0.1), [1.4, 1.8, 2.2], [0.3, 0.55, 0.9], { drag: 2, grav: -8 });
+          }
+        }
+      }
+      if (!gone && b.y < 1.6 && inCircle(b, this.p, b.r, BODY)) {
+        if (this.dashT > 0) this.perfect();   // 冲刺中穿身而过
+        else { this.hurt(b.dmg); gone = true; }
+      }
+      if (gone) { this.bullets.splice(i, 1); continue; }
+      // 身后拖一道冷光：追踪的拖得密，看得出它在拐弯；旋转弹幕一轮几十颗，拖得稀，不然连成一片白
+      if (Math.random() < dt * (b.homing ? 40 : 4)) {
+        particles.emit(b.x, b.y, b.z, -b.vx * 0.1, 0.2, -b.vz * 0.1, rand(0.25, 0.4), rand(0.1, 0.18), [1.4, 1.9, 2.4], [0.3, 0.5, 0.9], { alpha: 0.6, drag: 3 });
+      }
+    }
+    const n = this.bullets.length;
+    for (let i = 0; i < n; i++) {
+      const b = this.bullets[i];
+      this._bd.set(b.vx, 0, b.vz).normalize();
+      this._q.setFromUnitVectors(Z_AXIS, this._bd);
+      this.shards.setMatrixAt(i, this._m4.compose(this._bp.set(b.x, b.y, b.z), this._q, this._s));
+      this.dots.setMatrixAt(i, this._m4.compose(this._bp.set(b.x, 0.035, b.z), this._q.identity(), this._s));
+    }
+    this.shards.count = this.dots.count = n;
+    this.shards.instanceMatrix.needsUpdate = this.dots.instanceMatrix.needsUpdate = true;
   }
 
   /** 预警到点：判定、演出 */
@@ -330,6 +459,7 @@ export class Trial {
     if (this.move === 'slam') {
       this.circle.g.visible = false;
       if (inCircle(this.p, this.target, BOSS.slam.r, BODY)) this.hurt(BOSS.slam.dmg);
+      else this.checkPerfect((q) => inCircle(q, this.target, BOSS.slam.r, BODY));
       fx.burst(new THREE.Vector3(this.target.x, 0.3, this.target.z), 'ice', BOSS.slam.r, 0.7);
       fx.crack(this.target, BOSS.slam.r * 0.8);
       this.kick = 0.45;
@@ -338,6 +468,7 @@ export class Trial {
     } else if (this.move === 'sweep') {
       this.sector.g.visible = false;
       if (inSector(this.p, b.pos, this.sweepDir, SWEEP_HALF, BOSS.sweep.r, BODY)) this.hurt(BOSS.sweep.dmg);
+      else this.checkPerfect((q) => inSector(q, b.pos, this.sweepDir, SWEEP_HALF, BOSS.sweep.r, BODY));
       const a0 = Math.atan2(this.sweepDir.z, this.sweepDir.x);
       for (let i = 0; i < 90; i++) {
         const a = a0 + rand(-SWEEP_HALF, SWEEP_HALF), r = rand(1.2, BOSS.sweep.r), s = rand(3, 7);
@@ -346,6 +477,21 @@ export class Trial {
       }
       fx.shake = Math.max(fx.shake, 0.35);
       this.state = 'spin'; this.t = 0.28; this.spinFrom = a0 - SWEEP_HALF;   // 身子跟着扫过去
+    } else if (this.move === 'homing') {
+      // 从举高的手上往前甩出一把冰锥，左右散开，飞一小段后各自拐向玩家
+      const H = BOSS.homing, n = H.n[this.phase - 1], aim = Math.atan2(this.p.z - b.pos.z, this.p.x - b.pos.x), spread = (70 * Math.PI) / 180;
+      for (let i = 0; i < n; i++) {
+        const a = aim + (n > 1 ? (i / (n - 1) - 0.5) * 2 * spread : 0);
+        this.fire(b.pos.x + Math.cos(a) * 1.1, 2.6, b.pos.z + Math.sin(a) * 1.1, Math.cos(a) * H.speed, Math.sin(a) * H.speed,
+          { life: H.life, dmg: H.dmg, r: H.r, homing: true });
+      }
+      fx.burst(new THREE.Vector3(b.pos.x, 2.6, b.pos.z), 'ice', 1.2, 0.4);
+      this.kick = 0.35;
+      this.recover();
+    } else if (this.move === 'spiral') {
+      // 原地转起来，几条臂一边转一边往外喷冰锥
+      this.state = 'channel'; this.t = BOSS.spiral.sec; this.chT = 0; this.emitT = 0;
+      this.a0 = Math.atan2(this.p.z - b.pos.z, this.p.x - b.pos.x);
     } else {
       for (const s of this.spots) {
         this.d.enemies.spawnAt('grunt', s.x, s.z, 'chase');
@@ -362,9 +508,12 @@ export class Trial {
   /** 每帧（游戏时间） @param {number} dt @param {THREE.Camera} camera */
   update(dt, camera) {
     if (!this.on) return;
+    this.clock += dt;
     if (this.hp > 0) this.movePlayer(dt, camera);
     const b = this.boss;
     if (!this.fighting || !b) return;
+    this.updateBullets(dt);   // 冰锥照飞，boss 冻住了也一样
+    if (!this.fighting) return;   // 被冰锥打死了
     const held = b.frozen > 0 || b.stun > 0;
     if (b.frozen > 0) this.freezeCd = BOSS.freezeGrace; else this.freezeCd = Math.max(0, this.freezeCd - dt);
     const ph = bossPhase(b.hp, b.maxHp);
@@ -388,22 +537,51 @@ export class Trial {
         }
         if (this.t <= 0) {
           const minions = this.d.enemies.list.filter((o) => o.chase).length;
-          this.move = pickMove(this.phase, { dist, minions, sinceSummon: this.sinceSummon }, Math.random());
+          this.move = pickMove(this.phase, { dist, minions, sinceSummon: this.sinceSummon, last: this.lastMove }, Math.random());
+          this.lastMove = this.move;
           this.left = this.move === 'slam' ? slamCount(this.phase) : 1;
           this.startTele();
         }
       } else if (this.state === 'tele') {
-        const k = 1 - Math.max(0, this.t) / this.teleLen;
-        const fill = this.move === 'slam' ? this.circle.fill : this.sector.fill;
-        fill.scale.set(Math.max(0.001, k), Math.max(0.001, k), 1);
-        if (this.move === 'slam') turn(this.target.x - b.pos.x, this.target.z - b.pos.z, 6);
-        else if (this.move === 'sweep') turn(this.sweepDir.x, this.sweepDir.z, 8);
-        else if (Math.random() < dt * 30) {
-          const s = this.spots[Math.floor(Math.random() * this.spots.length)];
-          this.d.particles.emit(s.x + rand(-0.3, 0.3), 0.1, s.z + rand(-0.3, 0.3), 0, rand(0.8, 1.6), 0, rand(0.5, 0.8), rand(0.12, 0.22),
-            [0.9, 0.45, 1.5], [0.25, 0.08, 0.4], { alpha: 0.35, drag: 1 });
+        const k = Math.max(0.001, 1 - Math.max(0, this.t) / this.teleLen);
+        if (this.move === 'slam') {
+          this.circle.fill.scale.set(k, k, 1);
+          turn(this.target.x - b.pos.x, this.target.z - b.pos.z, 6);
+        } else if (this.move === 'sweep') {
+          this.sector.fill.scale.set(k, k, 1);
+          turn(this.sweepDir.x, this.sweepDir.z, 8);
+        } else if (this.move === 'summon') {
+          if (Math.random() < dt * 30) {
+            const s = this.spots[Math.floor(Math.random() * this.spots.length)];
+            this.d.particles.emit(s.x + rand(-0.3, 0.3), 0.1, s.z + rand(-0.3, 0.3), 0, rand(0.8, 1.6), 0, rand(0.5, 0.8), rand(0.12, 0.22),
+              [0.9, 0.45, 1.5], [0.25, 0.08, 0.4], { alpha: 0.35, drag: 1 });
+          }
+        } else {
+          // 冰锥、旋转弹幕的蓄力：寒气往 boss 身上收（冰锥收到举高的手上，弹幕收到腰间）
+          turn(dx, dz, 5);
+          const y = this.move === 'homing' ? 2.6 : 1.0;
+          for (let i = 0; i < 2; i++) {
+            if (Math.random() > dt * 30) continue;
+            const a = rand(0, Math.PI * 2), r = rand(1.8, 2.8), x = b.pos.x + Math.cos(a) * r, z = b.pos.z + Math.sin(a) * r;
+            this.d.particles.emit(x, y + rand(-0.5, 0.5), z, (b.pos.x - x) * 2.2, 0, (b.pos.z - z) * 2.2, 0.42, rand(0.06, 0.12),
+              [1.3, 1.8, 2.3], [0.3, 0.55, 0.9], { drag: 0.3 });
+          }
         }
         if (this.t <= 0) this.resolve();
+      } else if (this.state === 'channel') {
+        // 旋转弹幕：每 every 秒各条臂喷一颗，身子跟着转
+        const S = BOSS.spiral, arms = S.arms[this.phase - 1];
+        this.chT += dt; this.emitT -= dt;
+        while (this.emitT <= 0 && this.t > 0) {
+          this.emitT += S.every;
+          for (const a of spiralAngles(this.chT, arms, this.a0)) {
+            this.fire(b.pos.x + Math.cos(a) * 1.3, 1.0, b.pos.z + Math.sin(a) * 1.3, Math.cos(a) * S.speed, Math.sin(a) * S.speed,
+              { life: (PLAZA_R * 2) / S.speed, dmg: S.dmg, r: S.r });
+          }
+        }
+        const a = this.a0 + this.chT * S.spin;
+        b.dir.set(Math.cos(a), 0, Math.sin(a));
+        if (this.t <= 0) this.recover();
       } else if (this.state === 'spin') {
         const a = this.spinFrom + SWEEP_HALF * 2 * (1 - Math.max(0, this.t) / 0.28);
         b.dir.set(Math.cos(a), 0, Math.sin(a));

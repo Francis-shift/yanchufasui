@@ -115,23 +115,33 @@ export const ENEMIES = {
 };
 
 /**
- * 试炼模式的 boss（设计文档第 2 节"试炼模式"；10-25 灰盒初值，试玩后再写进设计文档）：三招（砸地红圈、扇形横扫、召小傀儡）加冰甲。
+ * 试炼模式的 boss（设计文档第 2 节"试炼模式"；10-25 灰盒初值，试玩后再写进设计文档）：五招加冰甲。
+ * 招随阶段变多（moves）：第 1 阶段砸地红圈、扇形横扫、召小傀儡；第 2 阶段加追踪冰锥；第 3 阶段再加旋转弹幕。
  * 冰甲只怕火：甲在时火照常伤害并削甲，别的元素只剩 armoredMult，也冻不住；削穿就碎，之后谁打都照常。
- * 血量降到 phases 两档换阶段：第 2 阶段冰甲重凝，第 3 阶段狂暴（红圈连砸两下、召得更多）。
+ * 血量降到 phases 两档换阶段：第 2 阶段冰甲重凝，第 3 阶段狂暴（红圈连砸两下、召得更多、弹幕多一条臂）。
+ * 弹幕（冰锥）飞在齐腰高，地上有红点标出落在哪；碰到土墙就碎。weight：挑招时的分量。
  * pace：每个阶段预警、喘息、召唤冷却的倍数（越小越快）。冻住过一次，化开后 freezeGrace 秒内冻不住（免得被冰弹冻到死）。
  */
 export const BOSS = {
   armor: 120, armoredMult: 0.2, scale: 2.6, freezeGrace: 3, stunMax: 0.2,
   phases: [0.7, 0.3], pace: [1, 0.8, 0.62], recover: [1.3, 2.0], roarSec: 1.6, keepDist: 3.4, enrageSpeed: 1.3,
-  slam:   { r: 2.6, tele: 1.2, dmg: 22 },                         // 红圈落在预警开始那一刻玩家站的地方
-  sweep:  { r: 6, halfDeg: 60, tele: 1.0, dmg: 16, reach: 5 },     // 玩家在 reach 米内才用：朝玩家扫一扇
-  summon: { tele: 0.9, n: [2, 3, 4], cd: 14, keep: 1 },           // 场上小傀儡不超过 keep 只、离上次召过了 cd 秒才召
+  moves: [['slam', 'sweep', 'summon'], ['slam', 'sweep', 'summon', 'homing'], ['slam', 'sweep', 'summon', 'homing', 'spiral']],
+  slam:   { r: 2.6, tele: 1.2, dmg: 22, weight: 3 },                         // 红圈落在预警开始那一刻玩家站的地方
+  sweep:  { r: 6, halfDeg: 60, tele: 1.0, dmg: 16, reach: 5, weight: 3 },     // 玩家在 reach 米内才用：朝玩家扫一扇
+  summon: { tele: 0.9, n: [2, 3, 4], cd: 14, keep: 1 },                      // 场上小傀儡不超过 keep 只、离上次召过了 cd 秒才召
+  // 追踪冰锥：先往上、往两边甩出去，落到齐腰高再追玩家；转向有上限（每秒 turn 弧度），侧着冲刺就甩得掉
+  homing: { tele: 0.8, n: [3, 3, 5], speed: 6, turn: 1.8, life: 3.6, dmg: 12, r: 0.3, weight: 2 },
+  // 旋转弹幕：原地转着往外喷冰锥，arms 条臂、每条每 every 秒一颗，持续 sec 秒；臂与臂之间的空当钻得过去
+  spiral: { tele: 0.7, arms: [3, 3, 4], spin: 1.5, every: 0.14, sec: 2.4, speed: 5, dmg: 10, r: 0.3, weight: 2 },
 };
 /**
  * 试炼模式的玩家：气血、走速（米/秒）、闪避（冲多远、多少秒冲完、冷却；冲刺中不受伤）、挨打后多少秒不再受伤；
  * 小傀儡贴身自爆的伤害。
+ * 完美闪避：招落下前 window 秒内才闪、而且闪之前本来站在打得到的地方（或冲刺中被冰锥穿过）——周身爆白光、顿帧 stop 秒，
+ * 回 mana 点法力、加 gauge 点气势，闪避冷却清零。
  */
-export const TRIAL = { hp: 100, speed: 4.2, dash: { dist: 3.6, sec: 0.18, cd: 0.9 }, hurtGrace: 0.7, touchDmg: 8 };
+export const TRIAL = { hp: 100, speed: 4.2, dash: { dist: 3.6, sec: 0.18, cd: 0.9 }, hurtGrace: 0.7, touchDmg: 8,
+  perfect: { window: 0.3, stop: 0.2, mana: 10, gauge: 1 } };
 
 /** 元素反应（只在程序里判断）：先中的元素 + 后来的元素 */
 export const REACTIONS = {
@@ -161,7 +171,7 @@ export const PHASE = {
  */
 export const FUSIONS = {
   'wind>fire':    { name: '火卷风',   el: 'fire',    idiom: '风助火势' },   // 龙卷风被点燃，往前卷，把敌人卷起来烧
-  'fire>wind':    { name: '烈焰冲击', el: 'fire',    idiom: '火借风威' },   // 从身前喷出又宽又长的火柱，一路烧穿
+  'fire>wind':    { name: '豪火灭却', el: 'fire',    idiom: '火借风威' },   // 从身前推出一整片往前翻滚的火浪，越推越宽（10-27 由"烈焰冲击"改名）
   'wind>ice':     { name: '暴风雪',   el: 'ice',     idiom: '风雪交加' },   // 第二批
   'wind>thunder': { name: '雷暴',     el: 'thunder', idiom: '风雷激荡' },   // 第二批（雷开放后）
   'earth>fire':   { name: '陨火',     el: 'fire',    idiom: '天火坠石' },   // 第二批
@@ -170,7 +180,7 @@ export const FUSIONS = {
 export const FUSION_OPEN = ['wind>fire', 'fire>wind'];
 /** 融合伤害 = 两步之和 × 1.2（消耗沿用组合八折，不另算） */
 export const FUSION_DMG_MULT = 1.2;
-/** 火卷风：半径、往前卷的速度和时长；烈焰冲击：火柱长度和宽度（米） */
+/** 火卷风：半径、往前卷的速度和时长；豪火灭却：火柱长度和宽度（米） */
 export const TORNADO = { r: 2.2, speed: 3.2, sec: 3 };
 export const BEAM = { len: 15, halfW: 1.8 };
 
