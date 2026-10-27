@@ -165,6 +165,31 @@ const CSS = FONT_CSS + `
 .yc-short .yc-said { margin-top: 2px; font-size: 14px; line-height: 1.6; }
 .yc-short .yc-meta { margin-top: 2px; gap: 2px 10px; }
 .yc-short .yc-big { font-size: 40px; }
+/* 试炼 · 手机（setPad）：左半边是摇杆（按哪儿就从哪儿起），右下角一簇按钮——大的"闪"在角上，天赋沿弧排开，召唤在最外 */
+.yc-stick { position: absolute; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; display: none;
+  border: 2px solid rgba(255,255,255,0.75); background: rgba(30,50,80,0.16); pointer-events: none; }
+.yc-stick > i { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px; border-radius: 50%;
+  background: rgba(255,255,255,0.88); box-shadow: 0 2px 8px rgba(20,40,80,0.35); }
+.yc-pad .yc-stick { display: block; opacity: 0.4; }
+.yc-pad .yc-stick:not(.on) { left: 104px; top: calc(100% - 96px); }
+.yc-pad .yc-stick.on { opacity: 0.9; }
+.yc-pad .yc-bottom { left: auto; right: 14px; bottom: 10px; transform: none; width: 232px; pointer-events: none; }
+.yc-pad .yc-bottom button { pointer-events: auto; }
+.yc-pad .yc-skills:not([hidden]) { order: 5; display: block; position: relative; width: 232px; height: 200px; margin: 4px 0 0; }
+.yc-pad .yc-key { display: none; }
+.yc-pad .yc-dash { position: absolute; right: 0; bottom: 0; width: 80px; height: 80px; font-size: 36px; }
+.yc-pad .yc-skill { position: absolute; }
+.yc-pad .yc-cast { width: 58px; height: 58px; }
+.yc-pad .yc-skill:nth-of-type(1) { right: 111px; bottom: 11px; }
+.yc-pad .yc-skill:nth-of-type(2) { right: 82px; bottom: 82px; }
+.yc-pad .yc-skill:nth-of-type(3) { right: 11px; bottom: 111px; }
+.yc-pad .yc-summon { position: absolute; left: 0; top: 0; height: 50px; }
+/* boss 血条紧挨左上面板右边放（横屏手机只有 600～900 宽，居中会和面板撞上、被挤到画面中间） */
+.yc-pad .yc-boss { left: 212px; right: 14px; width: auto; max-width: 440px; transform: none; }
+/* 法力条挪到下方正中（摇杆和按钮之间空着），不然右边一列太高，顶到 boss 血条 */
+.yc-pad .yc-bottom > .yc-label, .yc-pad .yc-bottom > .yc-mana { position: absolute; right: 250px; width: 240px; }
+.yc-pad .yc-bottom > .yc-label { bottom: 16px; }
+.yc-pad .yc-bottom > .yc-mana { bottom: 4px; }
 `;
 
 /** @param {string} html */
@@ -205,7 +230,9 @@ export class Hud {
         <button class="yc-btn ghost" data-cancel>取消</button><button class="yc-btn" data-ok>装进按钮</button></div></div></div>`);
     this.debug = el(`<div class="yc-debug" hidden></div>`);
     this.floats = el(`<div style="position:absolute;inset:0;overflow:hidden"></div>`);
-    this.root.append(this.floats, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.overlay);
+    this.stick = el(`<div class="yc-stick"><i></i></div>`);
+    this.knob = /** @type {HTMLElement} */ (this.stick.firstElementChild);
+    this.root.append(this.floats, this.stick, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.overlay);
     root.append(this.root);
     this.input = /** @type {HTMLInputElement} */ (this.bottom.querySelector('input'));
     this.go = /** @type {HTMLButtonElement} */ (this.bottom.querySelector('[data-go]'));
@@ -342,6 +369,18 @@ export class Hud {
     this.root.classList.toggle('yc-nopen', on && fighting);
     if (!on) this.setBoss(null);
   }
+  /** 试炼 · 手机布局：左手摇杆、右手一簇按钮 @param {boolean} on */
+  setPad(on) { this.root.classList.toggle('yc-pad', on); this.showStick(null); }
+  /**
+   * 摇杆：底座放在 at（界面坐标，像素），中间的圆偏 (kx, ky)；null 回左下角待命。
+   * @param {{ x: number, y: number } | null} at @param {number} [kx] @param {number} [ky]
+   */
+  showStick(at, kx = 0, ky = 0) {
+    this.stick.classList.toggle('on', !!at);
+    this.stick.style.left = at ? `${at.x}px` : '';
+    this.stick.style.top = at ? `${at.y}px` : '';
+    this.knob.style.transform = `translate(${kx}px, ${ky}px)`;
+  }
   /** 闪避冷却中：按钮变淡 @param {boolean} ready */
   setDashReady(ready) { this.root.querySelector('.yc-dash')?.classList.toggle('cd', !ready); }
 
@@ -361,11 +400,14 @@ export class Hud {
   /** boss 血条居中靠上；和左上角的面板左右重叠（竖屏）就放到面板下面 */
   placeBoss() {
     if (this.boss.hidden) return;
-    const ui = this.root.getBoundingClientRect(), top = this.top.getBoundingClientRect();
-    const w = this.boss.offsetWidth || Math.min(440, ui.width - 32);
-    const overlaps = (ui.width - w) / 2 < top.right - ui.left + 8;
-    this.boss.style.top = overlaps ? `${Math.round(top.bottom - ui.top + 6)}px` : '';
+    if (this.root.classList.contains('yc-pad')) { this.boss.style.top = ''; return; }   // 手机试炼布局由 CSS 放在面板右边
+    const W = this.root.clientWidth, w = this.boss.offsetWidth || Math.min(440, W - 32);
+    const overlaps = (W - w) / 2 < this.topRight() + 8;
+    this.boss.style.top = overlaps ? `${this.topBottom() + 6}px` : '';
   }
+  // 左上面板的右边、下边（界面坐标）：用布局尺寸，不用 getBoundingClientRect——试炼横过来转了 90° 时后者是转完的屏幕坐标
+  topRight() { return this.top.offsetLeft + this.top.offsetWidth; }
+  topBottom() { return this.top.offsetTop + this.top.offsetHeight; }
   setMana(m, max) { this.q('[data-mana]').textContent = String(Math.floor(m)); this.q('[data-manabar]').style.width = `${(m / max) * 100}%`; }
   setWave(text, left) { this.q('[data-wave]').textContent = text; this.q('[data-left]').textContent = left; }
   setHint(text) { this.q('[data-hint]').textContent = text; }
@@ -386,10 +428,9 @@ export class Hud {
 
   /** 咒语卡居中靠上；若和左上角的面板左右重叠，就放到面板下面 */
   placeCard() {
-    const ui = this.root.getBoundingClientRect(), top = this.top.getBoundingClientRect();
-    const cardW = this.card.offsetWidth || Math.min(560, ui.width - 32);
-    const overlaps = (ui.width - cardW) / 2 < top.right - ui.left + 8;
-    this.card.style.top = overlaps ? `${Math.round(top.bottom - ui.top + 8)}px` : '';
+    const W = this.root.clientWidth, cardW = this.card.offsetWidth || Math.min(560, W - 32);
+    const overlaps = (W - cardW) / 2 < this.topRight() + 8;
+    this.card.style.top = overlaps ? `${this.topBottom() + 8}px` : '';
   }
 
   /** 画面上、下被界面挡住的比例（给镜头取景用） @returns {{ top: number, bottom: number }} */

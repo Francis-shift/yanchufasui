@@ -1,7 +1,7 @@
 // @ts-check
 /**
  * 试炼模式（灰盒，设计文档第 2 节"试炼模式"）：在山门广场上走位躲 boss 的招。
- * 战中不打字：WASD / 方向键走位、空格闪避、1～3 放天赋、4 召唤（手机：在画面上拖动走位，轻点画面或点"闪"闪避）；战前可以给按钮写咒。
+ * 战中不打字：WASD / 方向键走位、空格闪避、1～3 放天赋、4 召唤（手机横过来玩：左手摇杆走位，右手点"闪"和天赋）；战前可以给按钮写咒。
  * 规则（冰甲、换阶段、挑招、判定、走位边界）在 rules/trial.js；这里管玩家走位与受伤、boss 的动作、地上的预警。
  * 施法者的位置就是 CASTER_POS：玩家走到哪，法术就从哪放出（同步脚下法阵和特效起点）；回到守关时放回原处。
  */
@@ -37,8 +37,10 @@ export class Trial {
    *           particles: import('../fx/particles.js').Particles, hud: import('../ui/hud.js').Hud,
    *           caster: THREE.Object3D, origins: THREE.Vector3[], canvas: HTMLElement, mobile: boolean,
    *           floatText: (p: THREE.Vector3, text: string, color: string) => void, win: () => void, lose: () => void,
-   *           blockers: () => { x: number, z: number, r: number }[], reward: (mana: number, gauge: number) => void }} d
-   *   origins：法术起点（施法者胸口高度），跟着玩家走；blockers：此刻的土墙（挡冰锥）；reward：完美闪避回法力、加气势
+   *           blockers: () => { x: number, z: number, r: number }[], reward: (mana: number, gauge: number) => void,
+   *           local: (x: number, y: number) => { x: number, y: number } }} d
+   *   origins：法术起点（施法者胸口高度），跟着玩家走；blockers：此刻的土墙（挡冰锥）；reward：完美闪避回法力、加气势；
+   *   local：屏幕坐标换成界面坐标（画面转了 90° 时要转回来）
    */
   constructor(scene, d) {
     this.scene = scene; this.d = d;
@@ -104,26 +106,45 @@ export class Trial {
     return { g, fill: parts[1] };
   }
 
-  /** 拖动画面走位、轻点闪避 @param {HTMLElement} canvas */
+  /**
+   * 触屏走位。手机（mobile）：左半边是浮动摇杆——按在哪儿底座就在哪儿，拖出底座半径时底座跟着手指走；右半边留给按钮，点空处不算。
+   * 电脑上用鼠标：在画面上拖动走位、轻点闪避。
+   * 坐标一律先换成界面坐标（d.local）：手机竖着拿时整个画面转了 90°，屏幕上的"往上拖"在画面里是"往右"。
+   * @param {HTMLElement} canvas
+   */
   attach(canvas) {
+    const R = 50;   // 摇杆半径（像素）：拖满就是全速
     const down = (/** @type {PointerEvent} */ e) => {
       if (!this.on || this.ptr) return;
-      this.ptr = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), moved: false };
+      const q = this.d.local(e.clientX, e.clientY);
+      if (this.d.mobile && q.x > canvas.clientWidth * 0.55) return;
+      this.ptr = { id: e.pointerId, x: q.x, y: q.y, t: performance.now(), moved: false };
       canvas.setPointerCapture?.(e.pointerId);
+      if (this.d.mobile) this.d.hud.showStick(q);
     };
     const move = (/** @type {PointerEvent} */ e) => {
       const p = this.ptr;
       if (!p || e.pointerId !== p.id) return;
-      const dx = e.clientX - p.x, dy = e.clientY - p.y, l = Math.hypot(dx, dy);
+      const q = this.d.local(e.clientX, e.clientY);
+      let dx = q.x - p.x, dy = q.y - p.y;
+      const l = Math.hypot(dx, dy);
       if (l > 10) p.moved = true;
+      if (this.d.mobile) {
+        if (l > R) { p.x += (dx / l) * (l - R); p.y += (dy / l) * (l - R); dx = (dx / l) * R; dy = (dy / l) * R; }
+        this.d.hud.showStick(p, dx, dy);
+        const k = l < 6 ? 0 : 1 / R;
+        this.stick.x = dx * k; this.stick.y = -dy * k;
+        return;
+      }
       const k = l < 10 ? 0 : Math.min(1, l / 60) / l;   // 拖 60 像素就是全速
       this.stick.x = dx * k; this.stick.y = -dy * k;
     };
     const up = (/** @type {PointerEvent} */ e) => {
       const p = this.ptr;
       if (!p || e.pointerId !== p.id) return;
-      if (!p.moved && performance.now() - p.t < 250) this.dash();
+      if (!this.d.mobile && !p.moved && performance.now() - p.t < 250) this.dash();
       this.ptr = null; this.stick.x = this.stick.y = 0;
+      if (this.d.mobile) this.d.hud.showStick(null);
     };
     canvas.addEventListener('pointerdown', down);
     canvas.addEventListener('pointermove', move);
@@ -153,11 +174,12 @@ export class Trial {
     this.d.canvas.style.touchAction = 'none';
     const { hud } = this.d;
     hud.setTrial(true, false);
+    hud.setPad(this.d.mobile);
     hud.setCoreName('气血');
     hud.setCore(this.hp, TRIAL.hp);
     hud.setWave('试炼', '战前准备');
     hud.setHint(this.d.mobile
-      ? '战前：点按钮右上角的笔给按钮写一句咒（开战后不能写）。在画面上拖动走位，轻点画面闪避；准备好了点「开战」'
+      ? '战前：点按钮右上角的笔给按钮写一句咒（开战后不能写）。左手按住左半边拖动走位，右手点「闪」闪避；准备好了点「开战」'
       : '战前：点按钮右上角的笔给按钮写一句咒（开战后不能写）。WASD / 方向键走位，空格闪避；准备好了点「开战」或按回车');
     hud.setDashReady(true);
   }
@@ -193,6 +215,7 @@ export class Trial {
     this.robe.emissive.setRGB(0, 0, 0);
     this.d.canvas.style.touchAction = '';
     this.d.hud.setTrial(false, false);
+    this.d.hud.setPad(false);
     this.d.hud.setCoreName('阵眼');
     this.shown = '';
   }

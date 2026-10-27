@@ -146,8 +146,8 @@ export function start(root, opts = {}) {
   const floatAt = (p, text, color) => {
     _v.copy(p).project(camera);
     if (_v.z > 1) return;
-    const r = renderer.domElement.getBoundingClientRect();
-    hud.floatText((_v.x * 0.5 + 0.5) * r.width, (-_v.y * 0.5 + 0.5) * r.height, text, color);
+    const c = renderer.domElement;   // 用布局尺寸：试炼横过来转了 90° 时，屏幕上量到的宽高是对调的
+    hud.floatText((_v.x * 0.5 + 0.5) * c.clientWidth, (-_v.y * 0.5 + 0.5) * c.clientHeight, text, color);
   };
   const enemies = new Enemies(scene, world, particles, {
     onCoreHit: (dmg) => hitCore(dmg),
@@ -160,7 +160,8 @@ export function start(root, opts = {}) {
   const trial = new Trial(scene, { enemies, fx, particles, hud, caster: layout.caster, origins: [origin, fx.origin],
     canvas: renderer.domElement, mobile, floatText: floatAt, win: trialWon, lose: trialLost,
     blockers: () => walls.obstacles(),   // 土墙挡得住冰锥
-    reward: (mana, gauge) => { S.mana = Math.min(MANA_MAX, S.mana + mana); setGauge(Math.min(ULT_GAUGE, S.gauge + gauge)); } });
+    reward: (mana, gauge) => { S.mana = Math.min(MANA_MAX, S.mana + mana); setGauge(Math.min(ULT_GAUGE, S.gauge + gauge)); },
+    local: (x, y) => toLocal(x, y) });
 
   // ---------------------------------------------------------------- 镜头：第三人称，平时固定；开口时轻推近
   const cam = { base: new THREE.Vector3(), look: new THREE.Vector3(), near: new THREE.Vector3(), nearLook: new THREE.Vector3(), focus: 0 };
@@ -194,7 +195,27 @@ export function start(root, opts = {}) {
   // iOS 的 Safari 弹出键盘时页面本身不变矮，只是下半截被盖住：把游戏区域缩到看得见的那块（微信、安卓会自己变矮，不受影响）
   const vv = window.visualViewport;
   let vvCovered = false;
+  // 试炼要横着玩。手机竖着拿（锁了自动旋转、或苹果锁不了方向）时，把整个游戏区域顺时针转 90°：
+  // 左上角钉在屏幕右上角，宽取屏幕的高、高取屏幕的宽；人把手机往左一横就是正的。界面跟着一起转，按钮照常点得到。
+  let rotated = false, locked = false, wentFull = false;
+  /** 屏幕坐标 → 游戏区域里的坐标（转了 90° 时：区域的 x 轴朝屏幕下方，y 轴朝屏幕左方） @param {number} x @param {number} y */
+  function toLocal(x, y) {
+    const r = root.getBoundingClientRect();
+    return rotated ? { x: y - r.top, y: r.right - x } : { x: x - r.left, y: y - r.top };
+  }
+  const ROT_KEYS = /** @type {const} */ (['left', 'top', 'right', 'bottom', 'width', 'height', 'transformOrigin', 'transform']);
   const onResize = () => {
+    const rot = S.mode === 'trial' && mobile && window.innerHeight > window.innerWidth;
+    if (rot) {
+      const zoomed = vv && Math.abs(vv.scale - 1) > 0.01;
+      const H = Math.round(vv && !zoomed ? vv.height : window.innerHeight), W = window.innerWidth;   // 键盘弹起时（写咒）只用看得见的那段
+      Object.assign(root.style, { left: `${W}px`, top: `${Math.round(vv && !zoomed ? vv.offsetTop : 0)}px`, right: 'auto', bottom: 'auto',
+        width: `${H}px`, height: `${W}px`, transformOrigin: '0 0', transform: 'rotate(90deg)' });
+      rotated = true; vvCovered = false;
+      layoutCamera();
+      return;
+    }
+    if (rotated) { for (const k of ROT_KEYS) root.style[k] = ''; rotated = false; }
     if (vv) {
       const covered = vv.height < window.innerHeight - 60 && Math.abs(vv.scale - 1) < 0.01;   // 双指放大时也会变小，那不算
       if (covered) {
@@ -275,8 +296,28 @@ export function start(root, opts = {}) {
     else { trial.stop(); startWave(0); }
     setGauge(0);
     hud.hideOverlay();
-    layoutCamera();   // 按钮栏出现后，底下被挡住的高度变了
+    if (mobile) landscape(mode === 'trial');
+    onResize();   // 试炼要不要转过来；按钮栏出现后，底下被挡住的高度也变了
     if (mode === 'defense') hud.input.focus();
+  }
+
+  /**
+   * 手机进试炼时锁横屏：安卓的浏览器要先全屏才锁得了（而且得在点按钮的那一下里调）。锁不了的（苹果、部分内置浏览器）
+   * 就靠 onResize 把画面转过来。回守关时解锁、退出全屏。
+   * @param {boolean} on
+   */
+  function landscape(on) {
+    const doc = /** @type {any} */ (document), so = /** @type {any} */ (screen.orientation);
+    if (!on) {
+      if (locked) so?.unlock?.();
+      if (wentFull && doc.fullscreenElement) doc.exitFullscreen?.().catch(() => {});
+      locked = wentFull = false;
+      return;
+    }
+    if (locked || !so?.lock || !doc.documentElement.requestFullscreen) return;
+    // 全屏了却锁不了方向：留着全屏（地址栏收起，转过来的画面也大一些），画面由 onResize 转
+    (doc.fullscreenElement ? Promise.resolve() : doc.documentElement.requestFullscreen({ navigationUI: 'hide' }).then(() => { wentFull = true; }))
+      .then(() => so.lock('landscape')).then(() => { locked = true; }).catch(() => {});
   }
 
   /** 试炼打赢了：boss 碎掉，过一会儿出结算页（可以再战或回去守关） */
