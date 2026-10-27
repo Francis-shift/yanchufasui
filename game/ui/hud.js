@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * 界面（纯 DOM，不依赖框架）：输入框、法力条、阵眼血条、波次、咒语卡、浮字、大字、开始与结算、调试面板。
+ * 界面（纯 DOM，不依赖框架）：输入框、法力条、阵眼血条、波次、咒语卡、浮字、大字、开始与结算、调试面板；试炼模式的 boss 血条、闪避键、开战按钮。
  * 咒语卡：书法大字写名字；下面把原话里被听懂的词加下划线并注明变成了什么，没听懂的标灰。
  */
 import { ELEMENTS, FORMS, INPUT_MAX_CHARS, SUMMONS } from '../rules/numbers.js';
@@ -132,6 +132,22 @@ const CSS = FONT_CSS + `
   max-width: min(420px, calc(100vw - 24px)); overflow: hidden;
   background: rgba(20,24,32,0.72); color: #dfe7f1; padding: 8px 10px; border-radius: 10px; white-space: pre; }
 .yc-debug[hidden] { display: none; }
+/* 试炼模式：顶上居中的 boss 血条（下面一条细的是冰甲）、闪避键、开战按钮；战斗中不打字、不写咒 */
+.yc-boss { position: absolute; left: 50%; transform: translateX(-50%); top: calc(14px + env(safe-area-inset-top, 0px));
+  width: min(440px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 5px; padding: 8px 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(6px); }
+.yc-boss[hidden] { display: none; }
+.yc-boss .yc-label b { color: #9a2a1e; }
+.yc-bosshp > i { background: linear-gradient(90deg, #b3261e, #ff6b4a); }
+.yc-armor { height: 5px; } .yc-armor > i { background: linear-gradient(90deg, #7cc8ff, #e2f4ff); }
+.yc-dash { width: 54px; height: 54px; border-radius: 50%; border: 2px solid #5d6b7a; background: rgba(255,255,255,0.9); color: #3b4856;
+  font-family: ${BRUSH}; font-size: 26px; line-height: 1; padding: 0; cursor: pointer; touch-action: manipulation; position: relative; }
+.yc-dash.cd { opacity: 0.45; }
+.yc-dash .yc-key { white-space: nowrap; font: 10px/1 system-ui, sans-serif; }
+.yc-go { align-self: center; margin-top: 2px; }
+.yc-go[hidden], .yc-input[hidden] { display: none; }
+.yc-nopen .yc-pen { display: none; }
+.yc-short .yc-dash { width: 46px; height: 46px; }
 /* 按游戏区域本身的尺寸切换（setLayout 加类名），不看整个浏览器窗口 */
 /* 窄（手机竖屏）：阵眼、波次、气势排成顶上一行，省出画面给敌人的来路；咒语卡由 placeCard 放在这一行下面 */
 .yc-narrow .yc-name { font-size: 32px; } .yc-narrow .yc-big { font-size: 46px; }
@@ -164,20 +180,23 @@ export class Hud {
     this.root = el(`<div class="yc-ui"></div>`);
     this.root.append(style);
     this.top = el(`<div class="yc-top">
-      <div class="yc-g"><div class="yc-label"><span>阵眼</span><b data-core>100</b></div><div class="yc-bar yc-core"><i data-corebar></i></div></div>
+      <div class="yc-g"><div class="yc-label"><span data-corename>阵眼</span><b data-core>100</b></div><div class="yc-bar yc-core"><i data-corebar></i></div></div>
       <div class="yc-g"><div class="yc-label"><span data-wave>准备守关</span><span data-left></span></div></div>
       <div class="yc-g yc-g-gauge"><div class="yc-label"><span>气势</span><b data-gauge>0 / 8</b></div><div class="yc-bar yc-gauge"><i data-gaugebar style="width:0"></i></div></div></div>`);
     this.bottom = el(`<div class="yc-bottom"><div class="yc-skills" hidden></div>
       <div class="yc-label"><span>法力</span><b data-mana>100</b></div><div class="yc-bar yc-mana"><i data-manabar></i></div>
       <input class="yc-input" maxlength="${INPUT_MAX_CHARS}" enterkeyhint="send" autocomplete="off" aria-label="咒语" placeholder="说出你的咒语……（回车施法）">
+      <button class="yc-btn yc-go" data-go hidden>开战</button>
       <div class="yc-hint" data-hint>开口就慢放，想好再说。例：先冻住最前面那只，再用风把它们吹下悬崖</div></div>`);
+    this.boss = el(`<div class="yc-boss" hidden><div class="yc-label"><span data-bossname></span><b data-bossphase></b></div>
+      <div class="yc-bar yc-bosshp"><i data-bosshp></i></div><div class="yc-bar yc-armor"><i data-armor></i></div></div>`);
     this.card = el(`<div class="yc-card" role="status" aria-live="polite"></div>`);
     this.big = el(`<div class="yc-big"></div>`);
     this.overlay = el(`<div class="yc-overlay"><div class="yc-box"><h1>言出法随</h1>
       <p>傀儡大军从云海里沿石阶和索桥攻上山门。你是守山门的修士，守住身后的护山大阵。</p>
       <p>打一句中文，法术就是什么；说得越有画面感，气势越足。不想打字，就点天赋按钮。</p>
       <div class="yc-picker"><div class="yc-picker-title">选天赋（最多 3 个）</div><div class="yc-talents"></div><div class="yc-syn"></div></div>
-      <button class="yc-btn" data-start>开始守关</button></div></div>`);
+      <button class="yc-btn" data-start>开始守关</button> <button class="yc-btn ghost" data-trial>试炼 · 试玩版</button></div></div>`);
     this.write = el(`<div class="yc-write" hidden><div class="yc-box">
       <div class="yc-write-title"></div>
       <input class="yc-input" maxlength="${INPUT_MAX_CHARS}" enterkeyhint="done" autocomplete="off" aria-label="给按钮写的咒" placeholder="写一句咒……（例：三颗火球从天而降）">
@@ -186,9 +205,10 @@ export class Hud {
         <button class="yc-btn ghost" data-cancel>取消</button><button class="yc-btn" data-ok>装进按钮</button></div></div></div>`);
     this.debug = el(`<div class="yc-debug" hidden></div>`);
     this.floats = el(`<div style="position:absolute;inset:0;overflow:hidden"></div>`);
-    this.root.append(this.floats, this.top, this.card, this.big, this.bottom, this.debug, this.write, this.overlay);
+    this.root.append(this.floats, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.overlay);
     root.append(this.root);
     this.input = /** @type {HTMLInputElement} */ (this.bottom.querySelector('input'));
+    this.go = /** @type {HTMLButtonElement} */ (this.bottom.querySelector('[data-go]'));
     this.q = (sel) => /** @type {HTMLElement} */ (this.root.querySelector(sel));
     this.cardTimer = 0; this.bigTimer = 0;
     // 写咒对话框的按钮只绑一次，回调在 openWrite 时换成当前这个天赋的
@@ -224,17 +244,23 @@ export class Hud {
     this.q('.yc-syn').innerHTML = syn.length
       ? '羁绊　' + syn.map((s) => `<span style="white-space:nowrap">先${esc(nm(s.a))}后${esc(nm(s.b))}：<b>${esc(s.name)}</b></span>`).join('　')
       : (list.some((t) => t.on) ? '再选一个，看看它们之间的羁绊' : '至少选一个天赋');
-    /** @type {HTMLButtonElement} */ (this.q('[data-start]')).disabled = !list.some((t) => t.on);
+    for (const b of this.overlay.querySelectorAll('[data-start],[data-trial]')) /** @type {HTMLButtonElement} */ (b).disabled = !list.some((t) => t.on);
   }
 
   /**
    * 战斗中的天赋按钮栏：每个天赋一个圆钮（右上角的笔用来写咒），后面是气势满了才出现的"召唤"。
+   * 试炼模式另给 dash：天赋前面多一个"闪"（闪避）。
    * @param {{ el: string, label: string, named: boolean }[]} skills
-   * @param {{ cast: (el: string) => void, pen: (el: string) => void, summon: () => void }} on
+   * @param {{ cast: (el: string) => void, pen: (el: string) => void, summon: () => void, dash?: () => void }} on
    */
   setSkills(skills, on) {
     const bar = this.q('.yc-skills');
     bar.innerHTML = '';
+    if (on.dash) {
+      const d = el(`<button class="yc-dash" aria-label="闪避">闪<span class="yc-key">空格</span></button>`);
+      d.addEventListener('pointerdown', (e) => { e.preventDefault(); on.dash?.(); });
+      bar.append(d);
+    }
     skills.forEach((s, i) => {
       const w = el(`<div class="yc-skill" style="--c:${elColor(s.el)}" data-el="${s.el}"><button class="yc-cast"></button>
         <button class="yc-pen" aria-label="给这个按钮写一句咒">✎</button><span class="yc-key">${i + 1}</span></div>`);
@@ -303,6 +329,43 @@ export class Hud {
   }
 
   setCore(hp, max) { this.q('[data-core]').textContent = String(Math.max(0, Math.ceil(hp))); this.q('[data-corebar]').style.width = `${Math.max(0, hp / max) * 100}%`; }
+  /** 左上第一条血叫什么：守关是"阵眼"，试炼是玩家自己的"气血" @param {string} name */
+  setCoreName(name) { this.q('[data-corename]').textContent = name; }
+
+  /**
+   * 试炼模式的界面：不打字（藏起输入框）；开战后不能写咒（藏起按钮上的笔）；战前显示"开战"。
+   * @param {boolean} on 是否在试炼模式 @param {boolean} fighting 是否已开战
+   */
+  setTrial(on, fighting) {
+    this.input.hidden = on;
+    this.go.hidden = !on || fighting;
+    this.root.classList.toggle('yc-nopen', on && fighting);
+    if (!on) this.setBoss(null);
+  }
+  /** 闪避冷却中：按钮变淡 @param {boolean} ready */
+  setDashReady(ready) { this.root.querySelector('.yc-dash')?.classList.toggle('cd', !ready); }
+
+  /**
+   * boss 血条（null 收起）：名字、第几阶段、血、冰甲。
+   * @param {{ name: string, phase: string, hp: number, max: number, armor: number, armorMax: number } | null} b
+   */
+  setBoss(b) {
+    this.boss.hidden = !b;
+    if (!b) return;
+    this.q('[data-bossname]').textContent = b.name;
+    this.q('[data-bossphase]').textContent = b.phase;
+    this.q('[data-bosshp]').style.width = `${Math.max(0, b.hp / b.max) * 100}%`;
+    this.q('[data-armor]').style.width = `${Math.max(0, b.armor / b.armorMax) * 100}%`;
+    this.placeBoss();
+  }
+  /** boss 血条居中靠上；和左上角的面板左右重叠（竖屏）就放到面板下面 */
+  placeBoss() {
+    if (this.boss.hidden) return;
+    const ui = this.root.getBoundingClientRect(), top = this.top.getBoundingClientRect();
+    const w = this.boss.offsetWidth || Math.min(440, ui.width - 32);
+    const overlaps = (ui.width - w) / 2 < top.right - ui.left + 8;
+    this.boss.style.top = overlaps ? `${Math.round(top.bottom - ui.top + 6)}px` : '';
+  }
   setMana(m, max) { this.q('[data-mana]').textContent = String(Math.floor(m)); this.q('[data-manabar]').style.width = `${(m / max) * 100}%`; }
   setWave(text, left) { this.q('[data-wave]').textContent = text; this.q('[data-left]').textContent = left; }
   setHint(text) { this.q('[data-hint]').textContent = text; }
@@ -318,6 +381,7 @@ export class Hud {
     this.root.classList.toggle('yc-narrow', w <= 600);
     this.root.classList.toggle('yc-short', h <= 520);
     this.placeCard();
+    this.placeBoss();
   }
 
   /** 咒语卡居中靠上；若和左上角的面板左右重叠，就放到面板下面 */
@@ -399,12 +463,13 @@ export class Hud {
     setTimeout(() => f.remove(), 950);
   }
 
-  /** 开始 / 结算页 @param {string} title @param {string} body @param {string} btn */
-  showOverlay(title, body, btn) {
+  /** 开始 / 结算页：btn 是守关按钮上的字，trial 是试炼按钮上的字 @param {string} title @param {string} body @param {string} btn @param {string} [trial] */
+  showOverlay(title, body, btn, trial = '试炼 · 试玩版') {
     /** @type {HTMLElement} */ (this.overlay.querySelector('h1')).textContent = title;
     const ps = this.overlay.querySelectorAll('p');
     ps[0].textContent = body; ps[1].textContent = '';
     /** @type {HTMLElement} */ (this.overlay.querySelector('[data-start]')).textContent = btn;
+    /** @type {HTMLElement} */ (this.overlay.querySelector('[data-trial]')).textContent = trial;
     this.overlay.hidden = false;
   }
   hideOverlay() { this.overlay.hidden = true; }

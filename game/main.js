@@ -4,6 +4,7 @@
  *   开口就慢放 → 回车：关键词先猜元素给法阵上色 → 咏唱（同时请模型解析，最短 0.8 秒、超时 4.5 秒改用关键词）
  *   → 清洗意图 → 裁决（消耗、降级、伤害）→ 咒语卡 → 执行（飞弹 / 爆炸 / 命中结算）。
  * 规则全在 game/rules/（纯函数、有单测）；这里只负责把结果演出来。
+ * 两个模式：守关（5 波，这里管波次）、试炼（boss 关，灰盒试玩版，在 modes/trial.js；这里切换模式、把打在 boss 身上的命中交给它算冰甲）。
  */
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
@@ -20,10 +21,11 @@ import {
   bindSpell, buttonGaugeGain, combineButtons, defaultIntent, elName, scrollsFor, synergies, talentOpen, toggleTalent,
 } from './rules/talents.js';
 import {
-  BEAM, BUTTON_CHANT_MS, CHANT_MIN_MS, CORE_HP, FORMS, INPUT_MAX_CHARS, MANA_MAX, MOMENTUM_FX, MOMENTUM_RANGE, PARSE_TIMEOUT_MS, RAIN,
+  BEAM, BUTTON_CHANT_MS, CHANT_MIN_MS, CORE_HP, ENEMIES, FORMS, INPUT_MAX_CHARS, MANA_MAX, MOMENTUM_FX, MOMENTUM_RANGE, PARSE_TIMEOUT_MS, RAIN,
   SLOWMO_MAX_SEC, SLOWMO_SCALE, TALENTS, TORNADO, ULT_GAUGE, WALL,
 } from './rules/numbers.js';
 import { Enemies } from './actors/enemies.js';
+import { Trial } from './modes/trial.js';
 import { DragonFx } from './fx/dragon.js';
 import { Locks } from './fx/locks.js';
 import { distToSegment, Walls } from './fx/walls.js';
@@ -140,18 +142,23 @@ export function start(root, opts = {}) {
   const hud = new Hud(root);
   preloadFonts();   // 标题画面期间先下书法字的常用那份
   const _v = new THREE.Vector3();
+  /** 场景里某点上方飘一个字 @param {THREE.Vector3} p @param {string} text @param {string} color */
+  const floatAt = (p, text, color) => {
+    _v.copy(p).project(camera);
+    if (_v.z > 1) return;
+    const r = renderer.domElement.getBoundingClientRect();
+    hud.floatText((_v.x * 0.5 + 0.5) * r.width, (-_v.y * 0.5 + 0.5) * r.height, text, color);
+  };
   const enemies = new Enemies(scene, world, particles, {
     onCoreHit: (dmg) => hitCore(dmg),
-    onGone: () => {},
+    onGone: (e, how) => trial.onGone(e, how),   // 试炼：boss 碎了就赢
     pushed: (e) => fx.windTrail(e.group),   // 被风吹飞的身后拖两道笔触，推下悬崖那一下看得清
     emerge: () => env.spawnPuff(),          // 索桥那一路从邻峰的黑雾里出来：雾鼓一下
-    floatText: (p, text, color) => {
-      _v.copy(p).project(camera);
-      if (_v.z > 1) return;
-      const r = renderer.domElement.getBoundingClientRect();
-      hud.floatText((_v.x * 0.5 + 0.5) * r.width, (-_v.y * 0.5 + 0.5) * r.height, text, color);
-    },
+    touch: (e) => trial.touch(e),           // 试炼：小傀儡贴身自爆
+    floatText: floatAt,
   });
+  const trial = new Trial(scene, { enemies, fx, particles, hud, caster: layout.caster, origins: [origin, fx.origin],
+    canvas: renderer.domElement, mobile, floatText: floatAt, win: trialWon, lose: trialLost });
 
   // ---------------------------------------------------------------- 镜头：第三人称，平时固定；开口时轻推近
   const cam = { base: new THREE.Vector3(), look: new THREE.Vector3(), near: new THREE.Vector3(), nearLook: new THREE.Vector3(), focus: 0 };
@@ -204,6 +211,7 @@ export function start(root, opts = {}) {
 
   // ---------------------------------------------------------------- 状态
   const S = {
+    mode: /** @type {'defense' | 'trial'} */ ('defense'),   // 守关 / 试炼
     phase: 'title', mana: MANA_MAX, core: CORE_HP, gauge: 0,
     lastCombo: /** @type {{ key: string, streak: number } | null} */ (null), seen: /** @type {string[]} */ ([]),
     said: new Set(), wave: 0, queue: /** @type {string[]} */ ([]), spawnT: 0, spawned: 0, busy: false,
@@ -242,7 +250,8 @@ export function start(root, opts = {}) {
     }
   }
 
-  function startGame() {
+  /** @param {'defense' | 'trial'} [mode] */
+  function startGame(mode = 'defense') {
     preloadFonts(true);   // 开局后把其余一级字也下好，免得冷门字第一次出现时先闪成别的字体
     enemies.clear();
     if (walls.clear()) enemies.setObstacles([]);
@@ -252,19 +261,39 @@ export function start(root, opts = {}) {
     if (pend) { clearTimeout(pend.t); pend = null; }
     buttonChant = false; frozen = false;
     hud.closeWrite();
-    Object.assign(S, { phase: 'playing', mana: MANA_MAX, core: CORE_HP, gauge: 0, lastCombo: null, seen: [], said: new Set(),
-      wave: 0, busy: false, restT: 0, inv: 0 });   // 新的一局天先放晴，再随第一波慢慢压上来
+    Object.assign(S, { mode, phase: 'playing', mana: MANA_MAX, core: CORE_HP, gauge: 0, lastCombo: null, seen: [], said: new Set(),
+      wave: 0, queue: [], busy: false, restT: 0, inv: 0 });   // 新的一局天先放晴，再随第一波慢慢压上来
     barrier.reset();
     S.talents = [...S.talents].sort((a, b) => TALENTS.indexOf(a) - TALENTS.indexOf(b));
     S.binds = Object.fromEntries(Object.entries(S.binds).filter(([k]) => S.talents.includes(k)));
     hud.setSkills(S.talents.map((el) => ({ el, label: S.binds[el]?.name || elName(el), named: !!S.binds[el] })),
-      { cast: pressTalent, pen: openWrite, summon: pressSummon });
-    startWave(0);
+      { cast: pressTalent, pen: openWrite, summon: pressSummon, dash: mode === 'trial' ? () => trial.dash() : undefined });
     hud.setCore(S.core, CORE_HP);
+    if (mode === 'trial') trial.prepare();   // 试炼：战前先写咒、试招，点"开战"boss 才出来
+    else { trial.stop(); startWave(0); }
     setGauge(0);
     hud.hideOverlay();
     layoutCamera();   // 按钮栏出现后，底下被挡住的高度变了
-    hud.input.focus();
+    if (mode === 'defense') hud.input.focus();
+  }
+
+  /** 试炼打赢了：boss 碎掉，过一会儿出结算页（可以再战或回去守关） */
+  function trialWon() {
+    S.phase = 'won';
+    hud.bigText('试炼通过', '#16202b', 1600);
+    after(1.6, () => {
+      if (S.phase === 'won' && S.mode === 'trial') {
+        hud.showOverlay('试炼通过', `${ENEMIES.boss.name}碎了，气血还剩 ${Math.ceil(trial.hp)}。这是试玩版，招式和数值还在调。`, '去守关', '再战试炼');
+      }
+    });
+  }
+  /** 试炼输了 */
+  function trialLost() {
+    S.phase = 'lost';
+    hud.bigText('败下阵来', '#b3261e', 1400);
+    after(1.4, () => {
+      if (S.phase === 'lost' && S.mode === 'trial') hud.showOverlay('败下阵来', '看地上的红圈和红扇走位；冰甲只怕火，先用火打碎它。再试一次？', '去守关', '再战试炼');
+    });
   }
 
   /** 气势槽：改数、更新界面；满了亮出召唤按钮，过半先把龙的模型下好 @param {number} g */
@@ -342,14 +371,25 @@ export function start(root, opts = {}) {
   const onGlobalKey = (e) => {
     if (e.key === '`') { hud.debug.hidden = !hud.debug.hidden; return; }
     if (document.activeElement instanceof HTMLInputElement) return;   // 在打字（主输入框或写咒对话框）
+    if (S.mode === 'trial' && S.phase === 'playing' && hud.write.hidden) {
+      // 试炼：走位、闪避；战前按回车开战。不打字，所以不抢焦点
+      if (trial.key(e.code, true)) { e.preventDefault(); return; }
+      if (e.key === 'Enter' && !trial.fighting) { e.preventDefault(); trial.engage(); return; }
+    }
     if (hotkey(e)) return;
-    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && S.phase === 'playing') input.focus();
+    if (S.mode === 'defense' && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && S.phase === 'playing') input.focus();
   };
+  const onGlobalKeyUp = (/** @type {KeyboardEvent} */ e) => { trial.key(e.code, false); };
+  const onBlur = () => trial.keys.clear();   // 切走窗口时松开的键收不到，免得一直往一个方向走
   input.addEventListener('input', onInput);
   input.addEventListener('keydown', onKey);
   window.addEventListener('keydown', onGlobalKey);
+  window.addEventListener('keyup', onGlobalKeyUp);
+  window.addEventListener('blur', onBlur);
   const startBtn = /** @type {HTMLButtonElement} */ (hud.overlay.querySelector('[data-start]'));
-  startBtn.addEventListener('click', startGame);
+  startBtn.addEventListener('click', () => startGame());
+  /** @type {HTMLButtonElement} */ (hud.overlay.querySelector('[data-trial]')).addEventListener('click', () => startGame('trial'));
+  hud.go.addEventListener('click', () => trial.engage());
   warmUp(opts.parseUrl);   // 玩家看标题的这几秒，把连接先建好
 
   // ---------------------------------------------------------------- 施法
@@ -441,7 +481,7 @@ export function start(root, opts = {}) {
     const fused = plan.steps.find((s) => s.fusion);
     const autoNamed = !intent.name || intent.name === defaultName(intent.steps);
     const name = fused && autoNamed ? /** @type {string} */ (fused.fusionName) : intent.name || (plan.ok ? defaultName(plan.steps) : '');
-    hud.showCard({ name, text, plan, intent, source, ms });
+    if (!(trial.fighting && c.button)) hud.showCard({ name, text, plan, intent, source, ms });   // 试炼开战后不出咒语卡：顶上是 boss 血条，眼睛要看地上
     if (plan.backlash) { fx.backlash(); hud.bigText('天道不允', '#b3261e', 1300); }
     fx.endChant();
     buttonChant = false;
@@ -535,7 +575,7 @@ export function start(root, opts = {}) {
   let frozen = false;
   /** @param {string} el */
   function openWrite(el) {
-    if (!(S.phase === 'playing' || S.phase === 'rest') || pend) return;
+    if (!(S.phase === 'playing' || S.phase === 'rest') || pend || trial.fighting) return;   // 试炼只能战前写咒
     frozen = true;
     const close = () => { hud.closeWrite(); frozen = false; };
     hud.openWrite(elName(el), el, {
@@ -696,9 +736,11 @@ export function start(root, opts = {}) {
   function raiseWall(step, res) {
     let c = res.point ? { x: res.point.x, z: res.point.z } : { x: DEFAULT_AIM.x, z: DEFAULT_AIM.z };
     if (res.ids.length) {
-      // 打的是敌人：墙立在它前面 2 米（挡在它和阵眼之间），而不是砸在它身上
-      const tx = CORE_POS.x - c.x, tz = CORE_POS.z - c.z, tl = Math.hypot(tx, tz) || 1;
-      c = { x: c.x + (tx / tl) * Math.min(2, tl - 3), z: c.z + (tz / tl) * Math.min(2, tl - 3) };
+      // 打的是敌人：墙立在它前面 2 米（挡在它和阵眼之间；试炼里挡在它和自己之间），而不是砸在它身上
+      const guard = S.mode === 'trial' ? CASTER_POS : CORE_POS;
+      const tx = guard.x - c.x, tz = guard.z - c.z, tl = Math.hypot(tx, tz) || 1;
+      const off = S.mode === 'trial' ? Math.min(2, Math.max(0, tl - 1.8)) : Math.min(2, tl - 3);
+      c = { x: c.x + (tx / tl) * off, z: c.z + (tz / tl) * off };
     }
     let dx = c.x - CASTER_POS.x, dz = c.z - CASTER_POS.z, len = Math.hypot(dx, dz);
     if (len < 2.2) { c = { x: CASTER_POS.x, z: CASTER_POS.z - 2.6 }; dx = 0; dz = -1; len = 1; }   // 「自己脚下」：立在身前，别把自己围住
@@ -769,7 +811,8 @@ export function start(root, opts = {}) {
 
   function hitEnemy(e, step, dmg, from, dir) {
     const wasFrozen = e.frozen > 0;
-    const r = damageTo({ type: e.type, frozen: wasFrozen }, { el: step.el, dmg, ...dir });
+    let r = damageTo({ type: e.type, frozen: wasFrozen }, { el: step.el, dmg, ...dir });
+    if (e.mode === 'boss') r = trial.hitBoss(e, step.el, r);   // 试炼的 boss：冰甲只怕火
     const at = e.pos.clone();
     enemies.applyHit(e, r, from, step.el);
     if (step.el === 'thunder' && !dir.chain) chain(e, at, wasFrozen, step, dmg);
@@ -779,7 +822,9 @@ export function start(root, opts = {}) {
       // 蒸汽爆：冻住的目标被火打中，炸开一圈额外伤害
       fx.burst(at.clone().setY(at.y + 0.6), 'fire', 2.5, 0.7);
       for (const o of [...enemies.list]) {
-        if (o !== e && Math.hypot(o.pos.x - at.x, o.pos.z - at.z) <= 3) enemies.applyHit(o, { dmg: r.aoeBonus, freezeSec: 0, burnSec: 0, unfreeze: true, push: 0, reaction: '蒸汽爆' }, at, 'fire');
+        if (o === e || Math.hypot(o.pos.x - at.x, o.pos.z - at.z) > 3) continue;
+        const hit = { dmg: r.aoeBonus, freezeSec: 0, burnSec: 0, unfreeze: true, push: 0, reaction: '蒸汽爆', stunSec: 0 };
+        enemies.applyHit(o, o.mode === 'boss' ? trial.hitBoss(o, 'fire', hit) : hit, at, 'fire');
       }
     }
   }
@@ -895,7 +940,8 @@ export function start(root, opts = {}) {
     for (let i = timers.length - 1; i >= 0; i--) { timers[i].t -= dt; if (timers[i].t <= 0) { const t = timers.splice(i, 1)[0]; t.fn(); } }
     if (S.phase === 'playing' || S.phase === 'rest') {
       S.mana = regenMana(S.mana, dt);
-      updateWave(dt);
+      if (S.mode === 'trial') trial.update(dt, camera);   // 试炼：走位、boss 出招（没有波次）
+      else updateWave(dt);
     }
     world.step(1 / 60, dt, 3);
     updateCubes(dt);
@@ -914,7 +960,9 @@ export function start(root, opts = {}) {
     worldDim += (dimTarget - worldDim) * Math.min(1, realDt * 6);
     env.setDim(worldDim);
     // 入侵：天色跟波次走、守住散开、输了全暗；试验场可以锁定某一档
-    const invT = invasionTarget({ phase: S.phase, wave: S.wave, waves: WAVES.length, progress: S.spawned / Math.max(1, S.spawned + S.queue.length) });
+    // 试炼按 boss 的三个阶段压（第三阶段与守关最后一波一样暗）
+    const invT = S.mode === 'trial' ? invasionTarget({ phase: S.phase, wave: trial.phase - 1, waves: 3, progress: trial.progress() })
+      : invasionTarget({ phase: S.phase, wave: S.wave, waves: WAVES.length, progress: S.spawned / Math.max(1, S.spawned + S.queue.length) });
     S.inv = lab.inv >= 0 ? lab.inv : stepInvasion(S.inv, invT, S.phase, dt);
     env.setInvasion(S.inv);
     layout.plaza.setInvasion(S.inv);   // 台面裂缝、焦痕
@@ -971,6 +1019,18 @@ export function start(root, opts = {}) {
   // ---------------------------------------------------------------- 调试接口（面板里用：地址参数不可用）
   const demo = {
     start: () => startGame(),
+    /** 试炼：trial() 进战前准备，engage() 开战；walk(x, z) 把玩家挪过去；bossHp(n) 改 boss 的血（看换阶段） */
+    trial: () => startGame('trial'),
+    engage: () => trial.engage(),
+    walk: (x = 0, z = 5.2) => { trial.p.set(x, 0, z); trial.sync(); },
+    bossHp: (n) => { if (trial.boss) trial.boss.hp = n; },
+    trialState: () => {
+      const b = trial.boss;
+      return { on: trial.on, fighting: trial.fighting, hp: trial.hp, at: [+trial.p.x.toFixed(2), +trial.p.z.toFixed(2)], phase: trial.phase,
+        armor: Math.round(trial.armor), state: trial.state, move: trial.move, t: +trial.t.toFixed(2),
+        boss: b && { hp: Math.round(b.hp), at: [+b.pos.x.toFixed(2), +b.pos.z.toFixed(2)], frozen: +b.frozen.toFixed(2) },
+        minions: enemies.list.filter((o) => o.chase).length };
+    },
     cast: (text) => submit(text),
     spawn: (/** @type {any} */ type = 'grunt', path = 0) => enemies.spawn(type, path),
     state: () => ({ phase: S.phase, mana: Math.round(S.mana), core: S.core, gauge: S.gauge, enemies: enemies.views(), last: S.last && { source: S.last.source, ms: S.last.ms, plan: S.last.plan } }),
@@ -1037,6 +1097,9 @@ export function start(root, opts = {}) {
     vv?.removeEventListener('resize', onResize);
     vv?.removeEventListener('scroll', onResize);
     window.removeEventListener('keydown', onGlobalKey);
+    window.removeEventListener('keyup', onGlobalKeyUp);
+    window.removeEventListener('blur', onBlur);
+    trial.dispose();
     enemies.clear();
     for (const c of stressList) world.removeBody(c.body);
     scene.remove(stressMesh); stressMesh.dispose(); stressGeo.dispose(); stressMat.dispose();

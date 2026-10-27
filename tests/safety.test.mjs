@@ -25,8 +25,8 @@ test('字表：界面固定大字、所有默认名、融合名与成语都在�
   assert.deepEqual(bad, [], `这些字不在先加载的字表里：${bad.join('、')}`);
 });
 
-test('字表：main.js 里所有大字与结算标题的写法，每个字都在大字那份字体里', () => {
-  const src = fs.readFileSync(new URL('../game/main.js', import.meta.url), 'utf8');
+test('字表：main.js、modes/trial.js 里所有大字与结算标题的写法，每个字都在大字那份字体里', () => {
+  const src = ['../game/main.js', '../game/modes/trial.js'].map((f) => fs.readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
   const calls = [...src.matchAll(/(?:bigText|showOverlay)\(([^;]*?)(?:,\s*'#|,\s*`|,\s*'[^']*',\s*'|\);)/g)].map((m) => m[1]);
   assert.ok(calls.length >= 6, `只找到 ${calls.length} 处大字，正则可能失效`);
   const big = new Set(BIG_CHARS);

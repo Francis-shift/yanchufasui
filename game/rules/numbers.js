@@ -111,7 +111,27 @@ export const ENEMIES = {
   grunt:    { name: '小傀儡', hp: 40,  speed: 2.0, coreDmg: 10 },
   shield:   { name: '盾傀儡', hp: 80,  speed: 1.2, coreDmg: 20, frontReduce: 0.8 },
   colossus: { name: '巨像',   hp: 300, speed: 0.6, coreDmg: 50, freezeMult: 0.5 },
+  boss:     { name: '寒甲傀儡王', hp: 1500, speed: 1.3, coreDmg: 0, freezeMult: 0.5 },   // 试炼模式的 boss，招式与冰甲见下面 BOSS
 };
+
+/**
+ * 试炼模式的 boss（设计文档第 2 节"试炼模式"；10-25 灰盒初值，试玩后再写进设计文档）：三招（砸地红圈、扇形横扫、召小傀儡）加冰甲。
+ * 冰甲只怕火：甲在时火照常伤害并削甲，别的元素只剩 armoredMult，也冻不住；削穿就碎，之后谁打都照常。
+ * 血量降到 phases 两档换阶段：第 2 阶段冰甲重凝，第 3 阶段狂暴（红圈连砸两下、召得更多）。
+ * pace：每个阶段预警、喘息、召唤冷却的倍数（越小越快）。冻住过一次，化开后 freezeGrace 秒内冻不住（免得被冰弹冻到死）。
+ */
+export const BOSS = {
+  armor: 120, armoredMult: 0.2, scale: 2.6, freezeGrace: 3, stunMax: 0.2,
+  phases: [0.7, 0.3], pace: [1, 0.8, 0.62], recover: [1.3, 2.0], roarSec: 1.6, keepDist: 3.4, enrageSpeed: 1.3,
+  slam:   { r: 2.6, tele: 1.2, dmg: 22 },                         // 红圈落在预警开始那一刻玩家站的地方
+  sweep:  { r: 6, halfDeg: 60, tele: 1.0, dmg: 16, reach: 5 },     // 玩家在 reach 米内才用：朝玩家扫一扇
+  summon: { tele: 0.9, n: [2, 3, 4], cd: 14, keep: 1 },           // 场上小傀儡不超过 keep 只、离上次召过了 cd 秒才召
+};
+/**
+ * 试炼模式的玩家：气血、走速（米/秒）、闪避（冲多远、多少秒冲完、冷却；冲刺中不受伤）、挨打后多少秒不再受伤；
+ * 小傀儡贴身自爆的伤害。
+ */
+export const TRIAL = { hp: 100, speed: 4.2, dash: { dist: 3.6, sec: 0.18, cd: 0.9 }, hurtGrace: 0.7, touchDmg: 8 };
 
 /** 元素反应（只在程序里判断）：先中的元素 + 后来的元素 */
 export const REACTIONS = {
