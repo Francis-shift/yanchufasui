@@ -2,7 +2,7 @@
 
 - 库（three、cannon-es、后期处理）取 jsdelivr 的压缩版，缓存在 preview/vendor-min/；
 - game/ 下的本地模块逐个收进来，相对引用改写成内部名字；
-- 全部 gzip + base64 内联，页面启动时用浏览器自带的 DecompressionStream 解开，动态写 importmap 再启动。
+- 全部模块合成一份、gzip + base64 内联，页面启动时用浏览器自带的 DecompressionStream 解开，动态写 importmap 再启动。
 预览页没有服务器，解析只走关键词（等同断网模式）。
 用法：python tools/build_preview.py          → preview/index.html（游戏）
       python tools/build_preview.py check    → preview/check.html（手机检查页）
@@ -93,8 +93,10 @@ BOOT = """<script>
       return new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
     };
     const urls = {};
-    for (const s of document.querySelectorAll('script[data-mod]')) {
-      urls[s.dataset.mod] = URL.createObjectURL(new Blob([await unzip(s.textContent)], { type: 'text/javascript' }));
+    for (const s of document.querySelectorAll('script[data-bundle]')) {
+      for (const [name, src] of Object.entries(JSON.parse(await unzip(s.textContent)))) {
+        urls[name] = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+      }
     }
     for (const [name, key] of Object.entries(%s)) urls[name] = urls[key];
     const map = document.createElement('script');
@@ -163,8 +165,9 @@ def main():
     for name, p in ENTRIES.items():
         if name in used:
             collect_pkg(p, pkgs)
-    blocks = [f'<script type="application/octet-stream" data-mod="@pkg/{p}">{gz_b64(c)}</script>' for p, c in pkgs.items()]
-    blocks += [f'<script type="application/octet-stream" data-mod="@local/{p}">{gz_b64(c)}</script>' for p, c in locs.items()]
+    # 所有模块压成一个 gzip 流（模块之间重复的写法能互相引用，比逐个压小几十 KB；10-27 逐个压时超了 512 KB）
+    mods = {f"@pkg/{p}": c for p, c in pkgs.items()} | {f"@local/{p}": c for p, c in locs.items()}
+    blocks = [f'<script type="application/octet-stream" data-bundle>{gz_b64(json.dumps(mods, ensure_ascii=False))}</script>']
     if dragon:   # 模型数据 gzip 后内联，游戏里按开头两个字节自己判断要不要解压
         blocks.append(f'<script type="application/octet-stream" id="asset-dragon">{base64.b64encode(gzip.compress(dragon, 9)).decode()}</script>')
     blocks += [f'<script type="application/octet-stream" data-asset="{a.name}">{base64.b64encode(a.read_bytes()).decode()}</script>' for a in assets]

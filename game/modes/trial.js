@@ -3,10 +3,13 @@
  * 试炼模式（灰盒，设计文档第 2 节"试炼模式"）：在山门广场上走位躲 boss 的招。
  * 战中不打字：WASD / 方向键走位、空格闪避、1～3 放天赋、4 召唤（手机横过来玩：左手摇杆走位，右手点"闪"和天赋）；战前可以给按钮写咒。
  * 规则（冰甲、换阶段、挑招、判定、走位边界）在 rules/trial.js；这里管玩家走位与受伤、boss 的动作、地上的预警。
+ * 一局（rules/run.js RUN_STAGES）：小怪潮 → 三选一 → boss → 三选一 → …… → 第三个 boss；这里按顺序推进，选卡交给 main.js（d.pick）。
+ * 第二、三个 boss（石甲巨像、火灵）还没做，先用寒甲傀儡王顶上。
  * 施法者的位置就是 CASTER_POS：玩家走到哪，法术就从哪放出（同步脚下法阵和特效起点）；回到守关时放回原处。
  */
 import * as THREE from 'three';
-import { BOSS, ENEMIES, TRIAL } from '../rules/numbers.js';
+import { BOSS, ENEMIES, RUN, TRIAL } from '../rules/numbers.js';
+import { BOSS_COUNT, RUN_STAGES, newRun, runMods } from '../rules/run.js';
 import {
   bossHit, bossPhase, homingTurn, inCircle, inSector, isPerfect, keepInArena, pickMove, recoverSec, slamCount, spiralAngles, teleSec,
 } from '../rules/trial.js';
@@ -38,15 +41,19 @@ export class Trial {
    *           caster: THREE.Object3D, origins: THREE.Vector3[], canvas: HTMLElement, mobile: boolean,
    *           floatText: (p: THREE.Vector3, text: string, color: string) => void, win: () => void, lose: () => void,
    *           blockers: () => { x: number, z: number, r: number }[], reward: (mana: number, gauge: number) => void,
-   *           local: (x: number, y: number) => { x: number, y: number } }} d
+   *           local: (x: number, y: number) => { x: number, y: number }, pick: (insight: boolean, done: () => void) => void }} d
    *   origins：法术起点（施法者胸口高度），跟着玩家走；blockers：此刻的土墙（挡冰锥）；reward：完美闪避回法力、加气势；
-   *   local：屏幕坐标换成界面坐标（画面转了 90° 时要转回来）
+   *   local：屏幕坐标换成界面坐标（画面转了 90° 时要转回来）；pick：出三选一（insight：打完 boss 那次），选完调 done 接着打
    */
   constructor(scene, d) {
     this.scene = scene; this.d = d;
     this.on = false;          // 在试炼模式里（含战前准备）
     this.fighting = false;    // 已开战
     this.hp = TRIAL.hp;
+    /** 这一局拿过的心法合成的加成（main.js 选完卡写进来） */
+    this.mods = runMods(newRun());
+    // 一局走到第几段（RUN_STAGES 的下标）、第几段小怪潮 / 第几个 boss、这段小怪还要冒几只、多久冒下一只；用时、完美闪避几次（结算用）
+    this.stage = -1; this.round = 0; this.waveLeft = 0; this.waveN = 1; this.spawnT = 0; this.runT = 0; this.perfects = 0;
     this.p = HOME.clone();
     this.face = new THREE.Vector3(0, 0, -1);   // 最近一次走的方向：原地闪避朝这边
     /** @type {Set<string>} */
@@ -171,6 +178,7 @@ export class Trial {
     this.stop();
     this.on = true;
     this.hp = TRIAL.hp; this.phase = 1; this.armor = 0; this.state = 'idle';
+    this.stage = -1; this.round = 0; this.waveLeft = 0; this.runT = 0; this.perfects = 0;
     this.d.canvas.style.touchAction = 'none';
     const { hud } = this.d;
     hud.setTrial(true, false);
@@ -179,26 +187,103 @@ export class Trial {
     hud.setCore(this.hp, TRIAL.hp);
     hud.setWave('试炼', '战前准备');
     hud.setHint(this.d.mobile
-      ? '战前：点按钮右上角的笔给按钮写一句咒（开战后不能写）。左手按住左半边拖动走位，右手点「闪」闪避；准备好了点「开战」'
-      : '战前：点按钮右上角的笔给按钮写一句咒（开战后不能写）。WASD / 方向键走位，空格闪避；准备好了点「开战」或按回车');
+      ? `一局：小怪潮与 ${BOSS_COUNT} 个 boss 交替，每打完一段三选一。战前点按钮右上角的笔写一句咒（开战后不能写）；左手拖动走位，右手点「闪」闪避；准备好了点「开战」`
+      : `一局：小怪潮与 ${BOSS_COUNT} 个 boss 交替，每打完一段三选一。战前点按钮右上角的笔写一句咒（开战后不能写）；WASD / 方向键走位，空格闪避；准备好了点「开战」或按回车`);
     hud.setDashReady(true);
   }
 
-  /** 开战：boss 从广场那头现身，吼一声再出招 */
+  /** 开战：从第一段小怪潮打起 */
   engage() {
     if (!this.on || this.fighting) return;
     this.fighting = true;
+    this.d.hud.setTrial(true, true);
+    this.next();
+  }
+
+  /** 进下一段（RUN_STAGES）：小怪潮、三选一、boss；排完了就是打通了 */
+  next() {
+    if (!this.fighting) return;
+    const st = RUN_STAGES[++this.stage];
+    if (!st) { this.end(true); return; }
+    if (st.kind === 'wave') this.startWave();
+    else if (st.kind === 'boss') this.spawnBoss(st.n ?? 1);
+    else { this.state = 'pick'; this.d.pick(!!st.insight, () => this.next()); }
+  }
+
+  /** 一段小怪潮：小傀儡隔一会儿从广场边上冒一只，追着人自爆；冒完、清空了这一段就过了 */
+  startWave() {
+    const W = RUN.wave;
+    this.round++;
+    this.waveLeft = this.waveN = W.n[Math.min(this.round, W.n.length) - 1];
+    this.spawnT = W.first; this.state = 'wave';
+    const { hud } = this.d;
+    hud.bigText(`第 ${this.round} 波`, '#16202b', 1400);
+    hud.setHint(this.d.mobile ? '小傀儡追着人自爆：边走边打，别让它们贴身' : '小傀儡追着人自爆：边走边打，别让它们贴身。1、2、3 放天赋，4 召唤，空格闪避');
+    this.showWave();
+  }
+
+  /** @param {number} dt */
+  updateWave(dt) {
+    if (this.waveLeft > 0 && (this.spawnT -= dt) <= 0) {
+      this.spawnT = RUN.wave.every;
+      this.waveLeft--;
+      this.spawnChaser();
+    }
+    if (this.waveLeft <= 0 && !this.d.enemies.list.some((o) => o.chase)) { this.state = 'rest'; this.t = RUN.rest; }
+    this.showWave();
+  }
+
+  /** 广场边上、离玩家够远的地方冒一只追人的小傀儡（冒紫烟） */
+  spawnChaser() {
+    const R = ARENA_R - 0.8;
+    let at = { x: 0, z: -R };
+    for (let i = 0; i < 12; i++) {
+      const a = rand(0, Math.PI * 2);
+      at = { x: Math.cos(a) * R, z: Math.sin(a) * R };
+      if (Math.hypot(at.x - this.p.x, at.z - this.p.z) >= RUN.wave.away) break;
+    }
+    keepInArena(at, BLOCK, ARENA_R, 0.3);
+    this.d.enemies.spawnAt('grunt', at.x, at.z, 'chase');
+    for (let i = 0; i < 24; i++) {
+      this.d.particles.emit(at.x + rand(-0.4, 0.4), rand(0.1, 0.9), at.z + rand(-0.4, 0.4), rand(-1.5, 1.5), rand(1, 3), rand(-1.5, 1.5),
+        rand(0.5, 0.9), rand(0.15, 0.3), [1.0, 0.5, 1.6], [0.3, 0.1, 0.5], { alpha: 0.4, drag: 2 });
+    }
+  }
+
+  /** 左上角：第几轮、这段小怪还剩几只（数变了才改界面） */
+  showWave() {
+    const left = this.waveLeft + this.d.enemies.list.filter((o) => o.chase).length;
+    const key = `w${this.round}|${left}`;
+    if (key === this.shown) return;
+    this.shown = key;
+    this.d.hud.setWave(`试炼 ${this.round}/${BOSS_COUNT} · 小怪潮`, `剩 ${left}`);
+  }
+
+  /** 第 n 个 boss 从广场那头现身，吼一声再出招（石甲巨像、火灵还没做，先用寒甲傀儡王顶上） @param {number} n */
+  spawnBoss(n) {
     const b = this.d.enemies.spawnAt('boss', BOSS_AT.x, BOSS_AT.z, 'boss');
     this.boss = b;
-    this.armor = BOSS.armor; this.phase = 1; this.freezeCd = 0; this.sinceSummon = 0;
+    this.armor = BOSS.armor; this.phase = 1; this.freezeCd = 0; this.sinceSummon = 0; this.lastMove = '';
     this.state = 'roar'; this.t = BOSS.roarSec;
     const { hud, fx } = this.d;
     fx.burst(new THREE.Vector3(b.pos.x, 0.4, b.pos.z), 'ice', 3, 0.8);
     hud.bigText(ENEMIES.boss.name, '#1f4f7a', 1600);
-    hud.setTrial(true, true);
-    hud.setWave('试炼', PHASE_NAME[1]);
+    hud.setWave(`试炼 ${n}/${BOSS_COUNT}`, PHASE_NAME[1]);
     hud.setHint(this.d.mobile ? '躲开地上的红圈和红扇；冰甲只怕火，先用火打碎它' : '躲开地上的红圈和红扇；冰甲只怕火，先用火打碎它。1、2、3 放天赋，4 召唤，空格闪避');
+    this.shown = '';
     this.showBoss();
+  }
+
+  /** 这个 boss 碎了：场上的小傀儡一起碎掉、冰锥收起，喘口气进下一段（最后一个 boss 就是打通了） @param {any} e */
+  bossDown(e) {
+    this.circle.g.visible = this.sector.g.visible = false;
+    this.clearBullets();
+    for (const o of [...this.d.enemies.list]) if (o.chase) this.d.enemies.kill(o, o.pos);
+    this.d.hud.setBoss(null);
+    this.d.fx.burst(new THREE.Vector3(e.pos.x, 1.2, e.pos.z), 'ice', 3.2, 0.9);
+    if (this.stage + 1 >= RUN_STAGES.length) { this.end(true); return; }
+    this.d.hud.bigText(`${ENEMIES.boss.name}碎了`, '#16202b', 1400);
+    this.state = 'rest'; this.t = RUN.rest;
   }
 
   /** 收场（回守关、重开）：玩家放回原处，预警收起 */
@@ -235,7 +320,7 @@ export class Trial {
     this.dashAt = this.clock; this.dashFrom.copy(this.p); this.perfectUsed = false;
     this.d.hud.setDashReady(false);
     // 冰锥眼看就要撞上（正朝人飞、window 秒内到）才闪：当场算完美闪避
-    const W = TRIAL.perfect.window;
+    const W = this.mods.perfectWindow;
     for (const b of this.bullets) {
       const rx = this.p.x - b.x, rz = this.p.z - b.z, d = Math.hypot(rx, rz), sp = Math.hypot(b.vx, b.vz);
       if (d < b.r + BODY + sp * W && rx * b.vx + rz * b.vz > 0.7 * d * sp) { this.perfect(); break; }
@@ -261,12 +346,13 @@ export class Trial {
     this.glow = 1;
     this.d.floatText(new THREE.Vector3(p.x, 2.4, p.z), '完美闪避', '#ffffff');
     this.dashCd = 0; hud.setDashReady(true);
-    this.d.reward(P.mana, P.gauge);
+    this.perfects++;
+    this.d.reward(P.mana, this.mods.perfectGauge);
   }
 
   /** 招落下没打中：闪避按得够晚、按的时候本来在范围里，就是完美闪避 @param {(q: { x: number, z: number }) => boolean} inside */
   checkPerfect(inside) {
-    if (!this.perfectUsed && isPerfect(this.clock - this.dashAt, inside(this.dashFrom))) this.perfect();
+    if (!this.perfectUsed && isPerfect(this.clock - this.dashAt, inside(this.dashFrom), this.mods.perfectWindow)) this.perfect();
   }
 
   /** 这一帧想往哪走（世界坐标，长度 0～1）：键盘和拖动按屏幕方向算，W / 往上拖是朝屏幕里走 */
@@ -352,11 +438,11 @@ export class Trial {
     return h.r;
   }
 
-  /** 有敌人没了（enemies 的 onGone）：是 boss 就赢了 @param {any} e @param {string} how */
+  /** 有敌人没了（enemies 的 onGone）：是 boss 就过了这一段 @param {any} e @param {string} how */
   onGone(e, how) {
     if (e !== this.boss) return;
     this.boss = null;
-    if (how === 'kill') this.end(true);
+    if (how === 'kill' && this.fighting) this.bossDown(e);
   }
 
   /** @param {boolean} won */
@@ -378,7 +464,7 @@ export class Trial {
     if (ph === 2) this.armor = BOSS.armor;
     if (ph === 2) this.d.hud.bigText('冰甲重凝', '#2f6fae', 1300);
     else this.d.hud.bigText('狂暴', '#b3261e', 1300);
-    this.d.hud.setWave('试炼', PHASE_NAME[ph]);
+    this.d.hud.setWave(`试炼 ${this.round}/${BOSS_COUNT}`, PHASE_NAME[ph]);
     this.d.fx.burst(new THREE.Vector3(b.pos.x, 1.2, b.pos.z), 'ice', 3.2, 0.9);
   }
 
@@ -533,8 +619,12 @@ export class Trial {
     if (!this.on) return;
     this.clock += dt;
     if (this.hp > 0) this.movePlayer(dt, camera);
+    if (!this.fighting) return;
+    this.runT += dt;
+    if (this.state === 'wave') { this.updateWave(dt); return; }
+    if (this.state === 'rest') { if ((this.t -= dt) <= 0) this.next(); return; }   // 一段打完喘口气
     const b = this.boss;
-    if (!this.fighting || !b) return;
+    if (!b) return;
     this.updateBullets(dt);   // 冰锥照飞，boss 冻住了也一样
     if (!this.fighting) return;   // 被冰锥打死了
     const held = b.frozen > 0 || b.stun > 0;
@@ -630,12 +720,12 @@ export class Trial {
       hp: b.hp, max: b.maxHp, armor: this.armor, armorMax: BOSS.armor });
   }
 
-  /** 天色（world/invasion.js）用：这一阶段打掉了几成 */
+  /** 天色（world/invasion.js，一轮一档）用：这一轮打到几成——小怪潮占前一半（这段小怪打掉几成），boss 占后一半（血掉了几成） */
   progress() {
     const b = this.boss;
-    if (!b) return 0;
-    const k = b.hp / b.maxHp, [p2, p3] = BOSS.phases;
-    const [hi, lo] = this.phase === 1 ? [1, p2] : this.phase === 2 ? [p2, p3] : [p3, 0];
-    return Math.min(1, Math.max(0, (hi - k) / (hi - lo)));
+    if (b) return 0.5 + 0.5 * Math.min(1, Math.max(0, 1 - b.hp / b.maxHp));
+    if (this.state === 'wave') return 0.5 * (1 - (this.waveLeft + this.d.enemies.list.filter((o) => o.chase).length) / Math.max(1, this.waveN));
+    const st = RUN_STAGES[this.stage]?.kind === 'pick' ? RUN_STAGES[this.stage - 1] : RUN_STAGES[this.stage];
+    return st?.kind === 'boss' ? 1 : st?.kind === 'wave' ? 0.5 : 0;
   }
 }

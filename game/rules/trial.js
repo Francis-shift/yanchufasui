@@ -74,10 +74,11 @@ export function teleSec(move, phase) {
 
 /**
  * 算不算完美闪避：招落下（或冰锥穿身）前 window 秒内才按的闪避，而且按的那一刻本来站在打得到的地方。
- * 早早走开不算。
+ * 早早走开不算。窗口默认 TRIAL.perfect.window，拿了心法「见切」放宽（rules/run.js runMods）。
  * @param {number} dashAgo 离上次按闪避过了几秒（没闪过给 Infinity） @param {boolean} wasInside 按闪避那一刻在不在范围里
+ * @param {number} [win] 窗口（秒）
  */
-export const isPerfect = (dashAgo, wasInside) => wasInside && dashAgo <= TRIAL.perfect.window;
+export const isPerfect = (dashAgo, wasInside, win = TRIAL.perfect.window) => wasInside && dashAgo <= win;
 
 /**
  * 追踪冰锥转一帧：速度方向朝目标转，每秒最多 turn 弧度，快慢不变。改的是 v 本身。

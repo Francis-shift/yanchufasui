@@ -30,8 +30,9 @@ export function totalCost(steps) {
  * @typedef {import('./intent.js').Intent} Intent
  * @typedef {import('./intent.js').Step} Step
  * @typedef {{ mana: number, lastCombo?: { key: string, streak: number } | null,
- *             seen?: Iterable<string>, said?: Iterable<string>, text?: string, gauge?: number, button?: boolean }} CastContext
+ *             seen?: Iterable<string>, said?: Iterable<string>, text?: string, gauge?: number, ult?: number, button?: boolean }} CastContext
  *   button：按天赋按钮放的——不按描写加气势槽（按键的气势看打法，见 talents.js buttonGaugeGain）
+ *   ult：召龙要几格气势（默认 ULT_GAUGE；试炼拿了心法「龙吟」变少，见 run.js runMods）
  * @typedef {Step & { cost: number, dmgTotal: number, dmgEach: number, first: boolean, repeat: number,
  *             fusion?: string, fusionName?: string, idiom?: string }} PlannedStep fusion 是融合的键（如 wind>fire）
  * @typedef {{ el: string, name: string, target: string, dmg: number, radius: number, cast: boolean, ghost: boolean,
@@ -121,9 +122,9 @@ function planSummon(intent, ctx) {
   const el = /** @type {keyof typeof SUMMONS} */ (intent.summon);
   const spec = SUMMONS[el];
   const target = intent.steps[0]?.target || 'densest';
-  const gauge = ctx.gauge ?? 0;
+  const gauge = ctx.gauge ?? 0, ult = ctx.ult ?? ULT_GAUGE;
   const why = !SUMMON_OPEN.includes(el) ? `${spec.name}尚未现世`
-    : gauge < ULT_GAUGE ? `气势 ${gauge}/${ULT_GAUGE}，${spec.name}未至`
+    : gauge < ult ? `气势 ${gauge}/${ult}，${spec.name}未至`
     : ctx.mana < spec.cost ? `法力不足，${spec.name}未至` : '';
   if (why) {
     const rest = { ...intent, summon: null };
@@ -175,9 +176,9 @@ export function fuse(planned, seen, newlySeen) {
   }
 }
 
-/** 法力恢复 */
-export function regenMana(mana, dt) {
-  return Math.min(MANA_MAX, mana + MANA_REGEN * dt);
+/** 法力恢复；mult 是回复倍数（试炼拿了心法「回元」） @param {number} mana @param {number} dt @param {number} [mult] */
+export function regenMana(mana, dt, mult = 1) {
+  return Math.min(MANA_MAX, mana + MANA_REGEN * mult * dt);
 }
 
 /**

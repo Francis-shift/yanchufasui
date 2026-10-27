@@ -190,6 +190,29 @@ const CSS = FONT_CSS + `
 .yc-pad .yc-bottom > .yc-label, .yc-pad .yc-bottom > .yc-mana { position: absolute; right: 250px; width: 240px; }
 .yc-pad .yc-bottom > .yc-label { bottom: 16px; }
 .yc-pad .yc-bottom > .yc-mana { bottom: 4px; }
+/* 试炼的三选一：三张卡一排（横屏手机也放得下），下面是重抽、不拿 */
+.yc-picks { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(220, 232, 245, 0.5);
+  backdrop-filter: blur(3px); pointer-events: auto; }
+.yc-picks[hidden] { display: none; }
+.yc-picks-box { width: min(620px, calc(100% - 24px)); text-align: center; }
+.yc-picks-title { font-family: ${BRUSH}; font-size: 36px; letter-spacing: 6px; color: #16202b; text-shadow: 0 2px 10px rgba(255,255,255,0.8); }
+.yc-picks-sub { font-size: 13px; color: var(--muted); margin: 2px 0 12px; }
+.yc-pick-row { display: flex; gap: 12px; justify-content: center; }
+.yc-pick { flex: 1 1 0; min-width: 0; max-width: 190px; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 12px 10px 14px; border-radius: 14px; border: 2px solid var(--c); background: rgba(255,255,255,0.92); color: var(--ink);
+  font: inherit; cursor: pointer; position: relative; box-shadow: 0 8px 22px -12px rgba(20,40,80,0.55); transition: transform .12s; }
+.yc-pick:hover, .yc-pick:focus-visible { transform: translateY(-3px); outline: none; box-shadow: 0 10px 26px -10px var(--c); }
+.yc-pick-kind { font-size: 11px; color: #fff; background: var(--c); border-radius: 999px; padding: 1px 8px; }
+.yc-pick-name { font-family: ${BRUSH}; font-size: 40px; line-height: 1.15; color: var(--c); white-space: nowrap; }
+.yc-pick-text { font-size: 12.5px; line-height: 1.55; color: #3b4856; }
+.yc-pick .yc-key { bottom: -16px; }
+.yc-pick.insight { background: linear-gradient(180deg, #fff8e6, rgba(255,255,255,0.94)); }
+.yc-picks-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
+.yc-picks-btns .yc-btn { margin-top: 0; padding: 8px 16px; font-size: 14px; }
+.yc-short .yc-picks-title { font-size: 26px; } .yc-short .yc-picks-sub { margin-bottom: 8px; }
+.yc-short .yc-pick { padding: 8px 8px 10px; } .yc-short .yc-pick-name { font-size: 30px; } .yc-short .yc-pick-text { font-size: 12px; line-height: 1.45; }
+.yc-short .yc-picks-btns { margin-top: 12px; }
+.yc-narrow .yc-pick-row { gap: 8px; } .yc-narrow .yc-pick-name { font-size: 30px; }
 `;
 
 /** @param {string} html */
@@ -232,7 +255,14 @@ export class Hud {
     this.floats = el(`<div style="position:absolute;inset:0;overflow:hidden"></div>`);
     this.stick = el(`<div class="yc-stick"><i></i></div>`);
     this.knob = /** @type {HTMLElement} */ (this.stick.firstElementChild);
-    this.root.append(this.floats, this.stick, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.overlay);
+    this.picks = el(`<div class="yc-picks" hidden><div class="yc-picks-box"><div class="yc-picks-title">三选一</div><div class="yc-picks-sub"></div>
+      <div class="yc-pick-row"></div>
+      <div class="yc-picks-btns"><button class="yc-btn ghost" data-reroll></button><button class="yc-btn ghost" data-skip>不拿，回满气血与法力</button></div></div></div>`);
+    /** @type {{ pick: (i: number) => void, reroll: () => void, skip: () => void } | null} */
+    this.pickOn = null;
+    /** @type {HTMLElement} */ (this.picks.querySelector('[data-reroll]')).addEventListener('click', () => this.pickOn?.reroll());
+    /** @type {HTMLElement} */ (this.picks.querySelector('[data-skip]')).addEventListener('click', () => this.pickOn?.skip());
+    this.root.append(this.floats, this.stick, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay);
     root.append(this.root);
     this.input = /** @type {HTMLInputElement} */ (this.bottom.querySelector('input'));
     this.go = /** @type {HTMLButtonElement} */ (this.bottom.querySelector('[data-go]'));
@@ -504,6 +534,31 @@ export class Hud {
     setTimeout(() => f.remove(), 950);
   }
 
+  /**
+   * 试炼的三选一。卡：种类（招式字、心法……）、书法名字（再拿是升级，名字后带「·二」）、说明、颜色（带元素的用元素色）。
+   * 点卡、或按 1～3 拿那一张（按键由 main.js 转给 pickOn）；重抽每局有限，用完按钮灰掉。
+   * @param {{ kind: string, name: string, text: string, el?: string, insight: boolean }[]} cards
+   * @param {{ sub: string, rerolls: number, pick: (i: number) => void, reroll: () => void, skip: () => void }} on
+   */
+  showPicks(cards, on) {
+    const row = this.q('.yc-pick-row');
+    row.innerHTML = '';
+    cards.forEach((c, i) => {
+      const color = c.el ? elColor(c.el) : KIND_COLOR[c.kind] || '#4a74d9';
+      const b = el(`<button class="yc-pick${c.insight ? ' insight' : ''}" style="--c:${color}"><span class="yc-pick-kind">${esc(c.kind)}</span>
+        <b class="yc-pick-name">${esc(showName(c.name))}</b><span class="yc-pick-text">${esc(c.text)}</span><span class="yc-key">${i + 1}</span></button>`);
+      b.addEventListener('click', () => this.pickOn?.pick(i));
+      row.append(b);
+    });
+    this.q('.yc-picks-sub').textContent = on.sub;
+    const rr = /** @type {HTMLButtonElement} */ (this.picks.querySelector('[data-reroll]'));
+    rr.textContent = `重抽（还剩 ${on.rerolls} 次）`;
+    rr.disabled = on.rerolls <= 0 || !cards.length;
+    this.pickOn = on;
+    this.picks.hidden = false;
+  }
+  closePicks() { this.picks.hidden = true; this.pickOn = null; }
+
   /** 开始 / 结算页：btn 是守关按钮上的字，trial 是试炼按钮上的字 @param {string} title @param {string} body @param {string} btn @param {string} [trial] */
   showOverlay(title, body, btn, trial = '试炼 · 试玩版') {
     /** @type {HTMLElement} */ (this.overlay.querySelector('h1')).textContent = title;
@@ -517,6 +572,9 @@ export class Hud {
 
   dispose() { clearTimeout(this.cardTimer); clearTimeout(this.bigTimer); this.root.remove(); }
 }
+
+/** 三选一卡面的颜色（不带元素的卡按种类；紫色只给敌人，这里不用） @type {Record<string, string>} */
+const KIND_COLOR = { 招式字: '#4a74d9', 字诀: '#2a8a7a', 心法: '#b06d00', 领悟: '#c9a03a' };
 
 /** @param {string} el */
 function elColor(el) {

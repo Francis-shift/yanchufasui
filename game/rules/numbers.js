@@ -142,6 +142,16 @@ export const BOSS = {
  */
 export const TRIAL = { hp: 100, speed: 4.2, dash: { dist: 3.6, sec: 0.18, cd: 0.9 }, hurtGrace: 0.7, touchDmg: 8,
   perfect: { window: 0.3, stop: 0.2, mana: 10, gauge: 1 } };
+/**
+ * 试炼的一局（设计文档第 4 节"试炼模式：一局与奖励"，10-27 定；初值，试玩再调）：
+ * 小怪潮第几段出几只小傀儡（n）、开打后 first 秒冒第一只、之后每 every 秒冒一只，从广场边上离玩家至少 away 米处冒出；
+ * 一段打完（小怪清空、boss 碎了）喘 rest 秒再选卡；每局重抽 rerolls 次；已经押过的元素，带这个元素的卡出现的分量 × owned。
+ * 心法的数：见切把完美闪避窗口放到 window 秒，聚气完美闪避加 gauge 格，回元法力回复 × regen，龙吟召龙只要 ult 格。
+ */
+export const RUN = {
+  wave: { n: [8, 10, 12], first: 1.2, every: 2.2, away: 6 }, rest: 1.6, rerolls: 1, owned: 2,
+  arts: { window: 0.45, gauge: 2, regen: 1.3, ult: 6 },
+};
 
 /** 元素反应（只在程序里判断）：先中的元素 + 后来的元素 */
 export const REACTIONS = {
