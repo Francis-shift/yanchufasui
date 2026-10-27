@@ -14,6 +14,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 import { chainTargets, damageTo, planCast, regenMana, resolveTarget } from './rules/arbiter.js';
+import { inWave } from './rules/fusion.js';
 import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
 import { maskText } from './rules/safety.js';
@@ -137,7 +138,7 @@ export function start(root, opts = {}) {
 
   const walls = new Walls(scene, world, particles);
   walls.fx = fx;   // 土墙碎成碎石、风墙的笔触
-  const fusions = new FusionFx(fx, particles);
+  const fusions = new FusionFx(fx, particles, quality.name === 'cinema' ? 1 : 0.55);   // 手机上火云团数打折
   const dragon = new DragonFx(fx, particles, opts.dragon);
   const hud = new Hud(root);
   preloadFonts();   // 标题画面期间先下书法字的常用那份
@@ -816,26 +817,30 @@ export function start(root, opts = {}) {
       start.y = groundHeightAt(start.x, start.z) ?? 0;
       fusions.tornado(start, dir, step);
     } else if (step.fusion === 'fire>wind') {
-      const from = CASTER_POS.clone().setY(1.3).addScaledVector(dir, 0.8);
-      fusions.beam(from, dir);
-      for (const e of [...enemies.list]) {
-        const rx = e.pos.x - from.x, rz = e.pos.z - from.z;
-        const along = rx * dir.x + rz * dir.z, lat = Math.abs(rx * dir.z - rz * dir.x);
-        if (along < 0 || along > BEAM.len || lat > BEAM.halfW) continue;
-        hitEnemy(e, step, step.dmgEach, from, {});
-        enemies.fling(e, dir.x * 11, 2.5, dir.z * 11);
-      }
+      fusions.beam(CASTER_POS.clone().setY(1.3).addScaledVector(dir, 0.8), dir, step);   // 浪头扫到谁才烧谁，见 fusionContacts
     }
   }
 
-  /** 每帧：火卷风碰到谁，烧一下并把它卷起来甩出去（每根卷风每个敌人一次） */
-  function tornadoContacts() {
+  /**
+   * 每帧：火卷风碰到谁，烧一下并把它卷起来甩出去；豪火灭却的浪头推到谁，烧一下并顺着浪推出去。
+   * 每道卷风、每片火浪对每个敌人只算一次。
+   */
+  function fusionContacts() {
     for (const tw of fusions.tornadoes) {
       for (const e of [...enemies.list]) {
         if (tw.hit.has(e.id) || Math.hypot(e.pos.x - tw.pos.x, e.pos.z - tw.pos.z) > TORNADO.r) continue;
         tw.hit.add(e.id);
         hitEnemy(e, tw.step, tw.step.dmgEach, tw.pos, {});
         enemies.fling(e, tw.dir.x * 8 + (Math.random() - 0.5) * 3, 6, tw.dir.z * 8 + (Math.random() - 0.5) * 3);
+      }
+    }
+    for (const wv of fusions.waves) {
+      const front = wv.t * BEAM.speed, at = wv.from.clone().setY(1.3);
+      for (const e of [...enemies.list]) {
+        if (wv.hit.has(e.id) || !inWave(e.pos, wv.from, wv.dir, front, 0.4)) continue;
+        wv.hit.add(e.id);
+        hitEnemy(e, wv.step, wv.step.dmgEach, at, {});
+        enemies.fling(e, wv.dir.x * 11, 2.5, wv.dir.z * 11);
       }
     }
   }
@@ -990,8 +995,8 @@ export function start(root, opts = {}) {
     updateCubes(dt);
     if (walls.update(dt)) enemies.setObstacles(walls.obstacles());   // 土墙沉下去了，流场重算
     curtainContacts();
-    fusions.update(dt);
-    tornadoContacts();
+    fusions.update(dt, camera);
+    fusionContacts();
     dragon.update(dt);
     enemies.update(dt, camera);
     fx.update(dt);

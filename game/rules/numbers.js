@@ -180,9 +180,13 @@ export const FUSIONS = {
 export const FUSION_OPEN = ['wind>fire', 'fire>wind'];
 /** 融合伤害 = 两步之和 × 1.2（消耗沿用组合八折，不另算） */
 export const FUSION_DMG_MULT = 1.2;
-/** 火卷风：半径、往前卷的速度和时长；豪火灭却：火柱长度和宽度（米） */
+/**
+ * 火卷风：半径、往前卷的速度和时长。
+ * 豪火灭却（10-27 由直的火柱改成往前推的火浪）：推多远（米）、起点和尽头的半宽（越推越宽）、浪头每秒推几米。
+ * 浪头扫到谁才烧谁，判定见 rules/fusion.js。
+ */
 export const TORNADO = { r: 2.2, speed: 3.2, sec: 3 };
-export const BEAM = { len: 15, halfW: 1.8 };
+export const BEAM = { len: 14, w0: 1.2, w1: 4.2, speed: 13 };
 
 /** 墙：段与段的间距（米）、持续时间（秒）。土墙是实心的，会挡路；火冰风墙是一道帘子，穿过就挨一下 */
 export const WALL = { gap: 1.1, earthSec: 8, curtainSec: 4 };
