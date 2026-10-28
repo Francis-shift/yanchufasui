@@ -1,7 +1,7 @@
 // 天赋与按键（设计文档第 4 节"天赋与按键"）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SCROLLS, bindSpell, buttonGaugeGain, combineButtons, defaultIntent, scrollsFor, synergies, toggleTalent } from '../game/rules/talents.js';
+import { GAUGE_WHITE, SCROLLS, bindSpell, buttonGaugeGain, combineButtons, defaultIntent, gaugeDragon, gaugeTo, scrollsFor, synergies, toggleTalent } from '../game/rules/talents.js';
 import { planCast } from '../game/rules/arbiter.js';
 import { parseKeywords } from '../game/rules/keywords.js';
 import { sanitizeIntent } from '../game/rules/intent.js';
@@ -102,4 +102,23 @@ test('召唤按钮：气势 0 档召冰龙，基础伤害与范围', () => {
   assert.equal(plan.summon?.dmg, 120);
   assert.equal(plan.summon?.radius, 5);
   assert.equal(plan.gaugeSpent, true);
+});
+
+test('气势槽分色：加的格染这一招的元素、完美闪避染白；召龙看哪种颜色最多，一样多看谁占最后一格，白格不算，全白召冰龙', () => {
+  const W = GAUGE_WHITE;
+  let cols = gaugeTo([], 2, 'fire');
+  cols = gaugeTo(cols, 3, W);
+  cols = gaugeTo(cols, 5, 'thunder');
+  assert.deepEqual(cols, ['fire', 'fire', W, 'thunder', 'thunder']);
+  assert.deepEqual(gaugeTo(cols, 3, 'ice'), ['fire', 'fire', W], '少了从后面去掉（拿了龙吟、上限变小）');
+  assert.deepEqual(gaugeTo(cols, 0, 'ice'), [], '召完清零');
+  assert.equal(gaugeDragon(cols), 'thunder', '火、雷各两格，雷占着最后一格');
+  assert.equal(gaugeDragon([...cols, 'fire']), 'fire');
+  assert.equal(gaugeDragon(['wind', W, W, W, W]), 'wind', '白格再多也不算');
+  assert.equal(gaugeDragon([W, W, W]), 'ice');
+  assert.equal(gaugeDragon([]), 'ice');
+  assert.equal(gaugeDragon(['earth', 'earth', 'earth', 'fire', 'fire', W]), 'earth');
+  assert.deepEqual(cols.length, 5, '原来那一列不被改');
+  assert.deepEqual(gaugeTo(['ice'], 4, ['wind', 'fire']), ['ice', 'wind', 'fire', 'wind'], '一句话用了几种元素，加的格轮着染');
+  assert.deepEqual(gaugeTo([], 1, []), [W], '一串是空的就染白');
 });

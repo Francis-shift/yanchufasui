@@ -51,20 +51,22 @@ test('召唤：气势槽满但法力不够 → 化作冰雨；冰雨也放不起
   assert.equal(broke.summon?.ghost, false, '什么都没放出来就不演龙影');
 });
 
-test('召唤：没开放的龙（火龙、雷龙）不管槽满不满都召不出，化作同元素的雨（雷 10-20 开放后雷龙也化成雷雨）', () => {
+test('召唤：五条龙都开放（10-27）——火龙、雷龙槽满就召得出；槽不满差一口气，演龙影、化作同元素的雨', () => {
   const fire = planCast(intentOf({ s: [{ e: 'fire', f: 'bolt', t: 'strongest' }], c: 'fire' }, '召唤火龙'), ctx());
-  assert.equal(fire.summon?.cast, false);
-  assert.equal(fire.summon?.ghost, false);
-  assert.match(fire.downgrades[0], /火龙尚未现世，化作火雨/);
-  assert.equal(fire.steps[0].el, 'fire');
+  assert.equal(fire.summon?.cast, true);
+  assert.equal(fire.summon?.el, 'fire');
+  assert.equal(fire.summon?.target, 'strongest');
+  assert.equal(fire.cost, SUMMONS.fire.cost);
   const thunder = planCast(intentOf({ s: [], c: 'thunder' }, '召唤雷龙'), ctx());
-  assert.equal(thunder.summon?.cast, false);
-  assert.equal(thunder.summon?.ghost, false, '没开放的龙不演龙影');
-  assert.match(thunder.downgrades[0], /雷龙尚未现世，化作雷雨/);
-  assert.equal(thunder.steps[0].el, 'thunder');
-  assert.equal(thunder.steps[0].form, 'rain');
+  assert.equal(thunder.summon?.cast, true);
+  assert.equal(thunder.summon?.target, 'densest', '没说打谁就打最密集的一群');
+  const short = planCast(intentOf({ s: [], c: 'thunder' }, '召唤雷龙'), ctx({ gauge: 3 }));
+  assert.equal(short.summon?.cast, false);
+  assert.equal(short.summon?.ghost, true);
+  assert.match(short.downgrades[0], /气势 3\/8，雷龙未至，化作雷雨/);
+  assert.equal(short.steps[0].el, 'thunder');
+  assert.equal(short.steps[0].form, 'rain');
 });
-
 test('召唤：模型给了表外的召唤物（凤凰）就当没召唤；关键词解析认得冰龙、火龙，只说"召唤神龙"按句里的元素', () => {
   assert.equal(intentOf({ s: [{ e: 'fire' }], c: 'phoenix' }).summon, null);
   assert.equal(parseKeywords('召唤冰龙，向左边吐一颗冰弹').c, 'ice');

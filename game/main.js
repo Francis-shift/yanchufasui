@@ -23,11 +23,12 @@ import {
   previewMove, reroll as rerollCards, runFusions, runMods, runeChantMs, runeSlots, runesOf, skip as skipCards, take as takeCard, upLabel, writeRune,
 } from './rules/run.js';
 import {
-  bindSpell, buttonGaugeGain, combineButtons, defaultIntent, elName, scrollsFor, synergies, talentOpen, toggleTalent,
+  GAUGE_WHITE, bindSpell, buttonGaugeGain, combineButtons, defaultIntent, elName, gaugeDragon, gaugeTo, scrollsFor, synergies, talentOpen,
+  toggleTalent,
 } from './rules/talents.js';
 import {
-  BEAM, BUTTON_CHANT_MS, CHANT_MIN_MS, CORE_HP, ENEMIES, FORMS, INPUT_MAX_CHARS, MANA_MAX, MOMENTUM_FX, MOMENTUM_RANGE, PARSE_TIMEOUT_MS, RAIN,
-  RUN, SLOWMO_MAX_SEC, SLOWMO_SCALE, TALENTS, TORNADO, TRIAL, WALL,
+  BEAM, BUTTON_CHANT_MS, CHANT_MIN_MS, CORE_HP, ELEMENTS, ENEMIES, FORMS, INPUT_MAX_CHARS, MANA_MAX, MOMENTUM_FX, MOMENTUM_RANGE, PARSE_TIMEOUT_MS, RAIN,
+  RUN, SLOWMO_MAX_SEC, SLOWMO_SCALE, SUMMONS, TALENTS, TORNADO, TRIAL, WALL,
 } from './rules/numbers.js';
 import { Enemies } from './actors/enemies.js';
 import { Trial } from './modes/trial.js';
@@ -43,7 +44,7 @@ import { invasionTarget, stepInvasion } from './world/invasion.js';
 import { buildBarrier } from './world/barrier.js';
 import { fitFrame } from './world/framing.js';
 import { loadProps } from './world/props.js';
-import { buildLayout, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS } from './world/layout.js';
+import { buildLayout, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS, OBSTACLES } from './world/layout.js';
 import { Hud, preloadFonts } from './ui/hud.js';
 import { inspireRemote, parseRemote, warmUp } from './net.js';
 import { pickQuality } from './quality.js';
@@ -246,6 +247,8 @@ export function start(root, opts = {}) {
   const S = {
     mode: /** @type {'defense' | 'trial'} */ ('defense'),   // 守关 / 试炼
     phase: 'title', mana: MANA_MAX, core: CORE_HP, gauge: 0,
+    /** 气势槽每一格是哪种元素的招加的（完美闪避加的是白格）：召哪条龙看这个（talents.js gaugeDragon） */
+    gaugeCols: /** @type {string[]} */ ([]),
     lastCombo: /** @type {{ key: string, streak: number } | null} */ (null), seen: /** @type {string[]} */ ([]),
     said: new Set(), wave: 0, queue: /** @type {string[]} */ ([]), spawnT: 0, spawned: 0, busy: false,
     last: /** @type {any} */ (null),
@@ -298,6 +301,7 @@ export function start(root, opts = {}) {
     fusions.clear();
     dragon.clear();
     embers.length = 0;
+    gales.length = 0;
     timers.length = 0;   // 上一局没跑完的延时（第二步法术、收锁定标记）不能带进新的一局
     if (pend) { clearTimeout(pend.t); pend = null; }
     buttonChant = false; frozen = false;
@@ -362,14 +366,22 @@ export function start(root, opts = {}) {
     });
   }
 
-  /** 气势槽：改数、更新界面；满了亮出召唤按钮，过半先把龙的模型下好（满几格看 S.mods.ult：拿了心法「龙吟」变少） @param {number} g */
-  function setGauge(g) {
+  /**
+   * 气势槽：改数、更新界面；满了亮出召唤按钮，过半先把要召的那条龙的模型下好（满几格看 S.mods.ult：拿了心法「龙吟」变少）。
+   * 加的格染这一招用到的元素（完美闪避加的是白格），哪种颜色最多，点"召唤"召哪条龙（设计文档第 4 节"五元素龙"）。
+   * @param {number} g @param {string | string[]} [el] 新加的格染什么（一串就轮着染）
+   */
+  function setGauge(g, el = GAUGE_WHITE) {
     const ult = S.mods.ult;
     S.gauge = g;
-    hud.setGauge(g, ult);
+    S.gaugeCols = gaugeTo(S.gaugeCols, g, el);
+    const next = gaugeDragon(S.gaugeCols);
+    hud.setGauge(g, ult, S.gaugeCols, SUMMONS[/** @type {keyof typeof SUMMONS} */ (next)].name);
     hud.setSummonReady(g >= ult);
-    if (g >= ult / 2) dragon.preload();
+    if (g >= ult / 2) dragon.preload(next);
   }
+  /** 这一招用到哪些元素（融合的两种都算），加的气势格染这几种颜色 @param {{ el: string, fusion?: string }[]} steps */
+  const stepEls = (steps) => steps.flatMap((s) => (s.fusion ? s.fusion.split('>') : [s.el]));
 
   // ---------------------------------------------------------------- 试炼的三选一（设计文档第 4 节"试炼模式：一局与奖励"）
   /**
@@ -677,8 +689,8 @@ export function start(root, opts = {}) {
       floatAt(new THREE.Vector3(CASTER_POS.x, 2.6, CASTER_POS.z), `${tag} ×${+boost.k.toFixed(2)}`, '#ffd76a');
     }
     S.mana -= plan.cost;
-    setGauge(plan.gaugeSpent ? 0 : Math.min(S.mods.ult, S.gauge + plan.gaugeGain));
-    if (intent.summon) dragon.preload();
+    setGauge(plan.gaugeSpent ? 0 : Math.min(S.mods.ult, S.gauge + plan.gaugeGain), stepEls(plan.steps));
+    if (intent.summon) dragon.preload(intent.summon);
     S.lastCombo = plan.lastCombo;
     S.seen.push(...plan.newlySeen);
     if (plan.saidKey) S.said.add(plan.saidKey);
@@ -705,7 +717,7 @@ export function start(root, opts = {}) {
     }
     if (c.button) {
       // 按键：打中几个、有没有打出融合或反应，边打边加气势槽（融合在放出时就算）
-      const stats = { hits: new Set(), combo: plan.steps.some((s) => s.fusion), awarded: 0 };
+      const stats = { hits: new Set(), combo: plan.steps.some((s) => s.fusion), awarded: 0, els: stepEls(plan.steps) };
       for (const s of plan.steps) stepStats.set(s, stats);
       awardButton(stats);
     }
@@ -747,11 +759,11 @@ export function start(root, opts = {}) {
   }
 
   // ---------------------------------------------------------------- 天赋按键（设计文档第 4 节"天赋与按键"）
-  /** 按键的这一招打出了新的命中或反应：补上该加的气势 @param {{ hits: Set<string>, combo: boolean, awarded: number }} st */
+  /** 按键的这一招打出了新的命中或反应：补上该加的气势 @param {{ hits: Set<string>, combo: boolean, awarded: number, els: string[] }} st */
   function awardButton(st) {
     const g = buttonGaugeGain({ hits: st.hits.size, combo: st.combo });
     if (g <= st.awarded || S.phase !== 'playing') return;
-    setGauge(Math.min(S.mods.ult, S.gauge + g - st.awarded));
+    setGauge(Math.min(S.mods.ult, S.gauge + g - st.awarded), st.els);
     st.awarded = g;
   }
 
@@ -814,13 +826,14 @@ export function start(root, opts = {}) {
     perform(intent, { text: `按键 · ${names.join(' → ')}`, source: '天赋按键', ms: 0, raw: null, castId: p.castId, button: true });
   }
 
-  /** 气势满了点"召唤"：冰龙按气势 0 档召（开口召的吃那句话的气势，更猛） */
+  /** 气势满了点"召唤"：召气势槽里颜色最多的那条龙（gaugeDragon），按气势 0 档召（开口召的吃那句话的气势，更猛） */
   function pressSummon() {
     if (S.phase !== 'playing' || S.busy || pend || S.gauge < S.mods.ult || !hud.write.hidden) return;
     S.busy = true;
     buttonChant = true;
-    beginChant('ice');
-    const intent = { steps: [], momentum: 0, name: '冰龙', unknown: [], overreach: false, notes: [], summon: 'ice' };
+    const el = /** @type {keyof typeof SUMMONS} */ (gaugeDragon(S.gaugeCols));
+    beginChant(el);
+    const intent = { steps: [], momentum: 0, name: SUMMONS[el].name, unknown: [], overreach: false, notes: [], summon: el };
     perform(intent, { text: '按键 · 召唤', source: '天赋按键', ms: 0, raw: null, castId: ++castSeq, button: true });
   }
 
@@ -886,8 +899,16 @@ export function start(root, opts = {}) {
   /** @type {Record<string, number>} */
   const scrollTurn = {};
 
+  /** 召唤时那行大字的颜色 */
+  const SUMMON_INK = { ice: '#1f5f9a', fire: '#b5481c', thunder: '#9a7410', wind: '#1f7a5a', earth: '#7a5428' };
+
   /**
-   * 真召唤：龙从施法者左前方破土，绕场一周，俯冲砸向目标；砸中时范围内每个敌人按"从天而降"吃一下（盾挡不住）。
+   * 真召唤：龙照自己的一套动作飞（fx/dragon.js flightPlan），砸中、劈雷时在这里结算（设计文档第 4 节"五元素龙"）：
+   *   - 冰、火、土：落下（土龙是从地里钻出来）那一下，范围内每个敌人按"从天而降"吃一下（盾挡不住）；
+   *     火龙再留一片火海，土龙把范围里的小怪顶起来、在钻出来的地方围一圈土墙；
+   *   - 风：不砸，卷起旋风——几秒里一下下割、把小怪往中心卷，顺带吹散 boss 的冰锥；
+   *   - 雷：不砸，绕圈时劈五道雷，轮着劈锁定的那几只，每道连锁比平常多跳一下，劈过的冰锥全碎。
+   * 气势、首次发现的加成（sm.dmg 比表里的 dmg 大多少）按同样的比例乘到火海、旋风、雷上。
    * @param {import('./rules/arbiter.js').SummonPlan} sm
    * @param {number} castId
    */
@@ -902,20 +923,105 @@ export function start(root, opts = {}) {
       if (!live.length) return null;
       return at(live.reduce((a, e) => a + e.pos.x, 0) / live.length, live.reduce((a, e) => a + e.pos.z, 0) / live.length);
     };
-    locks.show(castId, [{ el: sm.el, ids, ring: ids.length ? null : { x: pt.x, y: groundHeightAt(pt.x, pt.z) ?? 0, z: pt.z, r: sm.radius } }]);
-    hud.bigText(`${sm.name}现世`, '#1f5f9a', 1400);
-    fx.launchBurst(sm.el);
-    dragon.summon(at(pt.x, pt.z), sm.el, (p) => {
+    const el = /** @type {keyof typeof SUMMONS} */ (sm.el), k = sm.dmg / SUMMONS[el].dmg, T = at(pt.x, pt.z);
+    locks.show(castId, [{ el, ids, ring: ids.length ? null : { x: pt.x, y: T.y, z: pt.z, r: sm.radius } }]);
+    hud.bigText(`${sm.name}现世`, SUMMON_INK[el] ?? SUMMON_INK.ice, 1400);
+    fx.launchBurst(el);
+    const impact = (/** @type {THREE.Vector3} */ p) => {
       locks.clear(castId);
       if (S.phase !== 'playing') return;
-      for (const e of [...enemies.list]) {
-        if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) <= sm.radius) hitEnemy(e, { el: sm.el }, sm.dmg, p, { fromAbove: true });
+      if (el === 'wind') gale(p, sm.radius, k);
+      else if (el !== 'thunder') {
+        for (const e of [...enemies.list]) {
+          if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) > sm.radius) continue;
+          hitEnemy(e, { el }, sm.dmg, p, { fromAbove: true });
+          if (el === 'earth') enemies.fling(e, (Math.random() - 0.5) * 2, 7, (Math.random() - 0.5) * 2);   // 顶飞，落回圈里
+        }
+        if (el === 'fire') fireSea(p, sm.radius * 0.8, k);
+        if (el === 'earth') earthRing(p);
       }
       if (S.mods.yuwei) {   // 心法余威：龙落地后一段时间所有招加伤
         S.afterT = RUN.arts.after.sec;
         floatAt(new THREE.Vector3(CASTER_POS.x, 2.6, CASTER_POS.z), '余威', '#ffd76a');
       }
-    }, ids.length ? follow : undefined);
+    };
+    const strike = (/** @type {THREE.Vector3} */ from, /** @type {number} */ i) => dragonStrike(from, i, ids, follow() ?? T, SUMMONS.thunder.strike * k);
+    dragon.summon(T, el, { impact, strike: el === 'thunder' ? strike : undefined }, ids.length ? follow : undefined);
+  }
+
+  /** 火龙落下的火海：和字诀「燎」的地火一样每 tick 秒烧一下，只是大、烧得久 @param {THREE.Vector3} p @param {number} r @param {number} k */
+  function fireSea(p, r, k) {
+    const { sec, dps } = SUMMONS.fire.sea, tick = RUN.runes.liao.tick;
+    embers.push({ p: p.clone(), r, t: sec, tick, dmg: dps * tick * k });
+    fx.groundFire(p, r, sec);
+  }
+
+  /**
+   * 土龙钻出来的地方围一圈土墙（一段一个点，各自顺着圈的切线立），把圈里的困住；
+   * 落在柱子、石兽、香炉、石灯上，或者悬空的那几段不立。
+   * @param {THREE.Vector3} p
+   */
+  function earthRing(p) {
+    const { ring: R, wallSec } = SUMMONS.earth, n = Math.round((2 * Math.PI * R) / WALL.gap), pts = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2, x = p.x + Math.cos(a) * R, z = p.z + Math.sin(a) * R;
+      if (groundHeightAt(x, z) === null || OBSTACLES.some((o) => Math.hypot(x - o.x, z - o.z) < o.r + 0.5)) continue;
+      pts.push({ x, z, yaw: Math.atan2(-Math.sin(a), Math.cos(a)) + Math.PI / 2 });
+    }
+    if (!pts.length) return;
+    walls.add('earth', pts, 0, wallSec, { el: 'earth' });
+    enemies.setObstacles(walls.obstacles());
+  }
+
+  /** 风龙卷起的旋风：中心、半径、还剩几秒、离下一下还有几秒、每下多疼 @type {{ p: THREE.Vector3, r: number, t: number, tick: number, dmg: number }[]} */
+  const gales = [];
+  const GALE_TICK = 0.25, WIND = { el: 'wind' };
+  /** @param {THREE.Vector3} p @param {number} r @param {number} k */
+  function gale(p, r, k) {
+    const { sec, total } = SUMMONS.wind;
+    gales.push({ p: p.clone(), r, t: sec, tick: 0, dmg: (total * k * GALE_TICK) / sec });
+    fusions.gale(p, r, sec);
+    if (S.mode === 'trial') {   // 风一起，boss 射出来的冰锥全吹散
+      const n = trial.shatter(p, p, 999);
+      if (n) floatAt(p.clone().setY(p.y + 1.5), `吹散冰锥 ×${n}`, '#2fbf86');
+    }
+  }
+  /** 每帧：旋风里的每 GALE_TICK 秒割一下，小怪往中心卷、绕着转（boss 卷不动，照样挨割）；新飞进来的冰锥也吹散 @param {number} dt */
+  function updateGales(dt) {
+    for (let i = gales.length - 1; i >= 0; i--) {
+      const g = gales[i];
+      g.t -= dt; g.tick -= dt;
+      if (g.tick <= 0) {
+        g.tick += GALE_TICK;
+        for (const e of [...enemies.list]) {
+          const dx = g.p.x - e.pos.x, dz = g.p.z - e.pos.z, d = Math.hypot(dx, dz);
+          if (d > g.r + (e.mode === 'boss' ? 1 : 0)) continue;
+          hitEnemy(e, WIND, g.dmg, g.p, {});
+          const ux = dx / (d || 1), uz = dz / (d || 1), pull = Math.min(d, 2.5) * 1.6;
+          enemies.fling(e, ux * pull - uz * 4, 2.5, uz * pull + ux * 4);
+        }
+        if (S.mode === 'trial') trial.shatter(g.p, g.p, g.r * 1.5);
+      }
+      if (g.t <= 0) gales.splice(i, 1);
+    }
+  }
+
+  /**
+   * 雷龙劈的第 i 道雷：轮着劈锁定的那几只（死了的跳过），都没了就劈离目标最近的（10 米外的不劈，打在地上）；
+   * 从龙嘴劈下去，从天而降、盾挡不住，连锁一共跳 SUMMONS.thunder.jumps 下（平常是 ELEMENTS.thunder.chain.jumps），劈过的地方冰锥全碎。
+   * @param {THREE.Vector3} from @param {number} i @param {string[]} ids @param {THREE.Vector3} T @param {number} dmg
+   */
+  function dragonStrike(from, i, ids, T, dmg) {
+    if (S.phase !== 'playing') return;
+    const live = ids.map((id) => enemies.get(id)).filter(Boolean);
+    let e = live.length ? live[i % live.length] : nearest(T);
+    if (e && !live.length && Math.hypot(e.pos.x - T.x, e.pos.z - T.z) > 10) e = null;
+    const to = e ? enemies.aimPoint(e).clone() : T.clone().add(new THREE.Vector3((Math.random() - 0.5) * 4, 0, (Math.random() - 0.5) * 4));
+    fx.arc(from, to, { forks: 2 });
+    fx.burst(to, 'thunder', 1.4, 0.6);
+    fx.shake = Math.max(fx.shake, 0.2);
+    zapShards(from, to, SUMMONS.thunder.clear);   // 和字诀「引」一样，劈过的地方冰锥全碎，只是宽得多
+    if (e) hitEnemy(e, { el: 'thunder', extraJumps: SUMMONS.thunder.jumps - ELEMENTS.thunder.chain.jumps }, dmg, from, { fromAbove: true });
   }
 
   /**
@@ -937,10 +1043,10 @@ export function start(root, opts = {}) {
     });
   }
 
-  /** 字诀「引」：一道闪电从 a 劈到 b，两侧的冰锥全碎（试炼），碎了几颗飘在落点上 @param {THREE.Vector3} a @param {THREE.Vector3} b */
-  function zapShards(a, b) {
+  /** 字诀「引」：一道闪电从 a 劈到 b，两侧 r 米内的冰锥全碎（试炼），碎了几颗飘在落点上 @param {THREE.Vector3} a @param {THREE.Vector3} b */
+  function zapShards(a, b, r = RUN.runes.yin.r) {
     if (S.mode !== 'trial') return;
-    const n = trial.shatter(a, b, RUN.runes.yin.r);
+    const n = trial.shatter(a, b, r);
     if (n) floatAt(b.clone().setY(b.y + 1.2), `碎冰锥 ×${n}`, '#e0a816');
   }
 
@@ -1192,13 +1298,13 @@ export function start(root, opts = {}) {
 
   /**
    * 雷的连锁：从被劈中的那只（已经死了也算，用它倒下前的位置）一跳一跳劈向旁边的，每跳隔一小会儿，
-   * 打谁、打多疼由 chainTargets 定；跳出来的这几下不再连锁。
+   * 打谁、打多疼由 chainTargets 定；跳出来的这几下不再连锁。step.extraJumps：雷龙劈的雷多跳几下。
    */
   function chain(e, at, wasFrozen, step, dmg) {
     const views = [{ id: e.id, x: at.x, z: at.z, frozen: wasFrozen },
       ...enemies.list.filter((o) => o !== e).map((o) => ({ id: o.id, x: o.pos.x, z: o.pos.z, frozen: o.frozen > 0 }))];
     const yin = !!step.runes?.includes('yin');   // 字诀「引」：多跳几下，劈过的地方冰锥全碎
-    const jumps = chainTargets(e.id, views, dmg, yin ? RUN.runes.yin.jumps : 0);
+    const jumps = chainTargets(e.id, views, dmg, (yin ? RUN.runes.yin.jumps : 0) + (step.extraJumps ?? 0));
     let prev = at.clone().setY(at.y + 0.8);
     jumps.forEach((j, k) => after(0.08 * (k + 1), () => {
       const o = enemies.get(j.id);
@@ -1256,7 +1362,7 @@ export function start(root, opts = {}) {
   function labCast(raw, label) {
     if (S.phase !== 'playing') return;
     S.mana = MANA_MAX; S.lastCombo = null; S.said = new Set(); S.busy = false;
-    if (raw.c) setGauge(S.mods.ult);
+    if (raw.c) setGauge(S.mods.ult, raw.c);
     const castId = ++castSeq;
     const intent = sanitizeIntent(raw, label);
     locks.show(castId, lockSteps(intent.steps, intent.momentum).marks);
@@ -1314,7 +1420,7 @@ export function start(root, opts = {}) {
     updateCubes(dt);
     if (walls.update(dt)) enemies.setObstacles(walls.obstacles());   // 土墙沉下去了，流场重算
     curtainContacts();
-    if (S.phase === 'playing') updateEmbers(dt);
+    if (S.phase === 'playing') { updateEmbers(dt); updateGales(dt); }
     fusions.update(dt, camera);
     fusionContacts();
     dragon.update(dt);
@@ -1439,7 +1545,9 @@ export function start(root, opts = {}) {
     killAll: () => { S.queue.length = 0; for (const e of [...enemies.list]) enemies.kill(e, e.pos); },
     /** 打碎某一只（看飞弹半路目标没了会怎样） */
     kill: (id) => { const e = enemies.get(id); if (e) enemies.kill(e, e.pos); },
-    gauge: (n = S.mods.ult) => setGauge(n),
+    /** 气势槽设成 n 格，新加的格染 el（一串就轮着染；不给是白格）；gaugeCols() 看每一格的颜色 */
+    gauge: (n = S.mods.ult, /** @type {string | string[] | undefined} */ el = undefined) => setGauge(n, el),
+    gaugeCols: () => [...S.gaugeCols],
     /** 天赋按键：按一个，或在 0.6 秒内按两个（press('wind','fire') 出火卷风）；summonBtn 是金色召唤按钮 */
     press: (...els) => els.forEach((el) => pressTalent(el)),
     summonBtn: () => pressSummon(),
@@ -1473,8 +1581,12 @@ export function start(root, opts = {}) {
     },
     /** 竖屏取景的参数（调镜头用：改完这些向量再触发一次 resize） */
     framing: { dir: NARROW_DIR, look: NARROW_LOOK, wide: FRAME_WIDE, near: FRAME_NEAR },
-    dragon: () => dragon.preload(),
-    flight: () => { const f = dragon.active; return f && { kind: f.kind, s: +f.s.toFixed(1), sHit: +f.sHit.toFixed(1), impacted: f.impacted, target: f.target.toArray().map((v) => +v.toFixed(1)) }; },
+    dragon: (el = 'ice') => dragon.preload(el),
+    flight: () => {
+      const f = dragon.active, r = (/** @type {THREE.Vector3} */ v) => v.toArray().map((x) => +x.toFixed(1));
+      return f && { kind: f.kind, el: f.el, pick: f.plan.pick, s: +f.s.toFixed(1), sHit: +f.sHit.toFixed(1), L: +f.L.toFixed(1), impacted: f.impacted,
+        strikes: f.nextStrike, mesh: !!f.model, target: r(f.target), head: r(f.headPos) };
+    },
     locks: () => ({ heads: locks.heads.filter((h) => h.mesh.visible).map((h) => h.id), rings: locks.rings.filter((r) => r.mesh.visible).length }),
     // 以下给检查页用
     refill: () => { S.mana = MANA_MAX; S.core = CORE_HP; hud.setCore(S.core, CORE_HP); },

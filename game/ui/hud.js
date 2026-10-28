@@ -45,7 +45,9 @@ const CSS = FONT_CSS + `
 .yc-bar > i { display: block; height: 100%; width: 100%; border-radius: 4px; transition: width .15s; }
 .yc-core > i { background: linear-gradient(90deg, #6b7cff, #39c6ff); }
 .yc-mana > i { background: linear-gradient(90deg, #4f8dff, #7fe0ff); }
-.yc-gauge > i { background: linear-gradient(90deg, #f0b24a, #ffd98a); }
+.yc-gauge { display: flex; gap: 2px; }   /* 气势槽一格一格画，每格染加它的那个元素的颜色 */
+.yc-gauge > i { flex: 1; width: auto; border-radius: 2px; background: var(--c, transparent); transition: background .15s; }
+.yc-gauge > i.w { box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2); }
 .yc-top.gauge-full .yc-gauge { box-shadow: 0 0 10px 2px rgba(255, 196, 80, 0.75); animation: yc-pulse 1.1s ease-in-out infinite; }
 .yc-top.gauge-full [data-gauge] { color: #b06d00; }
 @keyframes yc-pulse { 50% { box-shadow: 0 0 16px 4px rgba(255, 196, 80, 0.95); } }
@@ -235,7 +237,7 @@ export class Hud {
     this.top = el(`<div class="yc-top">
       <div class="yc-g"><div class="yc-label"><span data-corename>阵眼</span><b data-core>100</b></div><div class="yc-bar yc-core"><i data-corebar></i></div></div>
       <div class="yc-g"><div class="yc-label"><span data-wave>准备守关</span><span data-left></span></div></div>
-      <div class="yc-g yc-g-gauge"><div class="yc-label"><span>气势</span><b data-gauge>0 / 8</b></div><div class="yc-bar yc-gauge"><i data-gaugebar style="width:0"></i></div></div></div>`);
+      <div class="yc-g yc-g-gauge"><div class="yc-label"><span>气势</span><b data-gauge>0 / 8</b></div><div class="yc-bar yc-gauge" data-gaugebar></div></div></div>`);
     this.bottom = el(`<div class="yc-bottom"><div class="yc-skills" hidden></div>
       <div class="yc-label"><span>法力</span><b data-mana>100</b></div><div class="yc-bar yc-mana"><i data-manabar></i></div>
       <input class="yc-input" maxlength="${INPUT_MAX_CHARS}" enterkeyhint="send" autocomplete="off" aria-label="咒语" placeholder="说出你的咒语……（回车施法）">
@@ -460,10 +462,19 @@ export class Hud {
   setMana(m, max) { this.q('[data-mana]').textContent = String(Math.floor(m)); this.q('[data-manabar]').style.width = `${(m / max) * 100}%`; }
   setWave(text, left) { this.q('[data-wave]').textContent = text; this.q('[data-left]').textContent = left; }
   setHint(text) { this.q('[data-hint]').textContent = text; }
-  /** 气势槽：满了发光，提示可以召唤 @param {number} g @param {number} max */
-  setGauge(g, max) {
-    this.q('[data-gauge]').textContent = g >= max ? '已满·可召唤冰龙' : `${g} / ${max}`;
-    this.q('[data-gaugebar]').style.width = `${Math.min(1, g / max) * 100}%`;
+  /**
+   * 气势槽：一格一格染色（完美闪避加的是白格），满了发光，写明能召哪条龙
+   * @param {number} g @param {number} max @param {string[]} [cols] 每一格的元素（或 white） @param {string} [name] 满了召的龙
+   */
+  setGauge(g, max, cols = [], name = '冰龙') {
+    this.q('[data-gauge]').textContent = g >= max ? `已满·可召唤${name}` : `${g} / ${max}`;
+    const bar = this.q('[data-gaugebar]');
+    if (bar.childElementCount !== max) bar.innerHTML = '<i></i>'.repeat(max);
+    [...bar.children].forEach((c, i) => {
+      const k = i < g ? cols[i] : undefined;
+      /** @type {HTMLElement} */ (c).style.setProperty('--c', !k ? 'transparent' : k === 'white' ? '#fffdf6' : elColor(k));
+      c.classList.toggle('w', k === 'white');
+    });
     this.top.classList.toggle('gauge-full', g >= max);
   }
 

@@ -60,18 +60,21 @@ export const ULT_GAUGE = 8;
 
 /**
  * 召唤（设计文档第 4 节"气势""大招"）：说的内容决定召唤谁，程序决定召不召得出。
- * 气势槽满、法力够、这条龙已开放 → 龙从施法者身旁破土而出，绕场一周俯冲砸向目标，范围伤害并带元素效果；
+ * 气势槽满、法力够、这条龙已开放 → 龙按自己的一套动作飞向目标（冰龙从施法者身旁破土、绕场一周俯冲，其余四条见下），范围伤害并带元素效果；
  * 否则"差一口气"：龙影现身又散去，化作同元素的雨（按雨正常扣法力），咒语卡写明差在哪。
- * 第一批只开冰龙；火龙等第三批（换材质复用冰龙的模型与飞行路线）。
+ * 10-27 五条都开放，各有一套动作和落地（设计文档第 4 节"五元素龙"）。dmg 是砸地那一下，范围 radius；
+ * 雷龙、风龙不砸地（dmg 当作这一招的伤害基数，气势和首次发现的加成按它和表里的比例乘到下面各自的数上）：
+ *   火龙：低空横扫、一路喷火，落点火海 sea.sec 秒、每秒 sea.dps；雷龙：在目标上空盘一圈劈 strikes 道雷，每道 strike、连锁跳 jumps 个，雷劈过的地方（俯看）两侧 clear 米内冰锥全碎；
+ *   风龙：落点卷起龙卷 sec 秒、一共 total，小怪吸向中心，场上冰锥全吹散；土龙：从目标脚下破土，四周竖一圈半径 ring 米的石墙 wallSec 秒。
  */
 export const SUMMONS = {
   ice:     { name: '冰龙', cost: 40, dmg: 120, radius: 5 },
-  fire:    { name: '火龙', cost: 40, dmg: 120, radius: 5 },
-  wind:    { name: '风龙', cost: 40, dmg: 120, radius: 5 },
-  earth:   { name: '土龙', cost: 40, dmg: 120, radius: 5 },
-  thunder: { name: '雷龙', cost: 40, dmg: 120, radius: 5 },
+  fire:    { name: '火龙', cost: 40, dmg: 120, radius: 5, sea: { sec: 4, dps: 10 } },
+  wind:    { name: '风龙', cost: 40, dmg: 120, radius: 5, sec: 3, total: 80 },
+  earth:   { name: '土龙', cost: 40, dmg: 120, radius: 5, ring: 3.4, wallSec: 4 },
+  thunder: { name: '雷龙', cost: 40, dmg: 120, radius: 5, strikes: 5, strike: 30, jumps: 3, clear: 2.5 },
 };
-export const SUMMON_OPEN = ['ice'];
+export const SUMMON_OPEN = ['ice', 'fire', 'wind', 'earth', 'thunder'];
 
 /**
  * 气势每一档都要看得出来（设计文档第 4 节）：伤害见 MOMENTUM_MULT；

@@ -5,6 +5,7 @@
  *     碰到的敌人被点着、卷起来甩出去；走过的地上留一路火；
  *   - 豪火灭却（先火后风，10-27 由"烈焰冲击"改名）：从施法者身前推出一整片往前翻滚的火浪，越推越宽，
  *     浪头上窜着火舌、顶上压着黑烟、两侧贴地翻白烟；浪头扫到谁才烧谁。
+ * 风龙卷起的旋风也放在这里（和火卷风共用火云那一套面片）：白色的漏斗，原地卷 3 秒。
  */
 import * as THREE from 'three';
 import { PALETTE, rand, scaleArr } from './common.js';
@@ -31,6 +32,45 @@ export class FusionFx {
     this.tornadoes = [];
     /** @type {{ from: THREE.Vector3, dir: THREE.Vector3, side: THREE.Vector3, t: number, hit: Set<string>, step: any, done: number, scorched: number }[]} */
     this.waves = [];
+    /** @type {{ pos: THREE.Vector3, r: number, sec: number, t: number, acc: number }[]} */
+    this.gales = [];
+  }
+
+  /**
+   * 风龙卷起的旋风（伤害、往中心卷、吹散冰锥都在 main 里结算）：照火卷风的漏斗做成白的——
+   * 白烟团沿两股螺旋往上卷、越高越开；外圈一圈青色气流绕着转、往里收；底下翻尘、地上冒风墙那样的笔触。
+   * @param {THREE.Vector3} at 中心（地面） @param {number} r 卷多大 @param {number} sec 卷多久
+   */
+  gale(at, r, sec) {
+    this.gales.push({ pos: at.clone(), r, sec, t: 0, acc: 0 });
+    this.fx.shake = Math.max(this.fx.shake, 0.25);
+  }
+
+  /** @param {{ pos: THREE.Vector3, r: number, t: number, acc: number }} g @param {number} dt @param {number} fade */
+  galeFrame(g, dt, fade) {
+    const C = this.clouds, c = g.pos, R = g.r, wind = PALETTE.wind;
+    g.acc += dt * fade * this.k;
+    const n = (/** @type {number} */ perSec) => Math.floor(g.acc * perSec) - Math.floor((g.acc - dt * fade * this.k) * perSec);
+    for (let i = n(70); i > 0; i--) {   // 两股螺旋往上卷的白烟
+      const band = Math.random() < 0.5 ? 0 : Math.PI;
+      C.puff('smoke', { x: c.x, y: c.y + rand(0, 0.4), z: c.z, vy: rand(4, 5.5), life: rand(1.2, 1.6), r0: rand(0.35, 0.5), r1: rand(1, 1.4),
+        heat: 0.95, cool: 0, alpha: 0.5, aspect: 0.7, rot: rand(0.25, 0.45), spin: 0,
+        orbit: { c, a: band + rand(-0.45, 0.45), r: R * rand(0.14, 0.22), w: SWIRL_W * 1.2, grow: 0.3 }, drag: 0.35 });
+    }
+    for (let i = n(10); i > 0; i--) {   // 底下翻起来的尘
+      const a = rand(0, Math.PI * 2);
+      C.puff('smoke', { x: c.x + Math.cos(a) * R * 0.8, y: c.y + rand(0.2, 0.6), z: c.z + Math.sin(a) * R * 0.8, vx: -Math.sin(a) * 3, vy: rand(0.3, 0.8), vz: Math.cos(a) * 3,
+        life: rand(1, 1.5), r0: rand(0.6, 0.9), r1: rand(1.5, 2), heat: 0.75, cool: 0, alpha: 0.4, drag: 1 });
+    }
+    for (let i = n(220); i > 0; i--) {   // 外圈的青色气流：绕着转、往里收
+      const a = Math.random() * Math.PI * 2, rr = R * rand(0.6, 1.1);
+      this.p.emit(c.x + Math.cos(a) * rr, c.y + rand(0.1, 4), c.z + Math.sin(a) * rr, -Math.sin(a) * 9 - Math.cos(a) * 3, rand(1, 3), Math.cos(a) * 9 - Math.sin(a) * 3,
+        rand(0.35, 0.6), rand(0.05, 0.09), scaleArr(wind.secondary, 2), scaleArr(wind.primary, 1), { drag: 0.8 });
+    }
+    for (let i = n(12); i > 0; i--) {
+      const a = rand(0, Math.PI * 2), rr = R * rand(0.3, 0.8), x = c.x + Math.cos(a) * rr, z = c.z + Math.sin(a) * rr;
+      this.fx.windRise(x, groundHeightAt(x, z) ?? c.y, z);
+    }
   }
 
   /**
@@ -184,12 +224,19 @@ export class FusionFx {
       }
       if (wv.t >= BEAM.len / BEAM.speed + WAVE_LINGER) this.waves.splice(i, 1);
     }
+    for (let i = this.gales.length - 1; i >= 0; i--) {
+      const g = this.gales[i];
+      g.t += dt;
+      this.galeFrame(g, dt, Math.min(1, g.t / 0.25) * Math.max(0, Math.min(1, (g.sec - g.t) / 0.5)));
+      if (g.t >= g.sec) this.gales.splice(i, 1);
+    }
     this.clouds.update(dt, camera);
   }
 
   clear() {
     this.tornadoes.length = 0;
     this.waves.length = 0;
+    this.gales.length = 0;
     this.clouds.clear();
   }
 }

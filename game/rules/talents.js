@@ -146,3 +146,31 @@ export function buttonGaugeGain(r) {
   const g = (r.hits >= BUTTON_GAUGE.multiHitMin ? BUTTON_GAUGE.multiHit : 0) + (r.combo ? BUTTON_GAUGE.combo : 0);
   return Math.min(BUTTON_GAUGE.max, g);
 }
+
+/** 气势槽里完美闪避加的格：白色，召龙时不算 */
+export const GAUGE_WHITE = 'white';
+
+/**
+ * 气势槽分色（设计文档第 4 节"五元素龙"）：槽里每一格记着是哪个元素的招加的。
+ * 气势变成 g 格：多出来的格染 el（给一串就轮着染：一句话用了几种元素，加的格就是这几种颜色），少了从后面去掉。
+ * 返回新的一列，不改原来的。
+ * @param {string[]} cols 现在每一格的颜色（元素或 GAUGE_WHITE） @param {number} g 变成几格 @param {string | string[]} el 新加的格染什么
+ */
+export function gaugeTo(cols, g, el) {
+  const n = Math.max(0, Math.floor(g)), els = typeof el === 'string' ? [el] : el.length ? el : [GAUGE_WHITE];
+  return n <= cols.length ? cols.slice(0, n) : [...cols, ...Array.from({ length: n - cols.length }, (_, i) => els[i % els.length])];
+}
+
+/**
+ * 召哪条龙：哪种颜色的格最多召哪条；一样多，看这几种里谁占着最后面的那一格；白格不算，全白（或空）召冰龙。
+ * @param {string[]} cols @returns {string}
+ */
+export function gaugeDragon(cols) {
+  /** @type {Record<string, number>} */
+  const count = {};
+  for (const c of cols) if (c !== GAUGE_WHITE) count[c] = (count[c] || 0) + 1;
+  const top = Math.max(0, ...Object.values(count));
+  if (!top) return 'ice';
+  for (let i = cols.length - 1; i >= 0; i--) if (count[cols[i]] === top) return cols[i];
+  return 'ice';
+}

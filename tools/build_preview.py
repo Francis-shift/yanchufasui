@@ -10,6 +10,7 @@
         正式的上色龙 gzip 后 310 KB、贴图 220 KB，塞进来就超过面板 512 KB 的上限，所以预览只验召唤的代码路径和飞行路线。
       python tools/build_preview.py props --asset public/models/lion.drg2.gz --asset ...  → preview/props.html（物件材质检查页）
         --asset 可重复，文件原样内嵌，页面里按文件名取（game/dev/propcheck.js）。
+      python tools/build_preview.py dragons --dragon preview/assets/dragon-6k.bin  → preview/dragons.html（五条龙的动作检查页，game/dev/dragoncheck.js）
 只打包页面真正引用到的库（扫本地模块里的 import）：检查页用不到物理引擎，省下来给模型。
 """
 import sys
@@ -135,6 +136,10 @@ TARGETS = {
               " assets[s.dataset.asset] = URL.createObjectURL(new Blob([Uint8Array.from(atob(s.textContent.trim()), (c) => c.charCodeAt(0))]));"
               " startPropCheck(document.getElementById('app'), assets);",
               "言出法随 · 物件材质检查", "props.html"),
+    "dragons": ("game/dev/dragoncheck.js", "import { startDragonCheck } from '@local/game/dev/dragoncheck.js';"
+                " const d = document.getElementById('asset-dragon');"
+                " startDragonCheck(document.getElementById('app'), d ? URL.createObjectURL(new Blob([Uint8Array.from(atob(d.textContent.trim()), (c) => c.charCodeAt(0))])) : undefined);",
+                "言出法随 · 五龙检查", "dragons.html"),
 }
 BARE_IMPORT = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(?\s*)(['"])([^'".][^'"]*)\1""")
 

@@ -54,7 +54,7 @@ export class Walls {
   /**
    * 立一堵墙。
    * @param {string} el
-   * @param {{ x: number, z: number }[]} pts 每一段的中心
+   * @param {{ x: number, z: number, yaw?: number }[]} pts 每一段的中心（土墙的段可以各朝各的方向：土龙围的一圈）
    * @param {number} yaw 墙沿哪个方向排开（绕 y 轴的角度）
    * @param {number} sec 持续时间
    * @param {any} payload 结算伤害要用的东西（main 塞进来，这里不看）
@@ -69,7 +69,7 @@ export class Walls {
         const y = groundHeightAt(p.x, p.z) ?? 0;
         const m = new THREE.Mesh(this.geo, w.mat);
         m.position.set(p.x, y - SEG.h / 2, p.z);
-        m.rotation.y = yaw + rand(-0.06, 0.06);
+        m.rotation.y = (p.yaw ?? yaw) + rand(-0.06, 0.06);
         m.castShadow = true; m.receiveShadow = true;
         this.scene.add(m);
         w.meshes.push(m);
