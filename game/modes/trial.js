@@ -11,7 +11,7 @@
  */
 import * as THREE from 'three';
 import { BEAM, BOSS, ENEMIES, FLAME, MINION, RUN, STONE, TRIAL } from '../rules/numbers.js';
-import { BOSS_COUNT, RUN_STAGES, newRun, runMods } from '../rules/run.js';
+import { BOSS_COUNT, RUN_STAGES, newRun, runMods, stageAt } from '../rules/run.js';
 import {
   bossHit, bossPhase, canDash, chargeLen, homingTurn, inCircle, inSector, inStrip, isPerfect, keepInArena, nextBatch, novaGap, pickMinion, pickMove,
   pyreSpots, recoverSec, regenStamina, ringReach, rockSpots, slamCount, spawnSpot, spikeDirs, spikeReach, spiralAngles, teleSec, waveReach,
@@ -552,6 +552,13 @@ export class Trial {
 
   /** 当前这个 boss 叫什么 */
   bossName() { return ENEMIES[/** @type {'boss' | 'stone' | 'flame'} */ (this.cfg.type)].name; }
+
+  /** 输了（结算页用）：倒在哪一段，那一段该怎么打（这一段开头的提示，用手机那句：不带按键，电脑上照样对） */
+  fell() {
+    const at = stageAt(this.stage);
+    if (at.kind === 'boss') return { where: `止步于第 ${at.n} 个 boss ${this.bossName()}（${PHASE_NAME[this.phase]}）`, tip: BOSS_HINT[this.cfg.type][0] };
+    return { where: `止步于第 ${at.n} 段小怪潮`, tip: WAVE_HINT[Math.min(at.n, WAVE_HINT.length) - 1][0] };
+  }
 
   /** 这个 boss 碎了：场上的小傀儡一起碎掉、冰锥收起，喘口气进下一段（最后一个 boss 就是打通了） @param {any} e */
   bossDown(e) {

@@ -6,8 +6,8 @@ import { planCast, regenMana } from '../game/rules/arbiter.js';
 import { inCharset } from '../game/rules/charset.js';
 import { BUTTON_CHANT_MS, FUSION_OPEN, MANA_MAX, MANA_REGEN, RUN, TRIAL, ULT_GAUGE } from '../game/rules/numbers.js';
 import {
-  BOSS_COUNT, CARDS, RUN_STAGES, applyRunes, artBoost, boostPlan, buttonMove, eligible, limitToLearned, moveName, moveTargets, native, newRun,
-  offer, previewMove, reroll, runFusions, runMods, runeChantMs, runesOf, skip, take, upLabel, weight, writeRune,
+  BOSS_COUNT, CARDS, RUN_STAGES, applyRunes, artBoost, beats, boostPlan, buttonMove, clock, eligible, limitToLearned, moveName, moveTargets, native, newRun,
+  offer, previewMove, readRecord, recordText, reroll, runFusions, runMods, runeChantMs, runesOf, skip, stageAt, take, upLabel, weight, writeRune,
 } from '../game/rules/run.js';
 import { combineButtons, defaultIntent } from '../game/rules/talents.js';
 import { isPerfect } from '../game/rules/trial.js';
@@ -336,4 +336,43 @@ test('一键写进按钮：加在句首；槽满了、句首又是一键写进�
   assert.equal(writeRune('疾·怒火炸开', '连', false), '连·疾·怒火炸开', '双诀还有空槽：两个都留着');
   assert.equal(writeRune('疾风·怒火', '连', true), '连·疾风·怒火');
   assert.equal(writeRune('火·弹', '连', true), '连·火·弹', '句首不是字诀不算');
+});
+
+test('结算：走到哪一段——三选一算前面那段，小怪潮按第几段数', () => {
+  assert.deepEqual(stageAt(0), { kind: 'wave', n: 1 });
+  assert.deepEqual(stageAt(1), { kind: 'wave', n: 1 }, '第一次三选一算第 1 段小怪潮');
+  assert.deepEqual(stageAt(2), { kind: 'boss', n: 1 });
+  assert.deepEqual(stageAt(3), { kind: 'boss', n: 1 }, '领悟算刚打完的 boss');
+  assert.deepEqual(stageAt(4), { kind: 'wave', n: 2 });
+  assert.deepEqual(stageAt(8), { kind: 'wave', n: 3 });
+  assert.deepEqual(stageAt(RUN_STAGES.length - 1), { kind: 'boss', n: 3 });
+  assert.deepEqual(stageAt(-1), { kind: 'wave', n: 1 }, '还没开战');
+});
+
+test('结算：本机最佳——打通胜过没打通，都打通比快，都没打通比走得远，同一段不算破纪录', () => {
+  const END = RUN_STAGES.length;
+  assert.equal(beats({ stage: 2, sec: 300 }, null), true, '第一次打总算');
+  assert.equal(beats({ stage: END, sec: 900 }, { stage: END - 1, sec: 200 }), true, '打通了，哪怕慢');
+  assert.equal(beats({ stage: END - 1, sec: 200 }, { stage: END, sec: 900 }), false);
+  assert.equal(beats({ stage: END, sec: 480 }, { stage: END, sec: 481 }), true);
+  assert.equal(beats({ stage: END, sec: 481 }, { stage: END, sec: 481 }), false, '一样快不算');
+  assert.equal(beats({ stage: 6, sec: 500 }, { stage: 4, sec: 100 }), true, '走得远就算，不看时间');
+  assert.equal(beats({ stage: 6, sec: 100 }, { stage: 6, sec: 500 }), false, '同一段不比时间');
+  assert.equal(beats({ stage: 4, sec: 100 }, { stage: 6, sec: 500 }), false);
+});
+
+test('结算：本机最佳从浏览器读回来，坏的当没有；怎么写', () => {
+  const END = RUN_STAGES.length;
+  assert.deepEqual(readRecord(JSON.stringify({ stage: END, sec: 485.4 })), { stage: END, sec: 485 });
+  for (const raw of [null, '', '{', 'null', '[]', '{"stage":2}', '{"stage":"2","sec":10}', '{"stage":1.5,"sec":10}',
+    `{"stage":${END + 1},"sec":10}`, '{"stage":-1,"sec":10}', '{"stage":2,"sec":-3}', '{"stage":2,"sec":1e999}']) {
+    assert.equal(readRecord(raw), null, String(raw));
+  }
+  assert.equal(recordText({ stage: END, sec: 485 }), '通关 8:05');
+  assert.equal(recordText({ stage: 6, sec: 300 }), '打到第 2 个 boss');
+  assert.equal(recordText({ stage: 8, sec: 300 }), '打到第 3 段小怪潮');
+  assert.equal(recordText({ stage: 3, sec: 300 }), '打到第 1 个 boss', '倒在领悟上不会发生，真发生了算前一段');
+  assert.equal(clock(59.6), '1:00');
+  assert.equal(clock(0), '0:00');
+  assert.equal(clock(3725), '62:05');
 });

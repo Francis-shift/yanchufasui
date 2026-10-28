@@ -19,8 +19,9 @@ import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
 import { maskText } from './rules/safety.js';
 import {
-  BOSS_COUNT, CARDS, KIND_NAMES, RUNES, applyRunes, artBoost, boostPlan, buttonMove, level, limitToLearned, moveName, moveTargets, newRun, offer,
-  previewMove, reroll as rerollCards, runFusions, runMods, runeChantMs, runeSlots, runesOf, skip as skipCards, take as takeCard, upLabel, writeRune,
+  BOSS_COUNT, CARDS, KIND_NAMES, RUNES, RUN_STAGES, applyRunes, artBoost, beats, boostPlan, buttonMove, clock, level, limitToLearned, moveName,
+  moveTargets, newRun, offer, previewMove, readRecord, recordText, reroll as rerollCards, runFusions, runMods, runeChantMs, runeSlots, runesOf,
+  skip as skipCards, take as takeCard, upLabel, writeRune,
 } from './rules/run.js';
 import {
   GAUGE_WHITE, bindSpell, buttonGaugeGain, combineButtons, defaultIntent, elName, gaugeDragon, gaugeTo, scrollsFor, synergies, talentOpen,
@@ -309,7 +310,7 @@ export function start(root, opts = {}) {
     if (S.core <= 0) {
       S.phase = 'lost';
       barrier.shatter();
-      hud.showOverlay('阵眼破碎', '傀儡冲破了护山大阵。换个说法再来一次？', '重新守关');
+      hud.showOverlay('阵眼破碎', { lead: '傀儡冲破了护山大阵。换个说法再来一次？', main: 'defense', defense: '重新守关', trial: '去试炼' });
     }
   }
 
@@ -365,25 +366,56 @@ export function start(root, opts = {}) {
       .then(() => so.lock('landscape')).then(() => { locked = true; }).catch(() => {});
   }
 
+  // ---------------------------------------------------------------- 首页与结算页（设计文档第 4 节"首页""结算"）
+  /**
+   * 本机最佳：存在这台设备的浏览器里（rules/run.js 的 RunRecord），打开页面时读一次，之后以这里为准——
+   * 存不进去（无痕窗口、禁了网站存储）也至少这次打开期间记得住。
+   */
+  const BEST_KEY = 'yc-trial-best';
+  let best = (() => { try { return readRecord(localStorage.getItem(BEST_KEY)); } catch { return null; } })();
+  /** 这一局记进本机最佳：破了纪录就存下来 @param {import('./rules/run.js').RunRecord} cur @returns {boolean} 破了以前的纪录（第一局不算） */
+  function record(cur) {
+    if (!beats(cur, best)) return false;
+    const had = !!best;
+    best = cur;
+    try { localStorage.setItem(BEST_KEY, JSON.stringify(cur)); } catch { /* 存不进去就只记在这次打开里 */ }
+    return had;
+  }
+
+  /** 首页：试炼主推，守关留着 */
+  function showTitle() {
+    hud.showOverlay('言出法随', {
+      lead: '打一句中文，法术就是什么；说得越有画面感，气势越足。',
+      tip: `试炼：小怪潮与 ${BOSS_COUNT} 个 boss 轮番上阵。开局只会本命招，每过一段三选一学新字，看你能走到哪。`,
+      best: best ? recordText(best) : '', main: 'trial', trial: '开始试炼', defense: '守关模式',
+      note: '守关模式：傀儡大军沿石阶和索桥攻上山门，打字施法，守住身后的护山大阵。',
+    });
+  }
+  showTitle();
+
+  /** 试炼结算页（won：打通了） @param {boolean} won */
+  function trialResult(won) {
+    const cur = { stage: won ? RUN_STAGES.length : trial.stage, sec: Math.round(trial.runT) };
+    const fresh = record(cur);
+    const fell = won ? null : trial.fell();
+    hud.showOverlay(won ? '试炼通过' : '败下阵来', {
+      lead: fell ? fell.where : `${BOSS_COUNT} 个 boss 尽数击碎，气血还剩 ${Math.ceil(trial.hp)}。`,
+      stats: [{ k: '用时', v: clock(cur.sec) }, { k: '完美闪避', v: `${trial.perfects} 次` }, { k: '发现法术', v: `${S.seen.length} 种` }],
+      tip: fell ? `${fell.tip}。` : '', best: best ? recordText(best) : '', fresh,
+      main: 'trial', trial: '再战试炼', defense: '去守关',
+    });
+  }
   /** 试炼打通了：最后一个 boss 碎掉，过一会儿出结算页（可以再战或回去守关） */
   function trialWon() {
     S.phase = 'won';
     hud.bigText('试炼通过', '#16202b', 1600);
-    after(1.6, () => {
-      if (S.phase === 'won' && S.mode === 'trial') {
-        const sec = Math.round(trial.runT);
-        hud.showOverlay('试炼通过', `${BOSS_COUNT} 个 boss 尽数击碎。用时 ${Math.floor(sec / 60)} 分 ${sec % 60} 秒，完美闪避 ${trial.perfects} 次，`
-          + `气血还剩 ${Math.ceil(trial.hp)}。`, '去守关', '再战试炼');
-      }
-    });
+    after(1.6, () => { if (S.phase === 'won' && S.mode === 'trial') trialResult(true); });
   }
   /** 试炼输了 */
   function trialLost() {
     S.phase = 'lost';
     hud.bigText('败下阵来', '#b3261e', 1400);
-    after(1.4, () => {
-      if (S.phase === 'lost' && S.mode === 'trial') hud.showOverlay('败下阵来', '看地上的红圈和红扇走位；冰甲只怕火，先用火打碎它。再试一次？', '去守关', '再战试炼');
-    });
+    after(1.4, () => { if (S.phase === 'lost' && S.mode === 'trial') trialResult(false); });
   }
 
   /**
@@ -566,7 +598,8 @@ export function start(root, opts = {}) {
         hud.setHint(`喘口气，${REST_SEC} 秒后下一波：${WAVES[S.wave + 1].tip}`);
       } else {
         S.phase = 'won';
-        hud.showOverlay('护山大阵守住了', `五波傀儡尽数退去，阵眼还剩 ${Math.ceil(S.core)} 点。换个说法，再守一次？`, '再守一次');
+        hud.showOverlay('护山大阵守住了', { lead: `五波傀儡尽数退去，阵眼还剩 ${Math.ceil(S.core)} 点。换个说法，再守一次？`,
+          main: 'defense', defense: '再守一次', trial: '去试炼' });
       }
     }
   }

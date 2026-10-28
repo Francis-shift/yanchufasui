@@ -27,7 +27,8 @@ test('字表：界面固定大字、所有默认名、融合名与成语都在�
 
 test('字表：main.js、modes/trial.js 里所有大字与结算标题的写法，每个字都在大字那份字体里', () => {
   const src = ['../game/main.js', '../game/modes/trial.js'].map((f) => fs.readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
-  const calls = [...src.matchAll(/(?:bigText|showOverlay)\(([^;]*?)(?:,\s*'#|,\s*`|,\s*'[^']*',\s*'|\);)/g)].map((m) => m[1]);
+  // 只取第一个参数：大字后面跟颜色（'#…'）、结算页标题后面跟一个对象（{ lead: … }，那些字用的是普通字体）
+  const calls = [...src.matchAll(/(?:bigText|showOverlay)\(([^;]*?)(?:,\s*'#|,\s*`|,\s*'[^']*',\s*'|,\s*\{|\);)/g)].map((m) => m[1]);
   assert.ok(calls.length >= 6, `只找到 ${calls.length} 处大字，正则可能失效`);
   const big = new Set(BIG_CHARS);
   const lits = calls.flatMap((c) => [...c.matchAll(/'([^']*)'|`([^`]*)`/g)].map((m) => (m[1] ?? m[2]).replace(/\$\{[^}]*\}/g, '')));

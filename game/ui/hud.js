@@ -77,13 +77,26 @@ const CSS = FONT_CSS + `
 .yc-big { position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%) scale(0.9); font-family: ${BRUSH_BIG};
   font-size: 64px; letter-spacing: 8px; opacity: 0; transition: opacity .2s, transform .3s; text-shadow: 0 2px 12px rgba(255,255,255,0.7); }
 .yc-big.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-.yc-overlay { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(220, 232, 245, 0.55);
+/* 首页与结算页：放不下时整块面板可以上下滚（margin: auto 居中，比 place-items 安全：太高时顶上不会被裁掉） */
+.yc-overlay { position: absolute; inset: 0; display: flex; overflow-y: auto; padding: 8px 0; background: rgba(220, 232, 245, 0.55);
   backdrop-filter: blur(3px); pointer-events: auto; }
 .yc-overlay[hidden] { display: none; }
-.yc-box { text-align: center; padding: 28px 32px; background: rgba(255,255,255,0.86); border-radius: 18px; border: 1px solid var(--line);
-  max-width: min(460px, calc(100vw - 32px)); }
+.yc-box { margin: auto; text-align: center; padding: 28px 32px; background: rgba(255,255,255,0.86); border-radius: 18px; border: 1px solid var(--line);
+  max-width: min(460px, calc(100% - 32px)); }
 .yc-box h1 { margin: 0 0 6px; font-family: ${BRUSH_BIG}; font-size: 48px; letter-spacing: 8px; }
 .yc-box p { margin: 6px 0; color: var(--muted); font-size: 14px; line-height: 1.7; }
+.yc-box p[hidden], .yc-best[hidden] { display: none; }
+.yc-box [data-lead] { color: #2b3a4a; font-size: 15px; }
+.yc-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0 8px; }
+.yc-stats[hidden] { display: none; }
+.yc-stat { padding: 8px 4px 6px; border-radius: 12px; background: rgba(40,60,90,0.06); }
+.yc-stat b { display: block; font-size: 24px; line-height: 1.2; color: #16202b; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.yc-stat span { font-size: 12px; color: var(--muted); }
+.yc-best { display: inline-block; margin: 4px 0 2px; padding: 3px 12px; border-radius: 999px; font-size: 13px; color: #2b3a4a; background: rgba(40,60,90,0.07); }
+.yc-best.hot { color: #7a4a00; background: rgba(240,178,74,0.28); font-weight: 600; }
+.yc-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 12px; }
+.yc-btns .yc-btn { margin-top: 0; }
+.yc-box .yc-note { margin: 10px 0 0; font-size: 12px; line-height: 1.6; }
 .yc-btn { margin-top: 12px; font: inherit; font-size: 16px; padding: 10px 26px; border-radius: 12px; border: 1px solid #4a74d9;
   background: #4a74d9; color: #fff; cursor: pointer; }
 .yc-btn:focus-visible { outline: 3px solid rgba(74,116,217,0.4); outline-offset: 2px; }
@@ -174,6 +187,17 @@ const CSS = FONT_CSS + `
 .yc-short .yc-said { margin-top: 2px; font-size: 14px; line-height: 1.6; }
 .yc-short .yc-meta { margin-top: 2px; gap: 2px 10px; }
 .yc-short .yc-big { font-size: 40px; }
+/* 横过来的手机（约 740×360）：面板放宽让字少折行、天赋钮缩小，整块不用滚就看得到按钮 */
+.yc-short .yc-overlay .yc-box { padding: 12px 22px 14px; max-width: min(640px, calc(100% - 32px)); }
+.yc-short .yc-overlay .yc-tal { width: 42px; height: 42px; font-size: 22px; }
+.yc-short .yc-overlay .yc-syn { margin-top: 12px; }
+.yc-short .yc-overlay h1 { font-size: 30px; line-height: 1.1; margin: 0; }
+.yc-short .yc-overlay p { margin: 2px 0; font-size: 13px; line-height: 1.5; }
+.yc-short .yc-overlay [data-tip] { font-size: 12px; }
+.yc-short .yc-stats { margin: 6px 0 4px; } .yc-short .yc-stat { padding: 3px 4px 2px; } .yc-short .yc-stat b { font-size: 17px; }
+.yc-short .yc-best { margin: 2px 0 0; }
+.yc-short .yc-picker { margin: 6px 0 0; } .yc-short .yc-overlay .yc-picker-title { display: none; }
+.yc-short .yc-btns { margin-top: 8px; } .yc-short .yc-btns .yc-btn { padding: 8px 22px; }
 /* 试炼 · 手机（setPad）：左半边是摇杆（按哪儿就从哪儿起），右下角一簇按钮——大的"闪"在角上，天赋沿弧排开，召唤在最外 */
 .yc-stick { position: absolute; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; display: none;
   border: 2px solid rgba(255,255,255,0.75); background: rgba(30,50,80,0.16); pointer-events: none; }
@@ -249,11 +273,12 @@ export class Hud {
       <div class="yc-bar yc-bosshp"><i data-bosshp></i></div><div class="yc-bar yc-armor"><i data-armor></i></div></div>`);
     this.card = el(`<div class="yc-card" role="status" aria-live="polite"></div>`);
     this.big = el(`<div class="yc-big"></div>`);
+    // 首页与结算页是同一块面板（内容由 showOverlay 填）
     this.overlay = el(`<div class="yc-overlay"><div class="yc-box"><h1>言出法随</h1>
-      <p>傀儡大军从云海里沿石阶和索桥攻上山门。你是守山门的修士，守住身后的护山大阵。</p>
-      <p>打一句中文，法术就是什么；说得越有画面感，气势越足。不想打字，就点天赋按钮。</p>
+      <p data-lead></p><div class="yc-stats" hidden></div><p data-tip hidden></p><div class="yc-best" hidden></div>
       <div class="yc-picker"><div class="yc-picker-title">选天赋（最多 3 个）</div><div class="yc-talents"></div><div class="yc-syn"></div></div>
-      <button class="yc-btn" data-start>开始守关</button> <button class="yc-btn ghost" data-trial>试炼 · 试玩版</button></div></div>`);
+      <div class="yc-btns"><button class="yc-btn" data-trial>开始试炼</button><button class="yc-btn ghost" data-start>守关模式</button></div>
+      <p class="yc-note" data-note hidden></p></div></div>`);
     this.write = el(`<div class="yc-write" hidden><div class="yc-box">
       <div class="yc-write-title"></div>
       <input class="yc-input" maxlength="${INPUT_MAX_CHARS}" enterkeyhint="done" autocomplete="off" aria-label="给按钮写的咒" placeholder="写一句咒……（例：三颗火球从天而降）">
@@ -599,14 +624,32 @@ export class Hud {
   }
   closePicks() { this.picks.hidden = true; this.pickOn = null; }
 
-  /** 开始 / 结算页：btn 是守关按钮上的字，trial 是试炼按钮上的字 @param {string} title @param {string} body @param {string} btn @param {string} [trial] */
-  showOverlay(title, body, btn, trial = '试炼 · 试玩版') {
-    /** @type {HTMLElement} */ (this.overlay.querySelector('h1')).textContent = title;
-    const ps = this.overlay.querySelectorAll('p');
-    ps[0].textContent = body; ps[1].textContent = '';
-    /** @type {HTMLElement} */ (this.overlay.querySelector('[data-start]')).textContent = btn;
-    /** @type {HTMLElement} */ (this.overlay.querySelector('[data-trial]')).textContent = trial;
-    this.overlay.hidden = false;
+  /**
+   * 首页 / 结算页：标题（大字）、一行说明、几格数字（结算用）、一行提示、本机最佳（fresh：这局刚破的）、
+   * 两个模式的按钮（main 那个是主按钮、排前面）、按钮下一行小字。
+   * @param {string} title
+   * @param {{ lead: string, stats?: { k: string, v: string }[], tip?: string, best?: string, fresh?: boolean,
+   *           main: 'trial' | 'defense', trial: string, defense: string, note?: string }} o
+   */
+  showOverlay(title, o) {
+    const box = this.overlay;
+    const set = (/** @type {string} */ sel, /** @type {string | undefined} */ text) => {
+      const n = /** @type {HTMLElement} */ (box.querySelector(sel));
+      n.textContent = text ?? ''; n.hidden = !text;
+    };
+    /** @type {HTMLElement} */ (box.querySelector('h1')).textContent = title;
+    set('[data-lead]', o.lead); set('[data-tip]', o.tip); set('[data-note]', o.note);
+    set('.yc-best', o.best ? `本机最佳　${o.best}${o.fresh ? '　· 新纪录' : ''}` : '');
+    this.q('.yc-best').classList.toggle('hot', !!o.fresh);
+    const stats = this.q('.yc-stats');
+    stats.innerHTML = (o.stats ?? []).map((s) => `<div class="yc-stat"><b>${esc(s.v)}</b><span>${esc(s.k)}</span></div>`).join('');
+    stats.hidden = !o.stats?.length;
+    const trialFirst = o.main === 'trial';
+    for (const [sel, text, first] of /** @type {const} */ ([['[data-trial]', o.trial, trialFirst], ['[data-start]', o.defense, !trialFirst]])) {
+      const b = /** @type {HTMLElement} */ (box.querySelector(sel));
+      b.textContent = text; b.classList.toggle('ghost', !first); b.style.order = first ? '0' : '1';
+    }
+    box.hidden = false;
   }
   hideOverlay() { this.overlay.hidden = true; }
 

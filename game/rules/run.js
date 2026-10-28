@@ -375,3 +375,54 @@ export function boostPlan(plan, k) {
   const steps = plan.steps.map((s) => ({ ...s, dmgTotal: s.dmgTotal * k, dmgEach: s.dmgEach * k }));
   return { ...plan, steps, ...(plan.summon ? { summon: { ...plan.summon, dmg: plan.summon.dmg * k } } : {}) };
 }
+
+// ---------------------------------------------------------------- 结算：走到哪、本机最佳
+/**
+ * RUN_STAGES 的第几段是第几段小怪潮 / 第几个 boss（三选一算它前面那段）
+ * @param {number} stage @returns {{ kind: 'wave' | 'boss', n: number }}
+ */
+export function stageAt(stage) {
+  let i = Math.max(0, Math.min(stage, RUN_STAGES.length - 1));
+  while (i > 0 && RUN_STAGES[i].kind === 'pick') i--;
+  const st = RUN_STAGES[i];
+  return st.kind === 'boss' ? { kind: 'boss', n: st.n ?? 1 } : { kind: 'wave', n: RUN_STAGES.slice(0, i + 1).filter((s) => s.kind === 'wave').length };
+}
+
+/** 几分几秒，如 8:05 @param {number} sec */
+export function clock(sec) {
+  const s = Math.max(0, Math.round(sec));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/**
+ * 本机最佳只记两样：打到第几段（RUN_STAGES 的下标，打通了记 RUN_STAGES.length）、用了几秒。
+ * @typedef {{ stage: number, sec: number }} RunRecord
+ */
+/**
+ * 这一局算不算破了纪录：打通的胜过没打通的；都打通比谁快；都没打通比谁走得远，走到同一段不算（同一段里多撑几秒说明不了什么）。
+ * @param {RunRecord} cur @param {RunRecord | null} best @returns {boolean}
+ */
+export function beats(cur, best) {
+  if (!best) return true;
+  const won = cur.stage >= RUN_STAGES.length, was = best.stage >= RUN_STAGES.length;
+  if (won !== was) return won;
+  return won ? cur.sec < best.sec : cur.stage > best.stage;
+}
+
+/** 从浏览器里存的那串字读回本机最佳；没有、读不出、被改坏了都当没有 @param {string | null} raw @returns {RunRecord | null} */
+export function readRecord(raw) {
+  try {
+    const r = JSON.parse(raw ?? '');
+    if (Number.isInteger(r?.stage) && r.stage >= 0 && r.stage <= RUN_STAGES.length && Number.isFinite(r.sec) && r.sec >= 0) {
+      return { stage: r.stage, sec: Math.round(r.sec) };
+    }
+  } catch { /* 当没有 */ }
+  return null;
+}
+
+/** 本机最佳怎么写：通关 8:05 / 打到第 2 个 boss / 打到第 3 段小怪潮 @param {RunRecord} r */
+export function recordText(r) {
+  if (r.stage >= RUN_STAGES.length) return `通关 ${clock(r.sec)}`;
+  const at = stageAt(r.stage);
+  return at.kind === 'boss' ? `打到第 ${at.n} 个 boss` : `打到第 ${at.n} 段小怪潮`;
+}
