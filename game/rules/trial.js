@@ -1,10 +1,10 @@
 // @ts-check
 /**
  * 试炼模式的规则（纯函数，有单测）：boss 挨打怎么算冰甲、什么时候换阶段、下一招出什么、站在哪算被打中、玩家走到哪被挡住、
- * 完美闪避、追踪冰锥怎么转弯、旋转弹幕朝哪喷。
- * 数值全在 numbers.js 的 BOSS、TRIAL。画面和 boss 的动作在 game/modes/trial.js。
+ * 完美闪避、追踪冰锥怎么转弯、旋转弹幕朝哪喷；小怪潮冒几只、冒在哪、冒哪种，符箓傀儡往哪挪，铁头傀儡冲多远、冲到谁。
+ * 数值全在 numbers.js 的 BOSS、TRIAL、RUN、MINION。画面和 boss 的动作在 game/modes/trial.js。
  */
-import { BOSS, RUN, TRIAL } from './numbers.js';
+import { BOSS, MINION, RUN, TRIAL } from './numbers.js';
 
 /** @typedef {'slam' | 'sweep' | 'summon' | 'homing' | 'spiral'} Move */
 
@@ -177,4 +177,45 @@ export function spawnSpot(rnd, me, R, away, obstacles) {
     if (d > far) { best = p; far = d; }
   }
   return best;
+}
+
+/**
+ * 小怪潮的下一只是哪种：按这一段的分量抽；某种已经到了同时上限（场上连同冒烟的算），就不抽它，都抽不到就是小傀儡。
+ * @param {Record<string, number>} mix 这一段各种的分量 @param {Record<string, number>} alive 每种现在有几只
+ * @param {Record<string, number>} cap 每种同时最多几只（没写的不限） @param {() => number} rnd
+ */
+export function pickMinion(mix, alive, cap, rnd) {
+  const ok = Object.entries(mix).filter(([k, w]) => w > 0 && (alive[k] ?? 0) < (cap[k] ?? Infinity));
+  const sum = ok.reduce((a, [, w]) => a + w, 0);
+  let x = rnd() * sum;
+  for (const [k, w] of ok) if ((x -= w) < 0) return k;
+  return 'grunt';
+}
+
+/**
+ * 符箓傀儡这一刻怎么挪：离玩家比 keep 远就靠近（1）、比 keep 近就后退（-1）、在区间里横着挪（0）。
+ * @param {number} d 离玩家多远 @param {number[]} [keep]
+ */
+export const archerIntent = (d, keep = MINION.archer.keep) => (d > keep[1] ? 1 : d < keep[0] ? -1 : 0);
+
+/**
+ * 铁头傀儡从 from 朝 dir（单位向量）最多冲多远：每 0.1 米量一次，身体（半径 body）碰到障碍、出了广场（半径 R）就停在前一步。
+ * @param {P} from @param {P} dir @param {{ x: number, z: number, r: number }[]} obstacles @param {number} R @param {number} max @param {number} [body]
+ */
+export function chargeLen(from, dir, obstacles, R, max, body = 0.4) {
+  const step = 0.1;
+  for (let s = step; s <= max + 1e-9; s += step) {
+    const x = from.x + dir.x * s, z = from.z + dir.z * s;
+    if (Math.hypot(x, z) > R || obstacles.some((o) => (x - o.x) ** 2 + (z - o.z) ** 2 < (o.r + body) ** 2)) return Math.max(0, s - step);
+  }
+  return max;
+}
+
+/**
+ * 站在铁头傀儡要冲的那条红条里吗：从 from 朝 dir 长 len、宽 w 的长条（身体半径 body 加在宽度和两头上）。
+ * @param {P} p @param {P} from @param {P} dir @param {number} len @param {number} w @param {number} [body]
+ */
+export function inStrip(p, from, dir, len, w, body = 0) {
+  const x = p.x - from.x, z = p.z - from.z, along = x * dir.x + z * dir.z, side = Math.abs(x * dir.z - z * dir.x);
+  return along >= -body && along <= len + body && side <= w / 2 + body;
 }

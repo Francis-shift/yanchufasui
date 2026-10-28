@@ -3,12 +3,13 @@
  * 傀儡（方块版）：沿石阶或索桥一跳一跳地走向阵眼；索桥那一路从邻峰的黑雾里走出来。
  * 会被冻住（停步、发蓝）、点燃（持续掉血）、被风推走（脚下没地面就坠入云海）；
  * 死了就碎成方块由物理引擎炸开。碰到阵眼扣阵眼的血。
- * 试炼模式（modes/trial.js）另有两种走法：boss 的位置由试炼模式每帧摆（mode 'boss'）；它召的小傀儡直奔施法者，贴身自爆（mode 'chase'）。
+ * 试炼模式（modes/trial.js）另有两种走法：boss 的位置由试炼模式每帧摆（mode 'boss'）；小怪潮和 boss 召的小怪追着施法者（mode 'chase'）：
+ * 小傀儡贴身自爆，符箓傀儡（额头贴黄符）站远处射火球，铁头傀儡（戴铁盔）冲锋——射和冲由试炼模式摆（e.act），这里只管平时怎么走。
  */
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
-import { BOSS, ELEMENTS, ENEMIES } from '../rules/numbers.js';
-import { keepInArena } from '../rules/trial.js';
+import { BOSS, ELEMENTS, ENEMIES, MINION } from '../rules/numbers.js';
+import { archerIntent, keepInArena } from '../rules/trial.js';
 import { CASTER_POS, CORE_POS, groundHeightAt, OBSTACLES, PATHS, PLAZA_R, SPAWN_FOG } from '../world/layout.js';
 import { FlowField } from '../world/flowfield.js';
 import { col, PALETTE, rand } from '../fx/common.js';
@@ -22,8 +23,10 @@ const { smoothstep } = THREE.MathUtils;
 const CORE_REACH = 2.6;
 /** 广场上的固定障碍：场景物件（位置以 layout.js 为准）加上施法者本人 */
 const STATIC_OBSTACLES = [...OBSTACLES, { x: CASTER_POS.x, z: CASTER_POS.z, r: 0.5 }];
-/** 试炼模式：追上来的小傀儡离施法者这么近就自爆 */
+/** 试炼模式：追上来的小傀儡离施法者这么近就自爆；铁头傀儡贴到这么近就站住等着冲 */
 const TOUCH_REACH = 0.9;
+const CHARGER_STOP = 1.0;
+/** @typedef {'grunt' | 'shield' | 'colossus' | 'boss' | 'archer' | 'charger'} EnemyType */
 
 /** 路径长度表，便于按走过的距离取位置；entry 是走到哪里算上了广场（之后改跟流场走） */
 function pathInfo(pts) {
@@ -81,8 +84,12 @@ export class Enemies {
       eye: new THREE.BoxGeometry(0.08, 0.06, 0.02), shard: new THREE.BoxGeometry(0.22, 0.22, 0.22),
       shield: new THREE.BoxGeometry(0.9, 1.0, 0.1), bar: new THREE.PlaneGeometry(0.8, 0.07),
       armor: new THREE.BoxGeometry(0.86, 1.5, 0.62),
+      charm: new THREE.BoxGeometry(0.1, 0.36, 0.02), helmet: new THREE.BoxGeometry(0.5, 0.2, 0.5), ram: new THREE.BoxGeometry(0.2, 0.14, 0.12),
     };
     this.eyeMat = new THREE.MeshBasicMaterial({ color: col(PALETTE.enemy.primary, 2.2) });
+    // 符箓傀儡额头上的黄符、铁头傀儡的铁盔（所有同类共用，不随敌人销毁）
+    this.charmMat = new THREE.MeshStandardMaterial({ color: 0xe8c860, emissive: 0x6a4a10, emissiveIntensity: 0.6, roughness: 0.9 });
+    this.ironMat = new THREE.MeshStandardMaterial({ color: 0x3a3f47, roughness: 0.4, metalness: 0.6 });
     /** boss 的冰甲：罩住上身的一层半透明冰（只有一个 boss，材质共用；透明度由试炼模式按剩多少甲调） */
     this.armorMat = new THREE.MeshStandardMaterial({ color: 0xcdeeff, roughness: 0.12, transparent: true, opacity: 0.55,
       emissive: 0x2f7fc0, emissiveIntensity: 0.5, depthWrite: false });
@@ -90,10 +97,12 @@ export class Enemies {
     this._p = new THREE.Vector3(); this._d = new THREE.Vector3();
   }
 
-  /** @param {'grunt' | 'shield' | 'colossus' | 'boss'} type @param {number} pathIndex */
+  /** @param {EnemyType} type @param {number} pathIndex */
   spawn(type, pathIndex) {
     const spec = ENEMIES[type];
-    const mat = new THREE.MeshStandardMaterial({ color: type === 'shield' ? 0x6f6a62 : type === 'boss' ? 0x7f93a8 : 0x8b7355, roughness: 0.8 });
+    // 符箓傀儡紫、铁头傀儡浅钢灰：0x585d66 那版在紫色天光下和符箓傀儡一样黑（10-28 截图）
+    const tint = { shield: 0x6f6a62, boss: 0x7f93a8, archer: 0x7a5aa8, charger: 0x9097a3 }[type] ?? 0x8b7355;
+    const mat = new THREE.MeshStandardMaterial({ color: tint, roughness: 0.8 });
     const base = mat.color.clone(), fromFog = pathIndex % this.paths.length === SPAWN_FOG.path;
     if (fromFog) { mat.transparent = true; mat.opacity = 0; mat.color.copy(EMERGE_DARK); }   // 眼睛是另一种材质，一开始就亮着
     const g = new THREE.Group();
@@ -103,9 +112,11 @@ export class Enemies {
     part(this.geo.leg, -0.16, 0.21, 0); part(this.geo.leg, 0.16, 0.21, 0);
     part(this.geo.eye, -0.1, 1.4, 0.215, this.eyeMat); part(this.geo.eye, 0.1, 1.4, 0.215, this.eyeMat);
     if (type === 'shield') part(this.geo.shield, 0, 0.8, 0.42);
+    if (type === 'archer') part(this.geo.charm, 0, 1.38, 0.225, this.charmMat);   // 两眼之间垂下一道黄符
+    if (type === 'charger') { part(this.geo.helmet, 0, 1.52, 0, this.ironMat); part(this.geo.ram, 0, 1.5, 0.28, this.ironMat); }
     let armorMesh = null;
     if (type === 'boss') { armorMesh = part(this.geo.armor, 0, 1.0, 0, this.armorMat); armorMesh.castShadow = false; }
-    const scale = type === 'boss' ? BOSS.scale : type === 'colossus' ? 2.2 : type === 'shield' ? 1.15 : 0.9;
+    const scale = { boss: BOSS.scale, colossus: 2.2, shield: 1.15, archer: 0.85, charger: 1.05 }[type] ?? 0.9;
     g.scale.setScalar(scale);
     g.rotation.order = 'YXZ';   // 先转向、再前倾、再左右晃
     const bar = new THREE.Group();
@@ -123,6 +134,8 @@ export class Enemies {
       path: info, s: 0, lateral: rand(-0.7, 0.7), mode: 'walk', pos: new THREE.Vector3(), vel: new THREE.Vector3(),
       dir: new THREE.Vector3(0, 0, 1), frozen: 0, burn: 0, stun: 0, hop: rand(0, Math.PI * 2), lastHitEl: '', squash: 0,
       emerge: fromFog ? 0 : 1, armorMesh, lean: 0, moving: false, chase: false,
+      // 试炼的小怪：act 是试炼模式摆的出招（符箓傀儡 'aim'，铁头傀儡 'tele' / 'rush' / 'daze'），cd 离下一次出招还有几秒；side 符箓傀儡横挪往哪边
+      act: '', cd: 0, side: Math.random() < 0.5 ? 1 : -1,
     };
     pointAt(info, 0, e.pos, e.dir);
     this.list.push(e);
@@ -132,8 +145,8 @@ export class Enemies {
 
   /**
    * 试炼模式：直接放在广场上某处（不走石阶索桥）。
-   * mode 'boss'：位置、朝向由试炼模式每帧摆（moving 为真时播走路的动画）；'chase'：自己直奔施法者，贴身自爆。
-   * @param {'grunt' | 'shield' | 'colossus' | 'boss'} type @param {number} x @param {number} z @param {'boss' | 'chase'} mode
+   * mode 'boss'：位置、朝向由试炼模式每帧摆（moving 为真时播走路的动画）；'chase'：自己追施法者（见 chaseStep）。
+   * @param {EnemyType} type @param {number} x @param {number} z @param {'boss' | 'chase'} mode
    */
   spawnAt(type, x, z, mode) {
     const e = this.spawn(type, 0);
@@ -173,6 +186,45 @@ export class Enemies {
     }
     const f = this.chaseField.dirAt(p.x, p.z);
     return f ? out.set(f.x, 0, f.z) : out;
+  }
+
+  /**
+   * 试炼里追人的一步。小傀儡、铁头傀儡直奔施法者（铁头傀儡贴到 1 米就站住）；符箓傀儡一直面朝施法者，
+   * 离得远就靠近、太近就后退（退到广场边退不动了改横挪）、不远不近就横着挪，时不时换个方向。同伴之间挤开一点；土墙挡着就原地等。
+   * @param {any} e @param {number} dx @param {number} dz 到施法者的向量 @param {number} d 距离 @param {number} dt
+   */
+  chaseStep(e, dx, dz, d, dt) {
+    const turn = 1 - Math.exp(-8 * dt);
+    let vx, vz, speed = e.spec.speed;
+    if (e.type === 'archer') {
+      const A = MINION.archer, face = this._p.set(dx / d, 0, dz / d);
+      e.dir.lerp(face, turn).setY(0).normalize();
+      let k = archerIntent(d, A.keep);
+      if (k === -1 && Math.hypot(e.pos.x, e.pos.z) > PLAZA_R - 1.8) k = 0;
+      if (k === 1) { const w = this.chaseDir(e.pos, dx, dz, d, this._d); vx = w.x; vz = w.z; }
+      else if (k === -1) { vx = -face.x; vz = -face.z; }
+      else {
+        if (Math.random() < dt * 0.5) e.side = -e.side;
+        vx = -face.z * e.side; vz = face.x * e.side; speed *= A.strafe;
+      }
+    } else {
+      const want = this.chaseDir(e.pos, dx, dz, d, this._p);
+      // 人正好在身后（铁头傀儡冲过了头）：两个方向正相反时插值只会缩短、归一化又还原，永远转不过来（10-28 预览：冲完背着人走到广场边）。先侧转 90°
+      if (e.dir.dot(want) < -0.95) e.dir.set(-e.dir.z, 0, e.dir.x);
+      e.dir.lerp(want, turn).setY(0).normalize();
+      vx = e.dir.x; vz = e.dir.z;
+      if (e.type === 'charger' && d <= CHARGER_STOP) speed = 0;
+    }
+    let sx = 0, sz = 0;   // 同伴之间挤开一点
+    for (const o of this.list) {
+      if (o === e || !o.chase) continue;
+      const ox = e.pos.x - o.pos.x, oz = e.pos.z - o.pos.z, d2 = ox * ox + oz * oz, minD = 0.45 * (e.scale + o.scale);
+      if (d2 > 1e-6 && d2 < minD * minD) { const od = Math.sqrt(d2); sx += (ox / od) * (minD - od); sz += (oz / od) * (minD - od); }
+    }
+    const nx = e.pos.x + (vx * speed + sx * 3) * dt, nz = e.pos.z + (vz * speed + sz * 3) * dt;
+    if (!this.blockedAt(nx + vx * 0.3, nz + vz * 0.3)) { e.pos.x = nx; e.pos.z = nz; }   // 土墙挡着就原地等
+    keepInArena(e.pos, OBSTACLES, PLAZA_R - 0.6, 0.3);
+    e.moving = speed > 0;
   }
 
   /** 石阶、索桥上沿固定路线走的敌人不看流场：前面有土墙就原地等（等墙沉下去再走） */
@@ -373,20 +425,13 @@ export class Enemies {
       } else if (e.mode === 'boss') {
         e.pos.y = groundHeightAt(e.pos.x, e.pos.z) ?? 0;   // 位置由试炼模式摆
       } else if (e.mode === 'chase') {
+        e.moving = false;
         if (!held) {
-          const dx = CASTER_POS.x - e.pos.x, dz = CASTER_POS.z - e.pos.z, d = Math.hypot(dx, dz);
-          if (d <= TOUCH_REACH) { this.hooks.touch?.(e); this.remove(e, 'touch'); continue; }
-          const want = this.chaseDir(e.pos, dx, dz, d, this._p);
-          e.dir.lerp(want, 1 - Math.exp(-8 * dt)).setY(0).normalize();
-          let sx = 0, sz = 0;   // 同伴之间挤开一点
-          for (const o of this.list) {
-            if (o === e || !o.chase) continue;
-            const ox = e.pos.x - o.pos.x, oz = e.pos.z - o.pos.z, d2 = ox * ox + oz * oz, minD = 0.45 * (e.scale + o.scale);
-            if (d2 > 1e-6 && d2 < minD * minD) { const od = Math.sqrt(d2); sx += (ox / od) * (minD - od); sz += (oz / od) * (minD - od); }
-          }
-          const nx = e.pos.x + (e.dir.x * e.spec.speed + sx * 3) * dt, nz = e.pos.z + (e.dir.z * e.spec.speed + sz * 3) * dt;
-          if (!this.blockedAt(nx + e.dir.x * 0.3, nz + e.dir.z * 0.3)) { e.pos.x = nx; e.pos.z = nz; }   // 土墙挡着就原地等
-          keepInArena(e.pos, OBSTACLES, PLAZA_R - 0.6, 0.3);
+          const dx = CASTER_POS.x - e.pos.x, dz = CASTER_POS.z - e.pos.z, d = Math.max(Math.hypot(dx, dz), 1e-6);
+          if (e.type === 'grunt' && d <= TOUCH_REACH) { this.hooks.touch?.(e); this.remove(e, 'touch'); continue; }
+          // 出招时（e.act）位置由试炼模式摆；符箓傀儡蓄力时还要一直转着对准人
+          if (!e.act) this.chaseStep(e, dx, dz, d, dt);
+          else if (e.act === 'aim') e.dir.lerp(this._p.set(dx / d, 0, dz / d), 1 - Math.exp(-8 * dt)).setY(0).normalize();
         }
         e.pos.y = groundHeightAt(e.pos.x, e.pos.z) ?? 0;
       } else if (e.mode === 'fall') {
@@ -405,10 +450,11 @@ export class Enemies {
       }
       // 程序动画（不用骨骼，傀儡本来就僵）：一跳一跳，空中拉长、落地压扁，前倾，每步左右晃
       const upright = e.mode === 'walk' || e.mode === 'field' || e.mode === 'chase' || e.mode === 'boss';
-      const walking = upright && (e.mode !== 'boss' || e.moving) && !held;
+      const rush = e.act === 'rush';
+      const walking = upright && !held && (e.mode === 'boss' || e.mode === 'chase' ? e.moving || rush : true);
       if (walking) {
         const before = Math.floor(e.hop / Math.PI);
-        e.hop += dt * e.spec.speed * 4.2;
+        e.hop += dt * (rush ? MINION.charger.speed * 0.5 : e.spec.speed) * 4.2;
         if (Math.floor(e.hop / Math.PI) !== before) this.land(e);   // 正弦过零 = 一跳落地
       }
       const air = walking ? Math.abs(Math.sin(e.hop)) : 0;

@@ -1,12 +1,12 @@
-// 试炼模式的规则（game/rules/trial.js）：冰甲只怕火、70% / 30% 换阶段、挑招、红圈与扇形的判定、玩家被挡在广场里。
+// 试炼模式的规则（game/rules/trial.js）：冰甲只怕火、70% / 30% 换阶段、挑招、红圈与扇形的判定、玩家被挡在广场里、小怪潮。
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { damageTo } from '../game/rules/arbiter.js';
-import { BOSS, ENEMIES, RUN, TRIAL } from '../game/rules/numbers.js';
+import { BOSS, ENEMIES, MINION, RUN, TRIAL } from '../game/rules/numbers.js';
 import {
-  bossHit, bossPhase, canDash, homingTurn, inCircle, inSector, isPerfect, keepInArena, nextBatch, pickMove, recoverSec, regenStamina, slamCount,
-  spawnSpot, spiralAngles, teleSec,
+  archerIntent, bossHit, bossPhase, canDash, chargeLen, homingTurn, inCircle, inSector, inStrip, isPerfect, keepInArena, nextBatch, pickMinion, pickMove,
+  recoverSec, regenStamina, slamCount, spawnSpot, spiralAngles, teleSec,
 } from '../game/rules/trial.js';
 
 const MAX = ENEMIES.boss.hp;
@@ -214,4 +214,59 @@ test('小怪潮：每批冒的只数、间隔在设定的区间里，不超过�
   // 广场太小、离谁都近：取试过里最远的，不卡死
   const p = spawnSpot(rnd, { x: 0, z: 0 }, 2, 10, []);
   assert.ok(Math.hypot(p.x, p.z) <= 2 + 1e-9);
+});
+test('小怪潮：第一段只有小傀儡；后面按分量混进新小怪，到了同时上限就不再抽它', () => {
+  const W = RUN.wave, rnd = seeded(11);
+  for (let i = 0; i < 100; i++) assert.equal(pickMinion(W.mix[0], {}, W.cap, rnd), 'grunt');
+  const count = (mix, alive) => {
+    const c = {};
+    for (let i = 0; i < 2000; i++) { const k = pickMinion(mix, alive, W.cap, rnd); c[k] = (c[k] ?? 0) + 1; }
+    return c;
+  };
+  const c3 = count(W.mix[2], {});
+  for (const k of Object.keys(W.mix[2])) assert.ok(Math.abs(c3[k] / 2000 - W.mix[2][k]) < 0.05, `${k} 的比例接近分量`);
+  // 符箓傀儡满了：只剩另外两种
+  const full = count(W.mix[2], { archer: W.cap.archer });
+  assert.equal(full.archer, undefined);
+  assert.ok(full.charger > 0 && full.grunt > 0);
+  // 新小怪都满了：只冒小傀儡
+  assert.deepEqual(Object.keys(count(W.mix[2], { archer: 9, charger: 9 })), ['grunt']);
+  // 每段都有小傀儡兜底，分量加起来是 1
+  for (const m of W.mix) {
+    assert.ok(m.grunt > 0);
+    assert.ok(Math.abs(Object.values(m).reduce((a, b) => a + b, 0) - 1) < 1e-9);
+  }
+});
+
+test('符箓傀儡：太远靠近、太近后退、在区间里横挪；射程够得到它站的最远处', () => {
+  const k = MINION.archer.keep;
+  assert.equal(archerIntent(k[1] + 0.1), 1);
+  assert.equal(archerIntent(k[0] - 0.1), -1);
+  assert.equal(archerIntent((k[0] + k[1]) / 2), 0);
+  const a = MINION.archer;
+  assert.ok(a.speed * a.life > k[1] + 2, '火球飞得到');
+  // 火球比玩家走得慢，看见了就躲得开
+  assert.ok(a.speed < TRIAL.speed * 1.5);
+});
+
+test('铁头傀儡：冲到障碍或广场边就停，直冲不受挡时冲满；红条判定含两头和宽度', () => {
+  const C = MINION.charger, R = 8, body = 0.4;
+  const from = { x: -6, z: 0 }, dir = { x: 1, z: 0 };
+  assert.equal(chargeLen(from, dir, [], R, C.len, body), C.len, '前面空：冲满');
+  const L = chargeLen(from, dir, [{ x: 0, z: 0, r: 1.5 }], R, C.len, body);
+  assert.ok(L < 6 - 1.5 - body + 1e-9 && L > 6 - 1.5 - body - 0.11, `停在柱子前（${L}）`);
+  const edge = chargeLen({ x: 5, z: 0 }, dir, [], R, C.len, body);
+  assert.ok(edge <= R - 5 + 1e-9 && edge > R - 5 - 0.11, '停在广场边');
+  // 贴着障碍：一步都冲不出去
+  assert.equal(chargeLen({ x: -1.9, z: 0 }, dir, [{ x: 0, z: 0, r: 1.5 }], R, C.len, body), 0);
+  // 红条：长 len、宽 w
+  const s = { x: 0, z: 0 };
+  assert.ok(inStrip({ x: 4, z: 0 }, s, dir, 9, C.w));
+  assert.ok(inStrip({ x: 4, z: C.w / 2 - 0.01 }, s, dir, 9, C.w));
+  assert.ok(!inStrip({ x: 4, z: C.w / 2 + 0.01 }, s, dir, 9, C.w));
+  assert.ok(!inStrip({ x: 9.2, z: 0 }, s, dir, 9, C.w), '冲不到的地方');
+  assert.ok(!inStrip({ x: -0.5, z: 0 }, s, dir, 9, C.w), '身后');
+  assert.ok(inStrip({ x: 4, z: C.w / 2 + 0.2 }, s, dir, 9, C.w, 0.35), '身体半径算进去');
+  // 预警够看清：蓄力时间里玩家能横着走出半条宽度加身体
+  assert.ok(TRIAL.speed * C.tele > C.w / 2 + 0.35);
 });

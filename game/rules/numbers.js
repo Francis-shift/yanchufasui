@@ -115,6 +115,21 @@ export const ENEMIES = {
   shield:   { name: '盾傀儡', hp: 80,  speed: 1.2, coreDmg: 20, frontReduce: 0.8 },
   colossus: { name: '巨像',   hp: 300, speed: 0.6, coreDmg: 50, freezeMult: 0.5 },
   boss:     { name: '寒甲傀儡王', hp: 1500, speed: 1.3, coreDmg: 0, freezeMult: 0.5 },   // 试炼模式的 boss，招式与冰甲见下面 BOSS
+  // 只在试炼的小怪潮里出现（10-28 加），怎么打人见下面 MINION
+  archer:   { name: '符箓傀儡', hp: 30,  speed: 1.6, coreDmg: 10 },
+  charger:  { name: '铁头傀儡', hp: 70,  speed: 1.7, coreDmg: 20 },
+};
+
+/**
+ * 小怪潮里的另外两种小怪（10-28 加，我定的初值，等本人试玩）：
+ * 符箓傀儡（archer）：离玩家保持 keep 米（太远就靠近、太近就后退、在区间里横着挪，横挪的速度 × strafe），
+ *   每隔 every 秒（区间里随机）站住蓄力 aim 秒，朝玩家射一颗紫火球：飞 speed 米/秒、伤害 dmg、半径 r、飞 life 秒。和冰锥一样飞在齐腰高、地上有红点。
+ * 铁头傀儡（charger）：追到 reach 米内、到玩家的直线没被挡着，就站住，地上亮一条宽 w 米的红条 tele 秒，然后沿直线冲 len 米（遇到障碍、广场边提前停），
+ *   速度 speed；冲的路上撞到玩家扣 dmg；冲完晕 daze 秒（这时打它最好），cd 秒后才能再冲。
+ */
+export const MINION = {
+  archer: { keep: [5.5, 8.5], strafe: 0.6, every: [2.4, 3.4], aim: 0.6, speed: 6, dmg: 10, r: 0.32, life: 3.2 },
+  charger: { reach: 7, w: 1.2, tele: 0.8, len: 9, speed: 12, dmg: 15, daze: 1.2, cd: 2.5 },
 };
 
 /**
@@ -149,6 +164,7 @@ export const TRIAL = { hp: 100, speed: 4.2, dash: { dist: 3.6, sec: 0.18, gap: 0
  * 试炼的一局（设计文档第 4 节"试炼模式：一局与奖励"，10-27 定；初值，试玩再调）：
  * 小怪潮第几段出几只小傀儡（n）；开打后 first 秒冒第一批，之后隔 gap 秒（区间里随机）冒一批 batch 只（随机），
  * 每只落在广场上随机一处、离玩家至少 away 米，先冒 warn 秒紫烟再出来；场上同时最多 alive 只，满了等打掉再冒（10-27 本人：数量少、要随机刷新）；
+ * 每只是哪种按这一段的 mix 抽（分量），符箓傀儡、铁头傀儡同时最多 cap 只，满了就出小傀儡（10-28：第 2 段加符箓傀儡，第 3 段再加铁头傀儡）；
  * 一段打完（小怪清空、boss 碎了）喘 rest 秒再选卡；每局重抽 rerolls 次；已经押过的元素，带这个元素的卡出现的分量 × owned。
  * 心法的数：见切把完美闪避窗口放到 window 秒，聚气完美闪避加 gauge 格，回元法力回复 × regen，龙吟召龙只要 ult 格；
  * 刹那：完美闪避后 slow.sec 秒（现实时间）全场慢到 slow.scale 倍，自己照常快；反手：完美闪避后 counter.sec 秒内下一招 × counter.mult；
@@ -161,7 +177,9 @@ export const TRIAL = { hp: 100, speed: 4.2, dash: { dist: 3.6, sec: 0.18, gap: 0
  * 返——土墙把冰锥弹回 boss（快 fan.speed 倍、伤害 × fan.mult）；引——雷链多跳 yin.jumps 下，闪电两侧 yin.r 米内的冰锥打碎。
  */
 export const RUN = {
-  wave: { n: [16, 22, 28], first: 1.2, gap: [1.2, 2.8], batch: [2, 3], away: 5, warn: 0.8, alive: 10 }, rest: 1.6, rerolls: 1, owned: 2,
+  wave: { n: [16, 22, 28], first: 1.2, gap: [1.2, 2.8], batch: [2, 3], away: 5, warn: 0.8, alive: 10,
+    mix: [{ grunt: 1 }, { grunt: 0.7, archer: 0.3 }, { grunt: 0.55, archer: 0.25, charger: 0.2 }], cap: { archer: 3, charger: 2 } },
+  rest: 1.6, rerolls: 1, owned: 2,
   up: 1.35, upDmg: 1.3,
   arts: { window: 0.45, gauge: 2, regen: 1.3, ult: 6, slow: { sec: 1, scale: 0.3 }, counter: { sec: 1.5, mult: 1.5 },
     ghost: { sec: 1.5, r: 0.45 }, after: { sec: 4, mult: 1.3 } },

@@ -1511,7 +1511,9 @@ export function start(root, opts = {}) {
         arts: { slow: +S.slowT.toFixed(2), counter: +S.counterT.toFixed(2), after: +S.afterT.toFixed(2), ghost: +trial.ghostT.toFixed(2) },
         stamina: +trial.stamina.toFixed(2), pending: trial.pending.length, dashLock: +trial.dashLock.toFixed(2), slowTele: trial.slowTele,
         teleLen: +trial.teleLen.toFixed(2), embers: embers.length, friendly: trial.bullets.filter((o) => o.friendly).length,
-        ghostAt: [+trial.ghost.position.x.toFixed(2), +trial.ghost.position.z.toFixed(2)], shots: trial.bullets.map((o) => [+o.x.toFixed(1), +o.z.toFixed(1)]) };
+        ghostAt: [+trial.ghost.position.x.toFixed(2), +trial.ghost.position.z.toFixed(2)], shots: trial.bullets.map((o) => [+o.x.toFixed(1), +o.z.toFixed(1)]),
+        crew: enemies.list.filter((o) => o.chase).map((o) => [o.type, o.act, +o.pos.x.toFixed(1), +o.pos.z.toFixed(1)]),
+        orbs: trial.bullets.filter((o) => o.orb).length, strips: trial.strips.size };
     },
     /** 试炼：直接拿一张卡；招式字给 el 就换进那个元素的按钮，字诀给 el 就一键写进那个按钮 */
     give: (id, el) => {
@@ -1532,6 +1534,8 @@ export function start(root, opts = {}) {
       for (const e of [...enemies.list]) if (e.chase) enemies.kill(e, e.pos);
       if (trial.boss) enemies.kill(trial.boss, trial.boss.pos);
     },
+    /** 试炼：在 (x, z) 放一只小怪潮里的小怪（'grunt' | 'archer' | 'charger'） */
+    minion: (/** @type {string} */ kind = 'archer', x = 0, z = -4) => { trial.spawnChaser({ x, z, kind }); },
     cast: (text) => submit(text),
     spawn: (/** @type {any} */ type = 'grunt', path = 0) => enemies.spawn(type, path),
     state: () => ({ phase: S.phase, mana: Math.round(S.mana), core: S.core, gauge: S.gauge, enemies: enemies.views(), last: S.last && { source: S.last.source, ms: S.last.ms, plan: S.last.plan } }),

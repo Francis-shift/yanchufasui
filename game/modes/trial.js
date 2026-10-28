@@ -8,11 +8,11 @@
  * 施法者的位置就是 CASTER_POS：玩家走到哪，法术就从哪放出（同步脚下法阵和特效起点）；回到守关时放回原处。
  */
 import * as THREE from 'three';
-import { BOSS, ENEMIES, RUN, TRIAL } from '../rules/numbers.js';
+import { BOSS, ENEMIES, MINION, RUN, TRIAL } from '../rules/numbers.js';
 import { BOSS_COUNT, RUN_STAGES, newRun, runMods } from '../rules/run.js';
 import {
-  bossHit, bossPhase, canDash, homingTurn, inCircle, inSector, isPerfect, keepInArena, nextBatch, pickMove, recoverSec, regenStamina, slamCount,
-  spawnSpot, spiralAngles, teleSec,
+  bossHit, bossPhase, canDash, chargeLen, homingTurn, inCircle, inSector, inStrip, isPerfect, keepInArena, nextBatch, pickMinion, pickMove,
+  recoverSec, regenStamina, slamCount, spawnSpot, spiralAngles, teleSec,
 } from '../rules/trial.js';
 import { CASTER_POS, CORE_POS, OBSTACLES, PLAZA_R } from '../world/layout.js';
 import { rand } from '../fx/common.js';
@@ -33,6 +33,16 @@ const SWEEP_HALF = (BOSS.sweep.halfDeg * Math.PI) / 180;
 const MAX_BULLETS = 200;
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const NO_SIZE = new THREE.Vector3(0, 0, 0);
+/** 小怪追人时被拦在这个半径里（enemies.js chaseStep）；铁头傀儡冲锋也冲不出去 */
+const CHASE_R = PLAZA_R - 0.6;
+/** 铁头傀儡的身体半径（冲锋撞障碍、撞人用） */
+const CHARGER_BODY = 0.4;
+/** 每段小怪潮开头的提示：这一段新来了什么、怎么对付 @type {[string, string][]} 手机版、电脑版 */
+const WAVE_HINT = [
+  ['小傀儡追着人自爆：边走边打，别让它们贴身', '小傀儡追着人自爆：边走边打，别让它们贴身。1、2、3 放天赋，4 召唤，空格闪避'],
+  ['新来的符箓傀儡站在远处射紫火球：看地上的红点，走开或者闪避；火球也能完美闪避', '新来的符箓傀儡站在远处射紫火球：看地上的红点，走开或者按空格闪避；火球也能完美闪避'],
+  ['铁头傀儡地上亮起红条就要冲过来：横着躲开，它冲完会晕一会儿，趁机打', '铁头傀儡地上亮起红条就要冲过来：横着躲开，它冲完会晕一会儿，趁机打'],
+];
 /** @type {Record<string, [number, number]>} 键 → 屏幕上的方向（右、上） */
 const MOVE_KEYS = { KeyW: [0, 1], ArrowUp: [0, 1], KeyS: [0, -1], ArrowDown: [0, -1], KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0] };
 
@@ -70,8 +80,10 @@ export class Trial {
     // 精力：还剩几格（攒到一半也算数）、离上次按闪避过了几秒；shownSta 是闪避按钮上画成什么样（变了才重画）
     // dashLock：字诀「重」放完这几秒不能闪避；slowTele：字诀「凝」冻住了 boss，下一招预警变慢
     this.stamina = TRIAL.stamina.max; this.sinceDash = Infinity; this.shownSta = ''; this.dashLock = 0; this.slowTele = false;
-    /** 小怪潮里冒着紫烟、还没出来的小傀儡：落点与还要几秒 @type {{ x: number, z: number, t: number }[]} */
+    /** 小怪潮里冒着紫烟、还没出来的小怪：落点、还要几秒、是哪种 @type {{ x: number, z: number, t: number, kind: string }[]} */
     this.pending = [];
+    /** 铁头傀儡正亮着的红条（收场时一起收） @type {Set<{ g: THREE.Group, fill: THREE.Mesh }>} */
+    this.strips = new Set();
     /** @type {any} */
     this.boss = null;
     this.armor = 0; this.phase = 1; this.freezeCd = 0;
@@ -86,8 +98,9 @@ export class Trial {
     // 完美闪避：按闪避的时刻与位置（招落下时回头核对）；一次闪避只算一次
     this.clock = 0; this.dashAt = -Infinity; this.dashFrom = new THREE.Vector3(); this.perfectUsed = true; this.glow = 0;
     // 冰锥：位置、速度、飞了多久；homing 的会追人；friendly：被写了字诀「返」的土墙弹回去的，不伤人、打敌人
+    // orb：符箓傀儡射的紫火球，和冰锥一样飞、一样躲、一样能被「引」劈碎和「返」弹回，只是画成一颗球
     /** @type {{ x: number, y: number, z: number, vx: number, vz: number, t: number, life: number, homing: boolean, dmg: number, r: number,
-     *           fooled?: boolean, friendly?: boolean }[]} */
+     *           fooled?: boolean, friendly?: boolean, orb?: boolean }[]} */
     this.bullets = [];
     this.emitT = 0; this.a0 = 0; this.chT = 0;   // 旋转弹幕：下一轮还有多久、起始角、已经转了几秒
     // 冰锥要在十几米外的镜头里一眼看见：0.2 米那版在截图里只剩一个白点（10-27），放大、自发光压过泛光阈值
@@ -98,7 +111,9 @@ export class Trial {
     // 冰锥底下的红点：飞在齐腰高，看地上的点才知道会不会撞上
     this.dots = new THREE.InstancedMesh(new THREE.CircleGeometry(0.34, 16).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: RED,
       transparent: true, opacity: 0.6, depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }), MAX_BULLETS);
-    for (const m of [this.shards, this.dots]) { m.count = 0; m.frustumCulled = false; scene.add(m); }
+    this.orbs = new THREE.InstancedMesh(new THREE.SphereGeometry(0.3, 14, 10), new THREE.MeshStandardMaterial({ color: 0xc89cff, emissive: 0x8a3cff,
+      emissiveIntensity: 2.2, roughness: 0.3 }), MAX_BULLETS);
+    for (const m of [this.shards, this.orbs, this.dots]) { m.count = 0; m.frustumCulled = false; scene.add(m); }
     this.shards.castShadow = true;
     this.dots.renderOrder = 2;
     // 心法残影：闪避处留下一个半透明的人影，追踪冰锥改追它、撞上就碎；ghostT 是它还剩几秒
@@ -229,7 +244,10 @@ export class Trial {
     else { this.state = 'pick'; this.d.pick(!!st.insight, () => this.next()); }
   }
 
-  /** 一段小怪潮：小傀儡隔一会儿成批冒出来（落点随机、先冒紫烟），追着人自爆；冒完、清空了这一段就过了 */
+  /**
+   * 一段小怪潮：小怪隔一会儿成批冒出来（落点随机、先冒紫烟）；冒完、清空了这一段就过了。
+   * 第 1 段只有追人自爆的小傀儡；第 2 段混进远处射火球的符箓傀儡，第 3 段再混进冲锋的铁头傀儡（比例、同时上限见 RUN.wave.mix / cap）
+   */
   startWave() {
     const W = RUN.wave;
     this.round++;
@@ -237,7 +255,7 @@ export class Trial {
     this.spawnT = W.first; this.state = 'wave'; this.pending.length = 0;
     const { hud } = this.d;
     hud.bigText(`第 ${this.round} 波`, '#16202b', 1400);
-    hud.setHint(this.d.mobile ? '小傀儡追着人自爆：边走边打，别让它们贴身' : '小傀儡追着人自爆：边走边打，别让它们贴身。1、2、3 放天赋，4 召唤，空格闪避');
+    hud.setHint(WAVE_HINT[Math.min(this.round, WAVE_HINT.length) - 1][this.d.mobile ? 0 : 1]);
     this.showWave();
   }
 
@@ -249,9 +267,17 @@ export class Trial {
       const b = nextBatch(Math.min(this.waveLeft, W.alive - alive - this.pending.length), Math.random);
       this.spawnT = b.gap;
       this.waveLeft -= b.n;
+      // 每种现在有几只（连同正冒烟的），到了同时上限就不再抽它
+      /** @type {Record<string, number>} */
+      const have = {};
+      for (const o of this.d.enemies.list) if (o.chase) have[o.type] = (have[o.type] ?? 0) + 1;
+      for (const q of this.pending) have[q.kind] = (have[q.kind] ?? 0) + 1;
+      const mix = /** @type {Record<string, number>} */ (W.mix[Math.min(this.round, W.mix.length) - 1]);
       for (let i = 0; i < b.n; i++) {
         const at = spawnSpot(Math.random, this.p, ARENA_R - 0.8, W.away, [...BLOCK, ...this.pending.map((q) => ({ x: q.x, z: q.z, r: 0.9 }))]);
-        this.pending.push({ x: at.x, z: at.z, t: W.warn });
+        const kind = pickMinion(mix, have, W.cap, Math.random);
+        have[kind] = (have[kind] ?? 0) + 1;
+        this.pending.push({ x: at.x, z: at.z, t: W.warn, kind });
       }
     }
     for (let i = this.pending.length - 1; i >= 0; i--) {
@@ -264,13 +290,15 @@ export class Trial {
       }
       if (q.t <= 0) { this.pending.splice(i, 1); this.spawnChaser(q); }
     }
-    if (this.waveLeft <= 0 && !this.pending.length && !alive) { this.state = 'rest'; this.t = RUN.rest; }
+    if (this.waveLeft <= 0 && !this.pending.length && !alive) { this.state = 'rest'; this.t = RUN.rest; this.clearBullets(); }
     this.showWave();
   }
 
-  /** 紫烟里冒出一只追人的小傀儡 @param {{ x: number, z: number }} at */
+  /** 紫烟里冒出一只小怪：刚出来的符箓傀儡、铁头傀儡先缓一会儿再出招 @param {{ x: number, z: number, kind: string }} at */
   spawnChaser(at) {
-    this.d.enemies.spawnAt('grunt', at.x, at.z, 'chase');
+    const type = at.kind === 'archer' || at.kind === 'charger' ? at.kind : 'grunt';
+    const e = this.d.enemies.spawnAt(type, at.x, at.z, 'chase');
+    e.cd = type === 'archer' ? rand(1.2, 2.2) : 1.2;
     for (let i = 0; i < 24; i++) {
       this.d.particles.emit(at.x + rand(-0.4, 0.4), rand(0.1, 0.9), at.z + rand(-0.4, 0.4), rand(-1.5, 1.5), rand(1, 3), rand(-1.5, 1.5),
         rand(0.5, 0.9), rand(0.15, 0.3), [1.0, 0.5, 1.6], [0.3, 0.1, 0.5], { alpha: 0.4, drag: 2 });
@@ -284,6 +312,143 @@ export class Trial {
     if (key === this.shown) return;
     this.shown = key;
     this.d.hud.setWave(`试炼 ${this.round}/${BOSS_COUNT} · 小怪潮`, `剩 ${left}`);
+  }
+
+  /**
+   * 小怪潮里符箓傀儡、铁头傀儡出招（平时怎么走在 enemies.js chaseStep）。被吹飞、冻住、麻痹：手上的招作废。
+   * @param {number} dt
+   */
+  updateMinions(dt) {
+    const walls = this.d.blockers();
+    for (const e of this.d.enemies.list) {
+      if (e.type !== 'archer' && e.type !== 'charger') continue;
+      if (e.mode !== 'chase' || e.frozen > 0 || e.stun > 0) { this.calm(e); continue; }
+      const dx = this.p.x - e.pos.x, dz = this.p.z - e.pos.z, d = Math.max(Math.hypot(dx, dz), 1e-6);
+      if (e.type === 'archer') this.archerAct(e, dt, d);
+      else this.chargerAct(e, dt, dx, dz, d, walls);
+      if (!this.fighting) return;   // 被撞死了
+    }
+  }
+
+  /** 招作废：红条收起，过一会儿再出招 @param {any} e */
+  calm(e) {
+    if (!e.act) return;
+    e.act = ''; e.lean = 0; e.cd = Math.max(e.cd, 1.0);
+    this.dropStrip(e);
+  }
+
+  /**
+   * 符箓傀儡：够得着就停下蓄力（紫光往手上收），到点朝玩家此刻站的地方射一颗紫火球（不提前量，走开就躲得掉）
+   * @param {any} e @param {number} dt @param {number} d 离玩家多远
+   */
+  archerAct(e, dt, d) {
+    const A = MINION.archer;
+    if (!e.act) {
+      e.cd -= dt;
+      if (e.cd <= 0 && d <= A.keep[1] + 1.5) { e.act = 'aim'; e.t = A.aim; }
+      return;
+    }
+    e.t -= dt;
+    const hx = e.pos.x + e.dir.x * 0.4 * e.scale, hy = 0.95 * e.scale, hz = e.pos.z + e.dir.z * 0.4 * e.scale;
+    if (Math.random() < dt * 40) {
+      const a = rand(0, Math.PI * 2), r = rand(0.5, 0.9), x = hx + Math.cos(a) * r, z = hz + Math.sin(a) * r;
+      this.d.particles.emit(x, hy + rand(-0.3, 0.3), z, (hx - x) * 3, 0, (hz - z) * 3, 0.3, rand(0.05, 0.1), [1.6, 0.8, 2.6], [0.5, 0.15, 0.9], { drag: 0.3 });
+    }
+    if (e.t > 0) return;
+    const vx = this.p.x - hx, vz = this.p.z - hz, l = Math.hypot(vx, vz) || 1;
+    this.fire(hx, hy, hz, (vx / l) * A.speed, (vz / l) * A.speed, { life: A.life, dmg: A.dmg, r: A.r, orb: true });
+    e.act = ''; e.cd = rand(A.every[0], A.every[1]);
+  }
+
+  /**
+   * 铁头傀儡：冷却好了、离玩家够近、中间没东西挡：停下，地上从脚下朝玩家亮一条红条（由近往远长满）；
+   * 到点沿红条直冲过去（撞到障碍、土墙、广场边就停），一路撞到人打一下；冲完原地发晕，过一阵才再冲
+   * @param {any} e @param {number} dt @param {number} dx @param {number} dz @param {number} d @param {{ x: number, z: number, r: number }[]} walls
+   */
+  chargerAct(e, dt, dx, dz, d, walls) {
+    const C = MINION.charger, { particles } = this.d;
+    if (!e.act) {
+      e.cd -= dt;
+      if (e.cd > 0 || d > C.reach) return;
+      const dir = { x: dx / d, z: dz / d }, obs = [...BLOCK, ...walls];
+      const len = chargeLen(e.pos, dir, obs, CHASE_R, C.len, CHARGER_BODY);
+      if (len < Math.min(d, C.len) - 1.0 || len < 2) { e.cd = 0.3; return; }   // 路上有东西挡着：接着绕，过会儿再看
+      e.act = 'tele'; e.t = C.tele; e.cdir = dir; e.clen = len; e.ran = 0; e.hit = false;
+      e.dir.set(dir.x, 0, dir.z);
+      e.strip = this.strip(e.pos, dir, len);
+      return;
+    }
+    if (e.act === 'tele') {
+      e.t -= dt;
+      const k = 1 - Math.max(0, e.t) / C.tele;
+      e.strip.fill.scale.x = Math.max(0.001, k);
+      e.lean = -0.25 * k;   // 往后一坐，蓄着劲
+      if (Math.random() < dt * 20) {   // 后脚刨地
+        particles.emit(e.pos.x - e.cdir.x * 0.4 + rand(-0.2, 0.2), 0.05, e.pos.z - e.cdir.z * 0.4 + rand(-0.2, 0.2), -e.cdir.x * rand(1, 2), rand(0.3, 0.8),
+          -e.cdir.z * rand(1, 2), rand(0.3, 0.5), rand(0.1, 0.16), [0.85, 0.8, 0.72], [0.6, 0.56, 0.5], { alpha: 0.35, drag: 2 });
+      }
+      if (e.t > 0) return;
+      e.act = 'rush';
+      // 预警到点时人已经不在红条里、闪避又按得够晚：算完美闪避
+      if (!inStrip(this.p, e.pos, e.cdir, e.clen, C.w, BODY)) this.checkPerfect((q) => inStrip(q, e.pos, e.cdir, e.clen, C.w, BODY));
+      return;
+    }
+    if (e.act === 'rush') {
+      const step = Math.min(C.speed * dt, e.clen - e.ran);
+      e.pos.x += e.cdir.x * step; e.pos.z += e.cdir.z * step; e.ran += step;
+      e.lean = 0.35;
+      // 冲的路上新立起的土墙：撞上就停
+      if (walls.some((o) => (e.pos.x - o.x) ** 2 + (e.pos.z - o.z) ** 2 < (o.r + CHARGER_BODY) ** 2)) e.ran = e.clen;
+      if (!e.hit && Math.hypot(this.p.x - e.pos.x, this.p.z - e.pos.z) < BODY + CHARGER_BODY + 0.1) {
+        e.hit = true;
+        if (this.hurt(C.dmg)) this.d.fx.shake = Math.max(this.d.fx.shake, 0.6);
+        if (!this.fighting) return;
+      }
+      for (let i = 0; i < 2; i++) {
+        particles.emit(e.pos.x + rand(-0.3, 0.3), 0.08, e.pos.z + rand(-0.3, 0.3), -e.cdir.x * rand(1, 3), rand(0.3, 1), -e.cdir.z * rand(1, 3),
+          rand(0.3, 0.5), rand(0.12, 0.2), [0.85, 0.8, 0.72], [0.6, 0.56, 0.5], { alpha: 0.35, drag: 2 });
+      }
+      if (e.ran < e.clen - 1e-6) return;
+      e.act = 'daze'; e.t = C.daze; e.lean = 0;
+      this.dropStrip(e);
+      return;
+    }
+    // 发晕：头上冒几颗金星
+    e.t -= dt;
+    if (Math.random() < dt * 10) {
+      const a = rand(0, Math.PI * 2), y = 1.75 * e.scale;
+      particles.emit(e.pos.x + Math.cos(a) * 0.35, y, e.pos.z + Math.sin(a) * 0.35, -Math.sin(a) * 1.2, 0.3, Math.cos(a) * 1.2, 0.45, rand(0.06, 0.1),
+        [2.4, 2.0, 0.8], [0.9, 0.6, 0.2], { drag: 1 });
+    }
+    if (e.t <= 0) { e.act = ''; e.cd = C.cd; e.dir.set(dx / d, 0, dz / d); }   // 醒过来先转身对着人
+  }
+
+  /**
+   * 铁头傀儡冲锋前地上的红条：从 at 朝 dir 长 len、宽 MINION.charger.w；填充由近往远长满（fill.scale.x 从 0 到 1）
+   * @param {{ x: number, z: number }} at @param {{ x: number, z: number }} dir @param {number} len
+   */
+  strip(at, dir, len) {
+    const h = MINION.charger.w / 2, t = 0.06;
+    const area = new THREE.PlaneGeometry(len, h * 2).translate(len / 2, 0, 0);
+    const edge = new THREE.Shape([new THREE.Vector2(0, -h), new THREE.Vector2(len, -h), new THREE.Vector2(len, h), new THREE.Vector2(0, h)]);
+    edge.holes.push(new THREE.Path([new THREE.Vector2(t, -h + t), new THREE.Vector2(t, h - t), new THREE.Vector2(len - t, h - t), new THREE.Vector2(len - t, -h + t)]));
+    const s = this.decal(area, new THREE.ShapeGeometry(edge));
+    s.g.position.set(at.x, 0.03, at.z);
+    s.g.rotation.y = Math.atan2(-dir.z, dir.x);   // 同扇形：几何沿 +x 画，转到 dir
+    s.fill.scale.x = 0.001;
+    s.g.visible = true;
+    this.strips.add(s);
+    return s;
+  }
+
+  /** 收起这只铁头傀儡的红条 @param {any} e */
+  dropStrip(e) {
+    const s = e.strip;
+    if (!s) return;
+    e.strip = null;
+    this.strips.delete(s);
+    this.scene.remove(s.g);
+    s.g.traverse((o) => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); /** @type {THREE.Material} */ (o.material).dispose(); } });
   }
 
   /** 第 n 个 boss 从广场那头现身，吼一声再出招（石甲巨像、火灵还没做，先用寒甲傀儡王顶上） @param {number} n */
@@ -323,6 +488,8 @@ export class Trial {
     this.dashT = 0; this.hurtT = 0; this.flash = 0;
     this.stamina = TRIAL.stamina.max; this.sinceDash = Infinity; this.shownSta = ''; this.dashLock = 0; this.slowTele = false;
     this.pending.length = 0;
+    for (const e of this.d.enemies.list) if (e.strip) this.dropStrip(e);
+    for (const s of this.strips) this.dropStrip({ strip: s });   // 敌人已经被清掉（enemies.clear 不报 onGone）的
     this.ghostT = 0; this.ghost.visible = false;
     this.p.copy(HOME); this.face.set(0, 0, -1);
     this.sync();
@@ -339,7 +506,7 @@ export class Trial {
     this.stop(); this.unbind();
     for (const x of [this.circle, this.sector]) this.scene.remove(x.g);
     this.scene.remove(this.ghost); this.ghostMat.dispose();
-    for (const m of [this.shards, this.dots]) { this.scene.remove(m); m.geometry.dispose(); /** @type {THREE.Material} */ (m.material).dispose(); m.dispose(); }
+    for (const m of [this.shards, this.orbs, this.dots]) { this.scene.remove(m); m.geometry.dispose(); /** @type {THREE.Material} */ (m.material).dispose(); m.dispose(); }
   }
 
   // ---------------------------------------------------------------- 玩家
@@ -504,6 +671,7 @@ export class Trial {
 
   /** 有敌人没了（enemies 的 onGone）：是 boss 就过了这一段 @param {any} e @param {string} how */
   onGone(e, how) {
+    this.dropStrip(e);
     if (e !== this.boss) return;
     this.boss = null;
     if (how === 'kill' && this.fighting) this.bossDown(e);
@@ -575,13 +743,16 @@ export class Trial {
     }
   }
 
-  /** 放一颗冰锥 @param {number} x @param {number} y @param {number} z @param {number} vx @param {number} vz @param {{ life: number, dmg: number, r: number, homing?: boolean }} o */
+  /**
+   * 放一颗冰锥（orb：符箓傀儡的紫火球）
+   * @param {number} x @param {number} y @param {number} z @param {number} vx @param {number} vz @param {{ life: number, dmg: number, r: number, homing?: boolean, orb?: boolean }} o
+   */
   fire(x, y, z, vx, vz, o) {
     if (this.bullets.length >= MAX_BULLETS) return;
-    this.bullets.push({ x, y, z, vx, vz, t: 0, life: o.life, homing: !!o.homing, dmg: o.dmg, r: o.r });
+    this.bullets.push({ x, y, z, vx, vz, t: 0, life: o.life, homing: !!o.homing, dmg: o.dmg, r: o.r, orb: !!o.orb });
   }
 
-  clearBullets() { this.bullets.length = 0; this.shards.count = this.dots.count = 0; }
+  clearBullets() { this.bullets.length = 0; this.shards.count = this.orbs.count = this.dots.count = 0; }
 
   /**
    * 字诀「返」：冰锥撞上写了「返」的土墙，被推回墙外、掉头飞向 boss（没有 boss 就照墙面反射），快一些、伤害翻倍，从此不伤人
@@ -677,9 +848,10 @@ export class Trial {
         if (b.friendly) continue;
         if (!gone) for (const o of BLOCK) if ((b.x - o.x) ** 2 + (b.z - o.z) ** 2 < (o.r + b.r) ** 2) { gone = true; break; }
         if (!gone && ghost && b.y < 1.6 && inCircle(b, ghost, b.r, RUN.arts.ghost.r)) gone = true;
-        if (gone) {   // 撞碎：溅几片冰
+        if (gone) {   // 撞碎：溅几片冰（火球溅紫火星）
+          const [c0, c1] = b.orb ? [[1.8, 0.9, 2.6], [0.5, 0.15, 0.9]] : [[1.4, 1.8, 2.2], [0.3, 0.55, 0.9]];
           for (let k = 0; k < 10; k++) {
-            particles.emit(b.x, b.y, b.z, rand(-3, 3), rand(0.5, 3), rand(-3, 3), rand(0.25, 0.5), rand(0.05, 0.1), [1.4, 1.8, 2.2], [0.3, 0.55, 0.9], { drag: 2, grav: -8 });
+            particles.emit(b.x, b.y, b.z, rand(-3, 3), rand(0.5, 3), rand(-3, 3), rand(0.25, 0.5), rand(0.05, 0.1), c0, c1, { drag: 2, grav: -8 });
           }
         }
       }
@@ -691,22 +863,25 @@ export class Trial {
         }
       }
       if (gone) { this.bullets.splice(i, 1); continue; }
-      // 身后拖一道冷光：追踪的拖得密，看得出它在拐弯；旋转弹幕一轮几十颗，拖得稀，不然连成一片白
-      if (Math.random() < dt * (b.homing ? 40 : 4)) {
-        particles.emit(b.x, b.y, b.z, -b.vx * 0.1, 0.2, -b.vz * 0.1, rand(0.25, 0.4), rand(0.1, 0.18), [1.4, 1.9, 2.4], [0.3, 0.5, 0.9], { alpha: 0.6, drag: 3 });
+      // 身后拖一道冷光：追踪的拖得密，看得出它在拐弯；旋转弹幕一轮几十颗，拖得稀，不然连成一片白；火球拖一串紫火
+      if (Math.random() < dt * (b.homing ? 40 : b.orb ? 30 : 4)) {
+        const [c0, c1] = b.orb ? [[1.6, 0.7, 2.4], [0.4, 0.1, 0.8]] : [[1.4, 1.9, 2.4], [0.3, 0.5, 0.9]];
+        particles.emit(b.x, b.y, b.z, -b.vx * 0.1, 0.2, -b.vz * 0.1, rand(0.25, 0.4), rand(0.1, 0.18), c0, c1, { alpha: 0.6, drag: 3 });
       }
     }
     const n = this.bullets.length;
+    let ns = 0, no = 0;
     for (let i = 0; i < n; i++) {
       const b = this.bullets[i];
       this._bd.set(b.vx, 0, b.vz).normalize();
       this._q.setFromUnitVectors(Z_AXIS, this._bd);
-      this.shards.setMatrixAt(i, this._m4.compose(this._bp.set(b.x, b.y, b.z), this._q, this._s));
+      this._m4.compose(this._bp.set(b.x, b.y, b.z), this._q, this._s);
+      if (b.orb) this.orbs.setMatrixAt(no++, this._m4); else this.shards.setMatrixAt(ns++, this._m4);
       // 弹回去的不伤人，地上不画红点
       this.dots.setMatrixAt(i, this._m4.compose(this._bp.set(b.x, 0.035, b.z), this._q.identity(), b.friendly ? NO_SIZE : this._s));
     }
-    this.shards.count = this.dots.count = n;
-    this.shards.instanceMatrix.needsUpdate = this.dots.instanceMatrix.needsUpdate = true;
+    this.shards.count = ns; this.orbs.count = no; this.dots.count = n;
+    for (const m of [this.shards, this.orbs, this.dots]) m.instanceMatrix.needsUpdate = true;
   }
 
   /** 预警到点：判定、演出 */
@@ -776,11 +951,17 @@ export class Trial {
     }
     if (!this.fighting) return;
     this.runT += dt;
-    if (this.state === 'wave') { this.updateWave(dt); return; }
+    if (this.state === 'wave') {   // 小怪潮：火球照飞（打死了人就停），小怪出招，到点冒下一批
+      this.updateBullets(dt);
+      if (this.fighting) this.updateMinions(dt);
+      if (this.fighting) this.updateWave(dt);
+      return;
+    }
     if (this.state === 'rest') { if ((this.t -= dt) <= 0) this.next(); return; }   // 一段打完喘口气
     const b = this.boss;
     if (!b) return;
     this.updateBullets(dt);   // 冰锥照飞，boss 冻住了也一样
+    if (this.fighting) this.updateMinions(dt);   // 小怪潮剩下的（调试放进来的）照样出招
     if (!this.fighting) return;   // 被冰锥打死了
     const held = b.frozen > 0 || b.stun > 0;
     if (b.frozen > 0) this.freezeCd = BOSS.freezeGrace; else this.freezeCd = Math.max(0, this.freezeCd - dt);
