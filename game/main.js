@@ -30,6 +30,7 @@ import {
   BEAM, BUTTON_CHANT_MS, CHANT_MIN_MS, CORE_HP, ELEMENTS, ENEMIES, FORMS, INPUT_MAX_CHARS, MANA_MAX, MOMENTUM_FX, MOMENTUM_RANGE, PARSE_TIMEOUT_MS, RAIN,
   RUN, SLOWMO_MAX_SEC, SLOWMO_SCALE, SUMMONS, TALENTS, TORNADO, TRIAL, WALL,
 } from './rules/numbers.js';
+import { Caster } from './actors/caster.js';
 import { Enemies } from './actors/enemies.js';
 import { loadRig } from './actors/rig.js';
 import { Trial } from './modes/trial.js';
@@ -95,8 +96,8 @@ const FAIL_TEXT = {
 /**
  * @param {HTMLElement} root
  * @param {{ parseUrl?: string | string[], lab?: boolean, dragon?: { mesh?: string, tex?: string | null, models?: Record<string, { mesh: string, tex?: string | null }> }, models?: string,
- *           grunt?: { mesh: string, tex?: string | null } }} [opts] lab：直接进特效试验场； parseUrl：解析接口，给一串就按顺序当后备（见 net.js）；dragon：冰龙模型与贴图的地址，models 里按元素给另外四条龙的；models：场景物件模型的目录（不给就一直用方块占位）；
- *   grunt：小傀儡的骨骼模型与贴图（三种小怪共用；不给或下载失败用方块）
+ *           grunt?: { mesh: string, tex?: string | null }, caster?: { mesh: string, tex?: string | null } }} [opts] lab：直接进特效试验场； parseUrl：解析接口，给一串就按顺序当后备（见 net.js）；dragon：冰龙模型与贴图的地址，models 里按元素给另外四条龙的；models：场景物件模型的目录（不给就一直用方块占位）；
+ *   grunt：小傀儡的骨骼模型与贴图（三种小怪共用；不给或下载失败用方块）；caster：施法者的（不给或下载失败用胶囊占位）
  * @returns {() => void} 卸载
  */
 export function start(root, opts = {}) {
@@ -169,7 +170,12 @@ export function start(root, opts = {}) {
   if (opts.grunt) {   // 开局就下（约 170 KB）：到了以后冒出来的小怪用模型，没到之前、下载失败都用方块
     loadRig(opts.grunt.mesh, opts.grunt.tex).then((r) => enemies.useRig(r), (err) => console.warn('小傀儡模型没下载成功，继续用方块', err));
   }
+  const caster = new Caster(layout.caster);   // 施法者：蓄力、出掌、走跑、闪避的动作（模型约 200 KB，到了才换掉胶囊）
+  if (opts.caster) {
+    loadRig(opts.caster.mesh, opts.caster.tex).then((r) => caster.use(r), (err) => console.warn('施法者模型没下载成功，继续用胶囊占位', err));
+  }
   const trial = new Trial(scene, { enemies, fx, particles, hud, caster: layout.caster, origins: [origin, fx.origin],
+    dodge: () => caster.dodge(), ghost: (mat) => caster.ghost(mat),
     canvas: renderer.domElement, mobile, floatText: floatAt, win: trialWon, lose: trialLost,
     blockers: () => walls.obstacles(),   // 土墙挡得住冰锥
     reward: (mana, gauge) => {   // 完美闪避：回法力、加气势；拿了刹那、反手的开窗口
@@ -277,11 +283,18 @@ export function start(root, opts = {}) {
   const timers = [];
   const after = (sec, fn) => timers.push({ t: sec, fn });
 
-  /** 咏唱开始（四种施法入口都走这里）：法阵起光，台面阵纹里一道金光扫向阵眼 @param {string} el */
+  /** 咏唱开始（四种施法入口都走这里）：法阵起光，台面阵纹里一道金光扫向阵眼，施法者蓄力 @param {string} el */
   function beginChant(el) {
     fx.beginChant(el);
     layout.plaza.flow();
+    caster.charge();
   }
+
+  /**
+   * 这一步打的方向（施法者转过去出掌）：有落点用落点，没有就用锁定的第一只
+   * @param {{ ids: string[], point: { x: number, z: number } | null } | undefined} res
+   */
+  const aimOf = (res) => res?.point ?? (res?.ids.length ? enemies.get(res.ids[0])?.pos : null) ?? null;
 
   function hitCore(dmg) {
     if (S.phase !== 'playing') return;
@@ -681,7 +694,7 @@ export function start(root, opts = {}) {
    */
   function perform(intent, c) {
     const { text, source, ms, raw, castId } = c;
-    if (S.phase !== 'playing') { fx.endChant(); buttonChant = false; locks.clear(castId); S.busy = false; return; }
+    if (S.phase !== 'playing') { fx.endChant(); caster.endCharge(); buttonChant = false; locks.clear(castId); S.busy = false; return; }
     const firstEl = intent.summon && intent.summon !== 'thunder' ? intent.summon : intent.steps[0]?.el;
     if (firstEl) fx.retint(firstEl);
     let plan = planCast(intent, { mana: S.mana, lastCombo: S.lastCombo, seen: S.seen, said: S.said, text: c.button ? '' : text,
@@ -711,12 +724,14 @@ export function start(root, opts = {}) {
     buttonChant = false;
     if (!plan.ok) {
       locks.clear(castId);
+      caster.endCharge();
       if (!plan.backlash) hud.bigText(intent.steps.length ? '法力不足' : '未能成咒', '#5d6b7a', 1000);
       S.busy = false;
       return;
     }
     const m = plan.momentum;
     if (plan.summon?.cast) {
+      caster.cast(null);
       runSummon(plan.summon, castId);
       S.busy = false;
       return;
@@ -731,6 +746,7 @@ export function start(root, opts = {}) {
     const { resolved, marks } = lockSteps(plan.steps, m);
     locks.show(castId, marks);
     fx.launchBurst(plan.steps[0].el);
+    caster.cast(aimOf(resolved[0]));
     const go = () => {
       plan.steps.forEach((step, i) => after(i * 0.45, () => runStep(step, resolved[i], m)));
       after((plan.steps.length - 1) * 0.45 + 1.2, () => locks.clear(castId));
@@ -758,6 +774,7 @@ export function start(root, opts = {}) {
     const castId = ++castSeq;
     const { resolved, marks } = lockSteps(half, m);
     locks.show(castId, marks);
+    caster.cast(aimOf(resolved[0]));
     floatAt(new THREE.Vector3(CASTER_POS.x, 2.6, CASTER_POS.z), '连', '#2a8a7a');
     fx.launchBurst(half[0].el);
     half.forEach((step, i) => after(i * 0.45, () => runStep(step, resolved[i], m)));
@@ -1409,7 +1426,9 @@ export function start(root, opts = {}) {
     const slow = (slowSince > 0 || (fx.chanting > 0 && !buttonChant)) && S.phase === 'playing';
     timeScale += ((slow ? SLOWMO_SCALE : 1) - timeScale) * Math.min(1, realDt * 10);
     let dt = frozen ? 0 : realDt * timeScale * lab.speed;   // 写咒对话框开着：游戏停住，画面照画；试验场可放慢、定格
-    if (fx.hitStop > 0) { fx.hitStop -= realDt; dt *= 0.06; }
+    // 施法者自己的钟：开口慢放时世界慢、人照常（不然 0.8 秒的咏唱里手还没抬起来）；顿帧照样顿
+    let cdt = frozen ? 0 : realDt * lab.speed;
+    if (fx.hitStop > 0) { fx.hitStop -= realDt; dt *= 0.06; cdt *= 0.06; }
     // 心法刹那：完美闪避后全场慢下来，玩家自己照常快。pdt 是玩家的时间：走位、闪避冷却、回法力、心法窗口都按它走
     const pdt = dt;
     if (S.slowT > 0) { S.slowT -= pdt; dt *= RUN.arts.slow.scale; }
@@ -1431,6 +1450,7 @@ export function start(root, opts = {}) {
     fusionContacts();
     dragon.update(dt);
     enemies.update(dt, camera);
+    caster.update(cdt, S.mode === 'trial' && trial.on);
     fx.update(dt);
     locks.update(dt, enemies);
     const live = particles.update(dt);

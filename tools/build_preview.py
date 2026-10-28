@@ -13,6 +13,8 @@
       python tools/build_preview.py dragons --dragon preview/assets/dragon-6k.bin  → preview/dragons.html（五条龙的动作检查页，game/dev/dragoncheck.js）
       python tools/build_preview.py rigs --asset public/models/grunt.rig.gz --asset preview/assets/grunt-192.webp  → preview/rigs.html
         （小傀儡骨骼模型的动作检查页，game/dev/rigcheck.js；正式的 512 贴图放不下，检查页用缩到 192 的）
+      python tools/build_preview.py casters --asset public/models/caster.rig.gz --asset preview/assets/caster-192.webp  → preview/casters.html
+        （施法者模型的动作检查页，game/dev/castercheck.js；只有地面和灯，不带场景）
 只打包页面真正引用到的库（扫本地模块里的 import）：检查页用不到物理引擎，省下来给模型。
 """
 import sys
@@ -148,6 +150,12 @@ TARGETS = {
              " assets[s.dataset.asset] = URL.createObjectURL(new Blob([Uint8Array.from(atob(s.textContent.trim()), (c) => c.charCodeAt(0))]));"
              " startRigCheck(document.getElementById('app'), assets);",
              "言出法随 · 小傀儡模型检查", "rigs.html"),
+    "casters": ("game/dev/castercheck.js", "import { startCasterCheck } from '@local/game/dev/castercheck.js';"
+                " const assets = {};"
+                " for (const s of document.querySelectorAll('script[data-asset]'))"
+                " assets[s.dataset.asset] = URL.createObjectURL(new Blob([Uint8Array.from(atob(s.textContent.trim()), (c) => c.charCodeAt(0))]));"
+                " startCasterCheck(document.getElementById('app'), assets);",
+                "言出法随 · 施法者模型检查", "casters.html"),
 }
 BARE_IMPORT = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(?\s*)(['"])([^'".][^'"]*)\1""")
 

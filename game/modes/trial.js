@@ -71,10 +71,12 @@ export class Trial {
    *           floatText: (p: THREE.Vector3, text: string, color: string) => void, win: () => void, lose: () => void,
    *           blockers: () => { x: number, z: number, r: number, bounce?: boolean }[], reward: (mana: number, gauge: number) => void,
    *           local: (x: number, y: number) => { x: number, y: number }, pick: (insight: boolean, done: () => void) => void,
-   *           strike: (e: any, dmg: number, at: { x: number, z: number }) => void }} d
+   *           strike: (e: any, dmg: number, at: { x: number, z: number }) => void,
+   *           dodge?: () => void, ghost?: (mat: THREE.Material) => THREE.Object3D | null }} d
    *   origins：法术起点（施法者胸口高度），跟着玩家走；blockers：此刻的土墙（挡冰锥；bounce 的写了字诀「返」，把冰锥弹回去）；
    *   reward：完美闪避回法力、加气势；local：屏幕坐标换成界面坐标（画面转了 90° 时要转回来）；
-   *   pick：出三选一（insight：打完 boss 那次），选完调 done 接着打；strike：弹回去的冰锥撞上敌人，打它一下（main.js 结算）
+   *   pick：出三选一（insight：打完 boss 那次），选完调 done 接着打；strike：弹回去的冰锥撞上敌人，打它一下（main.js 结算）；
+   *   dodge：施法者做闪避的动作；ghost：施法者模型此刻姿势的一份拷贝（残影用；模型没到给 null，照旧用胶囊）
    */
   constructor(scene, d) {
     this.scene = scene; this.d = d;
@@ -572,7 +574,10 @@ export class Trial {
     this.stamina -= 1; this.sinceDash = 0;
     this.dashAt = this.clock; this.dashFrom.copy(this.p); this.perfectUsed = false;
     this.showStamina();
-    if (this.mods.canying && this.fighting) {   // 残影留在闪避起点
+    this.d.dodge?.();
+    if (this.mods.canying && this.fighting) {   // 残影留在闪避起点，摆着按闪避那一刻的姿势
+      const g = this.d.ghost?.(this.ghostMat);
+      if (g && g !== this.ghost) { this.scene.remove(this.ghost); this.ghost = g; this.scene.add(g); }
       this.ghostT = RUN.arts.ghost.sec;
       this.ghost.position.set(this.p.x, 0, this.p.z);
       this.ghost.quaternion.copy(this.d.caster.quaternion);

@@ -7,6 +7,7 @@
 - 坐标原样（Tripo 归一化成高 1），游戏里按要的身高缩放；正面朝 +z。
 - 走、跑一类（--move）带根位移：髋骨一个循环往前走一段。游戏里位置由代码挪，所以把这段匀速前进从髋骨上扣掉（原地踏步），
   另记下它原本每秒走多少（模型单位），游戏里按实际移动速度调播放快慢，脚才不打滑。
+  导出时就选了原地的（髋骨首尾不挪，人物模型就是）：没有根位移可量，改按支撑脚往后滑多快估（foot_speed），整段同样挪回髋骨上方。
 
 用法：python tools/pack_rig.py 输入.glb 名字 --clip 游戏里的名字=GLB 里的名字[@起秒:止秒] ... [--move walk,run] [--tex 512] [--sheet 联系表.png]
 产出：public/models/名字.rig.gz、名字-<边长>.webp。--sheet：从打包好的文件解回来，每段动作画几帧侧视图（核对动作和打包对不对）。
@@ -171,7 +172,14 @@ def pack(src, clip_specs, move=()):
         hip = next((tr["v"] for tr in tracks if tr["bone"] == 0 and tr["kind"] == 1 and len(tr["v"]) > 1), None)
         d = (hip[-1] - hip[0]) if hip is not None else np.zeros(3)
         drift, speed, note = float(np.hypot(d[0], d[2])), 0.0, ""
-        if gname in move:
+        if gname in move and drift < 0.01:
+            # 导出时就是原地的（人物模型，10-28）：没有根位移可量，按支撑脚往后滑多快估它原本该往前走多快；
+            # 整段照样挪回静止姿势的髋骨上方（人物的跑整段偏前 0.56）
+            if hip is not None:
+                hip[:, [0, 2]] -= hip[:, [0, 2]].mean(0) - bones[0]["t"][[0, 2]]
+            speed = foot_speed(bones, tracks, hi - lo, fps)
+            note = f"，导出时已原地，按支撑脚估原本每秒 {speed:.3f}"
+        elif gname in move:
             assert hip is not None and d[2] > 0.9 * drift > 0, f"{gname} 的根位移不是朝 +z 往前走（{d.round(3)}）"
             k = np.arange(len(hip))[:, None] / (len(hip) - 1)
             hip[:, [0, 2]] -= k * d[[0, 2]]   # 扣掉匀速前进：首尾两帧落在同一处，循环接得上
@@ -183,6 +191,28 @@ def pack(src, clip_specs, move=()):
         report.append(f"{gname}（{aname}{'，' + m.group(3) + '～' + m.group(4) + ' 秒' if m.group(3) else ''}）：{hi - lo} 帧 / {(hi - lo - 1) / fps:.2f} 秒，"
                       f"{len(tracks)} 条通道，髋骨首尾水平差 {drift:.3f}{note}")
     return {"bones": bones, "pos": pos, "nrm": nrm, "uv": uv, "idx": idx, "joints": nj, "weights": wq, "clips": clips}, tex, report
+
+
+def foot_speed(bones, tracks, n, fps):
+    """原地走跑：两只脚里低的那只贴着地（离最低点 3 厘米内）时，每秒往后滑多少（模型单位）——就是这段动作原本往前走多快。
+    取中位数：跑步腾空、换脚那几帧不算。"""
+    names = [b["name"] for b in bones]
+    feet = [names.index(f) for f in ("LeftToeBase", "RightToeBase")]
+    ys, zs = np.zeros((n, 2)), np.zeros((n, 2))
+    for f in range(n):
+        local = [[b["t"], b["q"]] for b in bones]
+        for tr in tracks:
+            local[tr["bone"]][1 - tr["kind"]] = tr["v"][min(f, len(tr["v"]) - 1)]
+        W = world_mats(bones, local)
+        for k, i in enumerate(feet):
+            ys[f, k], zs[f, k] = W[i][1, 3], W[i][2, 3]
+    low, floor, v = ys.argmin(1), ys.min(), []
+    for f in range(1, n):
+        k = low[f]
+        if low[f - 1] == k and max(ys[f, k], ys[f - 1, k]) < floor + 0.03:
+            v.append((zs[f - 1, k] - zs[f, k]) * fps)
+    assert len(v) >= 3 and np.median(v) > 0, "原地走跑量不出支撑脚往后滑的速度"
+    return float(np.median(v))
 
 
 def write_rig(r):

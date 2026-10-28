@@ -31,6 +31,8 @@ export default function Game() {
         models: '/models/',
         // 小傀儡的骨骼模型（三种小怪共用，模型约 96 KB、贴图约 76 KB）：开局就下，没到之前是方块
         grunt: { mesh: '/models/grunt.rig.gz', tex: '/models/grunt-512.webp' },
+        // 施法者（模型约 159 KB、贴图约 45 KB）：开局就下，没到之前是胶囊占位
+        caster: { mesh: '/models/caster.rig.gz', tex: '/models/caster-512.webp' },
       });
     });
     return () => { cancelled = true; dispose?.(); };
