@@ -15,6 +15,8 @@
         （小傀儡骨骼模型的动作检查页，game/dev/rigcheck.js；正式的 512 贴图放不下，检查页用缩到 192 的）
       python tools/build_preview.py casters --asset public/models/caster.rig.gz --asset preview/assets/caster-192.webp  → preview/casters.html
         （施法者模型的动作检查页，game/dev/castercheck.js；只有地面和灯，不带场景）
+      python tools/build_preview.py bosses --asset preview/assets/boss.rig.gz --asset preview/assets/boss-192.webp  → preview/bosses.html
+        （寒甲傀儡王的动作检查页，game/dev/bosscheck.js；正式模型放不下，先用 tools/lite_rig.py 做减面版）
 只打包页面真正引用到的库（扫本地模块里的 import）：检查页用不到物理引擎，省下来给模型。
 """
 import sys
@@ -156,6 +158,12 @@ TARGETS = {
                 " assets[s.dataset.asset] = URL.createObjectURL(new Blob([Uint8Array.from(atob(s.textContent.trim()), (c) => c.charCodeAt(0))]));"
                 " startCasterCheck(document.getElementById('app'), assets);",
                 "言出法随 · 施法者模型检查", "casters.html"),
+    "bosses": ("game/dev/bosscheck.js", "import { startBossCheck } from '@local/game/dev/bosscheck.js';"
+               " const assets = {};"
+               " for (const s of document.querySelectorAll('script[data-asset]'))"
+               " assets[s.dataset.asset] = URL.createObjectURL(new Blob([Uint8Array.from(atob(s.textContent.trim()), (c) => c.charCodeAt(0))]));"
+               " startBossCheck(document.getElementById('app'), assets);",
+               "言出法随 · 寒甲傀儡王检查", "bosses.html"),
 }
 BARE_IMPORT = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(?\s*)(['"])([^'".][^'"]*)\1""")
 

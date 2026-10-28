@@ -30,13 +30,19 @@ const CHARGER_STOP = 1.0;
 /** @typedef {'grunt' | 'shield' | 'colossus' | 'boss' | 'stone' | 'flame' | 'archer' | 'charger'} EnemyType */
 /**
  * 小傀儡模型（actors/rig.js）到了以后三种小怪的样子：同一个模型，颜色乘在贴图上、身高（米）各不同，挂件另加（spawn 里）。
- * 盾傀儡、巨像、boss 还是方块。chip：碎块的颜色（木头色乘上染色）
+ * 盾傀儡、巨像还是方块；boss 见 BOSS_LOOK。chip：碎块的颜色（木头色乘上染色）
  */
 const RIG_LOOK = {
   grunt: { tint: 0xffffff, h: 1.3 },
   archer: { tint: 0xc9a2ff, h: 1.15 },
   charger: { tint: 0xb8c4d6, h: 1.45 },
 };
+/**
+ * 换成绑骨骼模型的 boss（模型由 useBossRig 给，没到之前照旧方块）：身高（米）、染色、碎块颜色、出招身段（lean）打几折（动作自己会俯仰）。
+ * 寒甲傀儡王：方块那版高约 4 米，模型取 3.8（宽是身高的 0.92 倍，双拳垂在身侧）
+ * @type {Record<string, { h: number, tint: number, chip: number, lean: number }>}
+ */
+const BOSS_LOOK = { boss: { h: 3.8, tint: 0xffffff, chip: 0x5a6872, lean: 0.35 } };
 /** 出拳那段动作里拳头打到最远是第几秒：符箓傀儡蓄力到点（出火球）正好打出去 */
 const AIM_PUNCH = 0.875;
 
@@ -107,6 +113,8 @@ export class Enemies {
     };
     /** @type {import('./rig.js').Rig | null} 小傀儡模型，没到之前（或下载失败）用方块 */
     this.rig = null;
+    /** @type {Record<string, import('./rig.js').Rig>} 各个 boss 自己的模型（按敌人种类），没到的照旧方块 */
+    this.bossRigs = {};
     this.eyeMat = new THREE.MeshBasicMaterial({ color: col(PALETTE.enemy.primary, 2.2) });
     // 符箓傀儡额头上的黄符、铁头傀儡的铁盔（所有同类共用，不随敌人销毁）
     this.charmMat = new THREE.MeshStandardMaterial({ color: 0xe8c860, emissive: 0x6a4a10, emissiveIntensity: 0.6, roughness: 0.9 });
@@ -114,6 +122,14 @@ export class Enemies {
     /** boss 的冰甲：罩住上身的一层半透明冰（只有一个 boss，材质共用；透明度由试炼模式按剩多少甲调） */
     this.armorMat = new THREE.MeshStandardMaterial({ color: 0xcdeeff, roughness: 0.12, transparent: true, opacity: 0.55,
       emissive: 0x2f7fc0, emissiveIntensity: 0.5, depthWrite: false });
+    // 换成模型的寒甲傀儡王：冰甲是贴着身子的一层（同一副骨架带着动），沿法线往外鼓 0.018（模型高 1），只罩静止姿势里 0.3 以上（膝盖以上）
+    this.shellMat = this.armorMat.clone();
+    this.shellMat.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vRestY;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += normal * 0.018;\nvRestY = position.y;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vRestY;')
+        .replace('void main() {', 'void main() {\n  if (vRestY < 0.3) discard;');
+    };
     // 石甲巨像的石甲：胸前一整块石板、两肩各压一块大石头（棱角分明），石缝里透一点土黄的光
     this.rockMat = new THREE.MeshStandardMaterial({ color: 0x5f5548, roughness: 0.95, flatShading: true, emissive: 0x3a2408, emissiveIntensity: 0.6 });
     // 火灵的火罩：半透明、自己发光（亮过泛光阈值）；透明度由试炼模式按剩多少罩、一闪一闪地调
@@ -127,21 +143,27 @@ export class Enemies {
   /** 小傀儡模型下载好了：之后冒出来的小怪用模型（已经在场上的照旧是方块） @param {import('./rig.js').Rig} rig */
   useRig(rig) { this.rig = rig; }
 
+  /** 某个 boss 的模型下载好了：之后现身的这个 boss 用模型 @param {EnemyType} type @param {import('./rig.js').Rig} rig */
+  useBossRig(type, rig) { this.bossRigs[type] = rig; }
+
   /** @param {EnemyType} type @param {number} pathIndex */
   spawn(type, pathIndex) {
     const spec = ENEMIES[type];
-    const look = this.rig ? RIG_LOOK[/** @type {keyof typeof RIG_LOOK} */ (type)] : undefined;
+    // 用哪份模型：这个 boss 自己的；三种小怪共用小傀儡的；都没有（或没下载完）就方块
+    const bossLook = this.bossRigs[type] ? BOSS_LOOK[type] : undefined;
+    const src = bossLook ? this.bossRigs[type] : this.rig && RIG_LOOK[/** @type {keyof typeof RIG_LOOK} */ (type)] ? this.rig : null;
+    const look = bossLook ?? (src ? RIG_LOOK[/** @type {keyof typeof RIG_LOOK} */ (type)] : undefined);
     // 符箓傀儡紫、铁头傀儡浅钢灰：0x585d66 那版在紫色天光下和符箓傀儡一样黑（10-28 截图）
     const tint = look?.tint ?? { shield: 0x6f6a62, boss: 0x7f93a8, stone: 0x8a8378, flame: 0x6a3022, archer: 0x7a5aa8, charger: 0x9097a3 }[type] ?? 0x8b7355;
-    const mat = new THREE.MeshStandardMaterial({ color: tint, roughness: look ? 0.85 : 0.8, map: look ? this.rig?.tex : null });
+    const mat = new THREE.MeshStandardMaterial({ color: tint, roughness: look ? 0.85 : 0.8, map: look ? src?.tex : null });
     const base = mat.color.clone(), fromFog = pathIndex % this.paths.length === SPAWN_FOG.path;
     if (fromFog) { mat.transparent = true; mat.opacity = 0; mat.color.copy(EMERGE_DARK); }   // 眼睛是另一种材质，一开始就亮着
     const g = new THREE.Group();
     const scale = { boss: BOSS.scale, stone: STONE.scale, flame: FLAME.scale, colossus: 2.2, shield: 1.15, archer: 0.85, charger: 1.05 }[type] ?? 0.9;
     let armorMesh = null, rig = null;
-    if (look && this.rig) {
+    if (look && src) {
       // 模型：骨骼动作代替一跳一跳；scale 仍按方块那套算（瞄准点、互相挤开的距离不变），画出来的大小按身高
-      rig = makeRig(this.rig, mat);
+      rig = makeRig(src, mat);
       const prop = (/** @type {THREE.BufferGeometry} */ geo, /** @type {THREE.Material} */ m, /** @type {number} */ y, /** @type {number} */ z, rx = 0) => {
         const o = new THREE.Mesh(geo, m);
         o.position.set(0, y, z); o.rotation.x = rx; o.castShadow = true;
@@ -150,6 +172,13 @@ export class Enemies {
       if (type === 'archer') prop(this.geo.rigCharm, this.charmMat, 0.86, 0.165, -0.22);   // 额头正中垂一道黄符，顺着脸往后仰
       if (type === 'charger') { prop(this.geo.rigHelmet, this.ironMat, 0.84, 0); prop(this.geo.rigRam, this.ironMat, 0.855, 0.17); }
       g.add(rig.mesh);
+      if (type === 'boss') {   // 冰甲：同一份网格、同一副骨架再画一层（shellMat 往外鼓、只罩上身），跟着动作走
+        const shell = new THREE.SkinnedMesh(src.geometry, this.shellMat);
+        shell.bind(rig.mesh.skeleton, new THREE.Matrix4());
+        shell.frustumCulled = false;
+        rig.mesh.add(shell);
+        armorMesh = shell;
+      }
       g.scale.setScalar(look.h);
     } else {
       const part = (geo, x, y, z, m = /** @type {THREE.Material} */ (mat)) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; g.add(o); return o; };
@@ -196,9 +225,11 @@ export class Enemies {
       emerge: fromFog ? 0 : 1, armorMesh, lean: 0, moving: false, chase: false,
       // 试炼的小怪：act 是试炼模式摆的出招（符箓傀儡 'aim'，铁头傀儡 'tele' / 'rush' / 'daze'），cd 离下一次出招还有几秒；side 符箓傀儡横挪往哪边
       act: '', cd: 0, side: Math.random() < 0.5 ? 1 : -1,
-      // 有模型的：rig 骨架与动作，vis 画出来的身高，spd 这几帧实际挪多快（挑走还是跑），px / pz 上一帧在哪；top 血条多高
-      rig, vis: look?.h ?? scale, spd: 0, px: NaN, pz: NaN, top: look ? look.h + 0.25 : 1.85 * scale,
-      chip: look ? new THREE.Color(0x7a6650).multiply(new THREE.Color(look.tint)) : base,
+      // 有模型的：rig 骨架与动作（rigSrc 是哪份模型），vis 画出来的身高，spd 这几帧实际挪多快（挑走还是跑），px / pz 上一帧在哪；top 血条多高；
+      // leanK 出招身段打几折；pose 试炼的 boss 出招时该摆哪段动作的第几秒（试炼模式每帧给）
+      rig, rigSrc: rig ? src : null, vis: look?.h ?? scale, spd: 0, px: NaN, pz: NaN, top: look ? look.h + 0.25 : 1.85 * scale,
+      leanK: bossLook ? bossLook.lean : 0.5, pose: null,
+      chip: bossLook ? new THREE.Color(bossLook.chip) : look ? new THREE.Color(0x7a6650).multiply(new THREE.Color(look.tint)) : base,
     };
     pointAt(info, 0, e.pos, e.dir);
     this.list.push(e);
@@ -365,16 +396,23 @@ export class Enemies {
   /**
    * 有模型的敌人挑动作、推进动作。冻住、麻痹就定在这一帧。出招按招：符箓傀儡蓄力时出拳（拳头打到最远正好是出火球那一刻），
    * 铁头傀儡预警、发晕站着，冲锋时狂奔；被吹飞、坠落也站着。平时看这几帧实际挪了多快：慢走、快跑，播放快慢 = 实际速度 ÷（动作原本的速度 × 身高），
-   * 脚才不打滑；面朝人往后退（符箓傀儡）就把走路倒着放。
+   * 脚才不打滑；面朝人往后退（符箓傀儡）就把走路倒着放。试炼的 boss 出招时（e.pose）放哪段、第几秒由试炼模式给（actors/bossanim.js），
+   * 这里只换段、摆到那一秒；没有跑的模型（boss）快了也是走。
    * @param {any} e @param {number} dt @param {boolean} held
    */
   animate(e, dt, held) {
-    if (dt <= 0 || !this.rig) return;
+    if (dt <= 0 || !e.rigSrc) return;
     const dx = Number.isFinite(e.px) ? e.pos.x - e.px : 0, dz = Number.isFinite(e.pz) ? e.pos.z - e.pz : 0;
     e.px = e.pos.x; e.pz = e.pos.z;
     e.spd += (Math.hypot(dx, dz) / dt - e.spd) * Math.min(1, dt * 8);
     if (held) return;
-    const S = this.rig.speeds;
+    if (e.pose && e.rig.actions[e.pose.clip]) {
+      playRig(e.rig, e.pose.clip, 0, 0.2);
+      e.rig.actions[e.pose.clip].time = e.pose.time;
+      e.rig.mixer.update(dt);
+      return;
+    }
+    const S = e.rigSrc.speeds;
     let name = 'idle', k = 1;
     if (e.act === 'aim') { name = 'box'; k = AIM_PUNCH / MINION.archer.aim; }
     else if (e.act === 'rush') { name = 'run'; k = 2.5; }
@@ -383,7 +421,7 @@ export class Enemies {
     else if (e.spd > 0.15) {
       // 往后退一律倒着走（倒放跑步像录像倒带）
       const back = dx * e.dir.x + dz * e.dir.z < 0;
-      name = e.spd > 1.1 && !back ? 'run' : 'walk';
+      name = e.spd > 1.1 && !back && e.rig.actions.run ? 'run' : 'walk';
       k = THREE.MathUtils.clamp(e.spd / (S[name] * e.vis), 0.4, 2.5) * (back ? -1 : 1);
     }
     playRig(e.rig, name, k);
@@ -548,10 +586,10 @@ export class Enemies {
       const upright = e.mode === 'walk' || e.mode === 'field' || e.mode === 'chase' || e.mode === 'boss';
       let hopY = 0;
       if (e.rig) {
-        // 模型：骨骼动作（animate）；lean 减半，跑的动作本身已经前倾
+        // 模型：骨骼动作（animate）；lean 打折（leanK），跑的动作本身已经前倾、boss 出招的动作自己会俯仰
         this.animate(e, dt, held);
         e.group.position.copy(e.pos);
-        if (upright) e.group.rotation.set(e.lean * 0.5, Math.atan2(e.dir.x, e.dir.z), 0);
+        if (upright) e.group.rotation.set(e.lean * e.leanK, Math.atan2(e.dir.x, e.dir.z), 0);
       } else {
         // 方块：程序动画（傀儡本来就僵）：一跳一跳，空中拉长、落地压扁，前倾，每步左右晃
         const rush = e.act === 'rush';

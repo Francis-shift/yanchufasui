@@ -33,6 +33,8 @@ export default function Game() {
         grunt: { mesh: '/models/grunt.rig.gz', tex: '/models/grunt-512.webp' },
         // 施法者（模型约 159 KB、贴图约 45 KB）：开局就下，没到之前是胶囊占位
         caster: { mesh: '/models/caster.rig.gz', tex: '/models/caster-512.webp' },
+        // 第一个 boss 寒甲傀儡王（模型约 352 KB、贴图约 226 KB）：开局就下，没到之前是方块
+        boss: { mesh: '/models/boss.rig.gz', tex: '/models/boss-1024.webp' },
       });
     });
     return () => { cancelled = true; dispose?.(); };
