@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { BOSS, ELEMENTS, ENEMIES, MINION } from '../rules/numbers.js';
 import { archerIntent, keepInArena } from '../rules/trial.js';
+import { attachToBone, makeRig, playRig } from './rig.js';
 import { CASTER_POS, CORE_POS, groundHeightAt, OBSTACLES, PATHS, PLAZA_R, SPAWN_FOG } from '../world/layout.js';
 import { FlowField } from '../world/flowfield.js';
 import { col, PALETTE, rand } from '../fx/common.js';
@@ -27,6 +28,17 @@ const STATIC_OBSTACLES = [...OBSTACLES, { x: CASTER_POS.x, z: CASTER_POS.z, r: 0
 const TOUCH_REACH = 0.9;
 const CHARGER_STOP = 1.0;
 /** @typedef {'grunt' | 'shield' | 'colossus' | 'boss' | 'archer' | 'charger'} EnemyType */
+/**
+ * 小傀儡模型（actors/rig.js）到了以后三种小怪的样子：同一个模型，颜色乘在贴图上、身高（米）各不同，挂件另加（spawn 里）。
+ * 盾傀儡、巨像、boss 还是方块。chip：碎块的颜色（木头色乘上染色）
+ */
+const RIG_LOOK = {
+  grunt: { tint: 0xffffff, h: 1.3 },
+  archer: { tint: 0xc9a2ff, h: 1.15 },
+  charger: { tint: 0xb8c4d6, h: 1.45 },
+};
+/** 出拳那段动作里拳头打到最远是第几秒：符箓傀儡蓄力到点（出火球）正好打出去 */
+const AIM_PUNCH = 0.875;
 
 /** 路径长度表，便于按走过的距离取位置；entry 是走到哪里算上了广场（之后改跟流场走） */
 function pathInfo(pts) {
@@ -85,7 +97,14 @@ export class Enemies {
       shield: new THREE.BoxGeometry(0.9, 1.0, 0.1), bar: new THREE.PlaneGeometry(0.8, 0.07),
       armor: new THREE.BoxGeometry(0.86, 1.5, 0.62),
       charm: new THREE.BoxGeometry(0.1, 0.36, 0.02), helmet: new THREE.BoxGeometry(0.5, 0.2, 0.5), ram: new THREE.BoxGeometry(0.2, 0.14, 0.12),
+      // 挂在模型头骨上的（模型单位：头从 0.68 到顶 1.0，最宽在 0.85 处、左右 ±0.19、前后 ±0.16，往上收窄；脸朝 +z）。
+      // 铁盔是贴着头形的半球（底边在眼睛上面），前沿一道帽檐：方盒子扣在圆头上像顶着箱子（10-28 截图）
+      rigCharm: new THREE.BoxGeometry(0.08, 0.22, 0.012),
+      rigHelmet: new THREE.SphereGeometry(1, 16, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(0.205, 0.17, 0.18),
+      rigRam: new THREE.BoxGeometry(0.26, 0.04, 0.08),
     };
+    /** @type {import('./rig.js').Rig | null} 小傀儡模型，没到之前（或下载失败）用方块 */
+    this.rig = null;
     this.eyeMat = new THREE.MeshBasicMaterial({ color: col(PALETTE.enemy.primary, 2.2) });
     // 符箓傀儡额头上的黄符、铁头傀儡的铁盔（所有同类共用，不随敌人销毁）
     this.charmMat = new THREE.MeshStandardMaterial({ color: 0xe8c860, emissive: 0x6a4a10, emissiveIntensity: 0.6, roughness: 0.9 });
@@ -97,27 +116,45 @@ export class Enemies {
     this._p = new THREE.Vector3(); this._d = new THREE.Vector3();
   }
 
+  /** 小傀儡模型下载好了：之后冒出来的小怪用模型（已经在场上的照旧是方块） @param {import('./rig.js').Rig} rig */
+  useRig(rig) { this.rig = rig; }
+
   /** @param {EnemyType} type @param {number} pathIndex */
   spawn(type, pathIndex) {
     const spec = ENEMIES[type];
+    const look = this.rig ? RIG_LOOK[/** @type {keyof typeof RIG_LOOK} */ (type)] : undefined;
     // 符箓傀儡紫、铁头傀儡浅钢灰：0x585d66 那版在紫色天光下和符箓傀儡一样黑（10-28 截图）
-    const tint = { shield: 0x6f6a62, boss: 0x7f93a8, archer: 0x7a5aa8, charger: 0x9097a3 }[type] ?? 0x8b7355;
-    const mat = new THREE.MeshStandardMaterial({ color: tint, roughness: 0.8 });
+    const tint = look?.tint ?? { shield: 0x6f6a62, boss: 0x7f93a8, archer: 0x7a5aa8, charger: 0x9097a3 }[type] ?? 0x8b7355;
+    const mat = new THREE.MeshStandardMaterial({ color: tint, roughness: look ? 0.85 : 0.8, map: look ? this.rig?.tex : null });
     const base = mat.color.clone(), fromFog = pathIndex % this.paths.length === SPAWN_FOG.path;
     if (fromFog) { mat.transparent = true; mat.opacity = 0; mat.color.copy(EMERGE_DARK); }   // 眼睛是另一种材质，一开始就亮着
     const g = new THREE.Group();
-    const part = (geo, x, y, z, m = /** @type {THREE.Material} */ (mat)) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; g.add(o); return o; };
-    part(this.geo.torso, 0, 0.77, 0); part(this.geo.head, 0, 1.35, 0);
-    part(this.geo.arm, -0.42, 0.8, 0); part(this.geo.arm, 0.42, 0.8, 0);
-    part(this.geo.leg, -0.16, 0.21, 0); part(this.geo.leg, 0.16, 0.21, 0);
-    part(this.geo.eye, -0.1, 1.4, 0.215, this.eyeMat); part(this.geo.eye, 0.1, 1.4, 0.215, this.eyeMat);
-    if (type === 'shield') part(this.geo.shield, 0, 0.8, 0.42);
-    if (type === 'archer') part(this.geo.charm, 0, 1.38, 0.225, this.charmMat);   // 两眼之间垂下一道黄符
-    if (type === 'charger') { part(this.geo.helmet, 0, 1.52, 0, this.ironMat); part(this.geo.ram, 0, 1.5, 0.28, this.ironMat); }
-    let armorMesh = null;
-    if (type === 'boss') { armorMesh = part(this.geo.armor, 0, 1.0, 0, this.armorMat); armorMesh.castShadow = false; }
     const scale = { boss: BOSS.scale, colossus: 2.2, shield: 1.15, archer: 0.85, charger: 1.05 }[type] ?? 0.9;
-    g.scale.setScalar(scale);
+    let armorMesh = null, rig = null;
+    if (look && this.rig) {
+      // 模型：骨骼动作代替一跳一跳；scale 仍按方块那套算（瞄准点、互相挤开的距离不变），画出来的大小按身高
+      rig = makeRig(this.rig, mat);
+      const prop = (/** @type {THREE.BufferGeometry} */ geo, /** @type {THREE.Material} */ m, /** @type {number} */ y, /** @type {number} */ z, rx = 0) => {
+        const o = new THREE.Mesh(geo, m);
+        o.position.set(0, y, z); o.rotation.x = rx; o.castShadow = true;
+        attachToBone(rig, 'Head', o);
+      };
+      if (type === 'archer') prop(this.geo.rigCharm, this.charmMat, 0.86, 0.165, -0.22);   // 额头正中垂一道黄符，顺着脸往后仰
+      if (type === 'charger') { prop(this.geo.rigHelmet, this.ironMat, 0.84, 0); prop(this.geo.rigRam, this.ironMat, 0.855, 0.17); }
+      g.add(rig.mesh);
+      g.scale.setScalar(look.h);
+    } else {
+      const part = (geo, x, y, z, m = /** @type {THREE.Material} */ (mat)) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; g.add(o); return o; };
+      part(this.geo.torso, 0, 0.77, 0); part(this.geo.head, 0, 1.35, 0);
+      part(this.geo.arm, -0.42, 0.8, 0); part(this.geo.arm, 0.42, 0.8, 0);
+      part(this.geo.leg, -0.16, 0.21, 0); part(this.geo.leg, 0.16, 0.21, 0);
+      part(this.geo.eye, -0.1, 1.4, 0.215, this.eyeMat); part(this.geo.eye, 0.1, 1.4, 0.215, this.eyeMat);
+      if (type === 'shield') part(this.geo.shield, 0, 0.8, 0.42);
+      if (type === 'archer') part(this.geo.charm, 0, 1.38, 0.225, this.charmMat);   // 两眼之间垂下一道黄符
+      if (type === 'charger') { part(this.geo.helmet, 0, 1.52, 0, this.ironMat); part(this.geo.ram, 0, 1.5, 0.28, this.ironMat); }
+      if (type === 'boss') { armorMesh = part(this.geo.armor, 0, 1.0, 0, this.armorMat); armorMesh.castShadow = false; }
+      g.scale.setScalar(scale);
+    }
     g.rotation.order = 'YXZ';   // 先转向、再前倾、再左右晃
     const bar = new THREE.Group();
     const bg = new THREE.Mesh(this.geo.bar, this.barBg);
@@ -136,6 +173,9 @@ export class Enemies {
       emerge: fromFog ? 0 : 1, armorMesh, lean: 0, moving: false, chase: false,
       // 试炼的小怪：act 是试炼模式摆的出招（符箓傀儡 'aim'，铁头傀儡 'tele' / 'rush' / 'daze'），cd 离下一次出招还有几秒；side 符箓傀儡横挪往哪边
       act: '', cd: 0, side: Math.random() < 0.5 ? 1 : -1,
+      // 有模型的：rig 骨架与动作，vis 画出来的身高，spd 这几帧实际挪多快（挑走还是跑），px / pz 上一帧在哪；top 血条多高
+      rig, vis: look?.h ?? scale, spd: 0, px: NaN, pz: NaN, top: look ? look.h + 0.25 : 1.85 * scale,
+      chip: look ? new THREE.Color(0x7a6650).multiply(new THREE.Color(look.tint)) : base,
     };
     pointAt(info, 0, e.pos, e.dir);
     this.list.push(e);
@@ -299,6 +339,34 @@ export class Enemies {
     e.pos.z += (e.dir.z * v + sz * 3) * dt;
   }
 
+  /**
+   * 有模型的敌人挑动作、推进动作。冻住、麻痹就定在这一帧。出招按招：符箓傀儡蓄力时出拳（拳头打到最远正好是出火球那一刻），
+   * 铁头傀儡预警、发晕站着，冲锋时狂奔；被吹飞、坠落也站着。平时看这几帧实际挪了多快：慢走、快跑，播放快慢 = 实际速度 ÷（动作原本的速度 × 身高），
+   * 脚才不打滑；面朝人往后退（符箓傀儡）就把走路倒着放。
+   * @param {any} e @param {number} dt @param {boolean} held
+   */
+  animate(e, dt, held) {
+    if (dt <= 0 || !this.rig) return;
+    const dx = Number.isFinite(e.px) ? e.pos.x - e.px : 0, dz = Number.isFinite(e.pz) ? e.pos.z - e.pz : 0;
+    e.px = e.pos.x; e.pz = e.pos.z;
+    e.spd += (Math.hypot(dx, dz) / dt - e.spd) * Math.min(1, dt * 8);
+    if (held) return;
+    const S = this.rig.speeds;
+    let name = 'idle', k = 1;
+    if (e.act === 'aim') { name = 'box'; k = AIM_PUNCH / MINION.archer.aim; }
+    else if (e.act === 'rush') { name = 'run'; k = 2.5; }
+    else if (e.act === 'daze') k = 0.4;
+    else if (e.act === 'tele' || e.mode === 'slide' || e.mode === 'fall') k = 1;
+    else if (e.spd > 0.15) {
+      // 往后退一律倒着走（倒放跑步像录像倒带）
+      const back = dx * e.dir.x + dz * e.dir.z < 0;
+      name = e.spd > 1.1 && !back ? 'run' : 'walk';
+      k = THREE.MathUtils.clamp(e.spd / (S[name] * e.vis), 0.4, 2.5) * (back ? -1 : 1);
+    }
+    playRig(e.rig, name, k);
+    e.rig.mixer.update(dt);
+  }
+
   /** 一跳落地：压扁一下，脚边扬一点尘 */
   land(e) {
     e.squash = 1;
@@ -328,13 +396,19 @@ export class Enemies {
     if (i < 0) return;
     this.list.splice(i, 1);
     this.scene.remove(e.group, e.bar);
-    e.mat.dispose(); e.fillMat.dispose();
+    this.release(e);
     this.hooks.onGone(e, how);
+  }
+
+  /** 一个敌人用完的显存：自己的材质；有模型的还有骨架（每份一张骨骼贴图） @param {any} e */
+  release(e) {
+    e.mat.dispose(); e.fillMat.dispose();
+    if (e.rig) { e.rig.mixer.stopAllAction(); e.rig.mesh.skeleton.dispose(); }
   }
 
   /** 碎成同色方块，物理引擎炸开 */
   shatter(e, from) {
-    const c = e.base.clone();
+    const c = e.chip.clone();
     const away = this._d.copy(e.pos).sub(from).setY(0).normalize();
     for (let i = 0; i < 9; i++) {
       const dm = new THREE.MeshStandardMaterial({ color: c, roughness: 0.8 });
@@ -448,31 +522,39 @@ export class Enemies {
           continue;
         }
       }
-      // 程序动画（不用骨骼，傀儡本来就僵）：一跳一跳，空中拉长、落地压扁，前倾，每步左右晃
       const upright = e.mode === 'walk' || e.mode === 'field' || e.mode === 'chase' || e.mode === 'boss';
-      const rush = e.act === 'rush';
-      const walking = upright && !held && (e.mode === 'boss' || e.mode === 'chase' ? e.moving || rush : true);
-      if (walking) {
-        const before = Math.floor(e.hop / Math.PI);
-        e.hop += dt * (rush ? MINION.charger.speed * 0.5 : e.spec.speed) * 4.2;
-        if (Math.floor(e.hop / Math.PI) !== before) this.land(e);   // 正弦过零 = 一跳落地
-      }
-      const air = walking ? Math.abs(Math.sin(e.hop)) : 0;
-      const hopY = air * 0.22;
-      e.squash = Math.max(0, e.squash - dt / 0.14);
-      const sq = e.squash * e.squash;
-      const sy = 1 + 0.07 * air - 0.2 * sq, sxz = 1 + 0.12 * sq - 0.03 * air;
-      e.group.scale.set(e.scale * sxz, e.scale * sy, e.scale * sxz);
-      e.group.position.set(e.pos.x, e.pos.y + hopY, e.pos.z);
-      if (upright) {
-        const sway = walking ? Math.sin(e.hop * 0.5) * 0.09 : 0;          // 左一步右一步
-        // lean：试炼模式的 boss 出招时后仰蓄力、砸下去前扑
-        e.group.rotation.set((walking ? 0.1 + 0.06 * air : 0) + e.lean, Math.atan2(e.dir.x, e.dir.z), sway);
+      let hopY = 0;
+      if (e.rig) {
+        // 模型：骨骼动作（animate）；lean 减半，跑的动作本身已经前倾
+        this.animate(e, dt, held);
+        e.group.position.copy(e.pos);
+        if (upright) e.group.rotation.set(e.lean * 0.5, Math.atan2(e.dir.x, e.dir.z), 0);
+      } else {
+        // 方块：程序动画（傀儡本来就僵）：一跳一跳，空中拉长、落地压扁，前倾，每步左右晃
+        const rush = e.act === 'rush';
+        const walking = upright && !held && (e.mode === 'boss' || e.mode === 'chase' ? e.moving || rush : true);
+        if (walking) {
+          const before = Math.floor(e.hop / Math.PI);
+          e.hop += dt * (rush ? MINION.charger.speed * 0.5 : e.spec.speed) * 4.2;
+          if (Math.floor(e.hop / Math.PI) !== before) this.land(e);   // 正弦过零 = 一跳落地
+        }
+        const air = walking ? Math.abs(Math.sin(e.hop)) : 0;
+        hopY = air * 0.22;
+        e.squash = Math.max(0, e.squash - dt / 0.14);
+        const sq = e.squash * e.squash;
+        const sy = 1 + 0.07 * air - 0.2 * sq, sxz = 1 + 0.12 * sq - 0.03 * air;
+        e.group.scale.set(e.scale * sxz, e.scale * sy, e.scale * sxz);
+        e.group.position.set(e.pos.x, e.pos.y + hopY, e.pos.z);
+        if (upright) {
+          const sway = walking ? Math.sin(e.hop * 0.5) * 0.09 : 0;          // 左一步右一步
+          // lean：试炼模式的 boss 出招时后仰蓄力、砸下去前扑
+          e.group.rotation.set((walking ? 0.1 + 0.06 * air : 0) + e.lean, Math.atan2(e.dir.x, e.dir.z), sway);
+        }
       }
       // 血条：受过伤才显示，始终朝向镜头（boss 的血条在界面顶上）
       e.bar.visible = e.hp < e.maxHp && e.mode !== 'boss';
       if (e.bar.visible) {
-        e.bar.position.set(e.pos.x, e.pos.y + 1.85 * e.scale + hopY, e.pos.z);
+        e.bar.position.set(e.pos.x, e.pos.y + e.top + hopY, e.pos.z);
         e.bar.quaternion.copy(camera.quaternion);
         const k = Math.max(0, e.hp / e.maxHp);
         e.fill.scale.x = Math.max(k, 0.001);
@@ -494,7 +576,7 @@ export class Enemies {
   }
 
   clear() {
-    for (const e of [...this.list]) { this.scene.remove(e.group, e.bar); e.mat.dispose(); e.fillMat.dispose(); }
+    for (const e of [...this.list]) { this.scene.remove(e.group, e.bar); this.release(e); }
     this.list.length = 0;
     for (const d of this.debris) { this.world.removeBody(d.body); this.scene.remove(d.mesh); d.mat.dispose(); }
     this.debris.length = 0;

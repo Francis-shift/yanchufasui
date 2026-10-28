@@ -31,6 +31,7 @@ import {
   RUN, SLOWMO_MAX_SEC, SLOWMO_SCALE, SUMMONS, TALENTS, TORNADO, TRIAL, WALL,
 } from './rules/numbers.js';
 import { Enemies } from './actors/enemies.js';
+import { loadRig } from './actors/rig.js';
 import { Trial } from './modes/trial.js';
 import { DragonFx } from './fx/dragon.js';
 import { Locks } from './fx/locks.js';
@@ -93,7 +94,9 @@ const FAIL_TEXT = {
 
 /**
  * @param {HTMLElement} root
- * @param {{ parseUrl?: string | string[], lab?: boolean, dragon?: { mesh?: string, tex?: string | null, models?: Record<string, { mesh: string, tex?: string | null }> }, models?: string }} [opts] lab：直接进特效试验场； parseUrl：解析接口，给一串就按顺序当后备（见 net.js）；dragon：冰龙模型与贴图的地址，models 里按元素给另外四条龙的；models：场景物件模型的目录（不给就一直用方块占位）
+ * @param {{ parseUrl?: string | string[], lab?: boolean, dragon?: { mesh?: string, tex?: string | null, models?: Record<string, { mesh: string, tex?: string | null }> }, models?: string,
+ *           grunt?: { mesh: string, tex?: string | null } }} [opts] lab：直接进特效试验场； parseUrl：解析接口，给一串就按顺序当后备（见 net.js）；dragon：冰龙模型与贴图的地址，models 里按元素给另外四条龙的；models：场景物件模型的目录（不给就一直用方块占位）；
+ *   grunt：小傀儡的骨骼模型与贴图（三种小怪共用；不给或下载失败用方块）
  * @returns {() => void} 卸载
  */
 export function start(root, opts = {}) {
@@ -163,6 +166,9 @@ export function start(root, opts = {}) {
     touch: (e) => trial.touch(e),           // 试炼：小傀儡贴身自爆
     floatText: floatAt,
   });
+  if (opts.grunt) {   // 开局就下（约 170 KB）：到了以后冒出来的小怪用模型，没到之前、下载失败都用方块
+    loadRig(opts.grunt.mesh, opts.grunt.tex).then((r) => enemies.useRig(r), (err) => console.warn('小傀儡模型没下载成功，继续用方块', err));
+  }
   const trial = new Trial(scene, { enemies, fx, particles, hud, caster: layout.caster, origins: [origin, fx.origin],
     canvas: renderer.domElement, mobile, floatText: floatAt, win: trialWon, lose: trialLost,
     blockers: () => walls.obstacles(),   // 土墙挡得住冰锥

@@ -29,6 +29,8 @@ export default function Game() {
         },
         // 场景物件（牌坊、石兽、镇山石）：开局后台下载，电脑约 1.6 MB、手机约 1 MB；没到之前是方块占位
         models: '/models/',
+        // 小傀儡的骨骼模型（三种小怪共用，模型约 96 KB、贴图约 76 KB）：开局就下，没到之前是方块
+        grunt: { mesh: '/models/grunt.rig.gz', tex: '/models/grunt-512.webp' },
       });
     });
     return () => { cancelled = true; dispose?.(); };

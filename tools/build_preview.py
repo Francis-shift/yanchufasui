@@ -11,6 +11,8 @@
       python tools/build_preview.py props --asset public/models/lion.drg2.gz --asset ...  → preview/props.html（物件材质检查页）
         --asset 可重复，文件原样内嵌，页面里按文件名取（game/dev/propcheck.js）。
       python tools/build_preview.py dragons --dragon preview/assets/dragon-6k.bin  → preview/dragons.html（五条龙的动作检查页，game/dev/dragoncheck.js）
+      python tools/build_preview.py rigs --asset public/models/grunt.rig.gz --asset preview/assets/grunt-192.webp  → preview/rigs.html
+        （小傀儡骨骼模型的动作检查页，game/dev/rigcheck.js；正式的 512 贴图放不下，检查页用缩到 192 的）
 只打包页面真正引用到的库（扫本地模块里的 import）：检查页用不到物理引擎，省下来给模型。
 """
 import sys
@@ -140,6 +142,12 @@ TARGETS = {
                 " const d = document.getElementById('asset-dragon');"
                 " startDragonCheck(document.getElementById('app'), d ? URL.createObjectURL(new Blob([Uint8Array.from(atob(d.textContent.trim()), (c) => c.charCodeAt(0))])) : undefined);",
                 "言出法随 · 五龙检查", "dragons.html"),
+    "rigs": ("game/dev/rigcheck.js", "import { startRigCheck } from '@local/game/dev/rigcheck.js';"
+             " const assets = {};"
+             " for (const s of document.querySelectorAll('script[data-asset]'))"
+             " assets[s.dataset.asset] = URL.createObjectURL(new Blob([Uint8Array.from(atob(s.textContent.trim()), (c) => c.charCodeAt(0))]));"
+             " startRigCheck(document.getElementById('app'), assets);",
+             "言出法随 · 小傀儡模型检查", "rigs.html"),
 }
 BARE_IMPORT = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(?\s*)(['"])([^'".][^'"]*)\1""")
 
