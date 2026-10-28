@@ -20,8 +20,13 @@ export default function Game() {
         // 先走北京（与模型同机房，国内手机实测一来一回约 0.8 秒），不通再走网站自带的新加坡线路
         parseUrl: [CN_PARSE_URL, '/api/parse'],
         lab: new URLSearchParams(location.search).has('lab'),   // 特效试验场：地址加 ?lab
-        // 冰龙：气势槽过半或第一次召唤时才下载（模型 gzip 后约 310 KB，贴图约 220 KB）
-        dragon: { mesh: '/models/ice-dragon.drg2.gz', tex: '/models/ice-dragon-1024.webp' },
+        // 龙：气势槽过半（要召的是哪条看槽的颜色）或第一次召唤时才下载那一条（每条模型 gzip 后约 230～320 KB，贴图约 220 KB）；
+        // 别的龙的模型下不成就借冰龙的换色
+        dragon: {
+          mesh: '/models/ice-dragon.drg2.gz', tex: '/models/ice-dragon-1024.webp',
+          models: Object.fromEntries(['fire', 'thunder', 'wind', 'earth'].map((el) =>
+            [el, { mesh: `/models/${el}-dragon.drg2.gz`, tex: `/models/${el}-dragon-1024.webp` }])),
+        },
         // 场景物件（牌坊、石兽、镇山石）：开局后台下载，电脑约 1.6 MB、手机约 1 MB；没到之前是方块占位
         models: '/models/',
       });

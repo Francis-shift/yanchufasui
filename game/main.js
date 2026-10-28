@@ -93,7 +93,7 @@ const FAIL_TEXT = {
 
 /**
  * @param {HTMLElement} root
- * @param {{ parseUrl?: string | string[], lab?: boolean, dragon?: { mesh?: string, tex?: string | null }, models?: string }} [opts] lab：直接进特效试验场； parseUrl：解析接口，给一串就按顺序当后备（见 net.js）；dragon：冰龙模型与贴图的地址；models：场景物件模型的目录（不给就一直用方块占位）
+ * @param {{ parseUrl?: string | string[], lab?: boolean, dragon?: { mesh?: string, tex?: string | null, models?: Record<string, { mesh: string, tex?: string | null }> }, models?: string }} [opts] lab：直接进特效试验场； parseUrl：解析接口，给一串就按顺序当后备（见 net.js）；dragon：冰龙模型与贴图的地址，models 里按元素给另外四条龙的；models：场景物件模型的目录（不给就一直用方块占位）
  * @returns {() => void} 卸载
  */
 export function start(root, opts = {}) {

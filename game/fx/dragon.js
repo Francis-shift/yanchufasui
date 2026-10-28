@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * 召唤：五元素龙（冰龙从法术 Demo 移植，模型由本人用 Tripo 生成；另外四条的模型到之前，用冰龙的模型换色顶上）。
+ * 召唤：五元素龙（冰龙从法术 Demo 移植；五条的模型都由本人用 Tripo 生成，哪条的模型没给地址或下载失败，就借冰龙的模型换色顶上）。
  *
  * 做法：龙头沿一条预先设计的三维曲线按弧长前进；龙的模型是笔直的，
  * 每一帧把模型上每个点按"离龙头多远"贴到曲线的对应位置上（路径变形），整条龙就沿同一条路径游动。
@@ -38,6 +38,7 @@ const clamp = THREE.MathUtils.clamp;
 /**
  * 冰龙模型换色给别的龙用：贴图按亮度拉开（冰龙贴图亮度九成落在 0.42～0.87），暗处取 dark、亮处取 light（sRGB）；
  * emissive 是自发光的颜色（同一张贴图当自发光贴图）；flat 是没贴图的减面版用的底色。
+ * 有自己模型的龙不换色，emissive、rough、metal 照样用这里的。
  */
 const LOOK = {
   fire:    { dark: [0.30, 0.04, 0.01], light: [1.0, 0.62, 0.22], emissive: [0.85, 0.32, 0.08], rough: 0.45, metal: 0.15, flat: 0xff8a4a },
@@ -362,7 +363,7 @@ export class DragonFx {
   fetch(key, u) {
     if (!this.loads[key]) {
       this.busy++;
-      this.loads[key] = this.load(u).then((m) => (this.models[key] = m))
+      this.loads[key] = this.load(u, key).then((m) => (this.models[key] = m))
         .catch((e) => { console.warn(`龙模型（${key}）加载失败：`, e); return null; })
         .finally(() => { this.busy--; });
     }
@@ -383,8 +384,8 @@ export class DragonFx {
     return { model: base, material: this.tints[el] };
   }
 
-  /** @param {ModelUrls} urls */
-  async load(urls) {
+  /** @param {ModelUrls} urls @param {string} el 这是哪条龙的模型（定材质） */
+  async load(urls, el) {
     const [buf, tex] = await Promise.all([fetchBytes(urls.mesh), urls.tex ? new THREE.TextureLoader().loadAsync(urls.tex).catch(() => null) : null]);
     const d = decodeDRG2(buf);
     let material;
@@ -392,8 +393,11 @@ export class DragonFx {
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.flipY = false;                               // 贴图坐标按 glTF 约定（v 从上往下）
       tex.anisotropy = 4;
-      // 上色版：贴图当底色，同一张贴图再当自发光贴图，冰会透出自己的颜色，泛光也是冰蓝而不是白
-      material = new THREE.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: new THREE.Color(0.35, 0.55, 0.9), roughness: 0.3, metalness: 0.1 });
+      // 上色版：贴图当底色，同一张贴图再当自发光贴图，龙会透出自己的颜色，泛光也是冰蓝、火红而不是白
+      const look = LOOK[/** @type {keyof typeof LOOK} */ (el)];
+      material = new THREE.MeshStandardMaterial(look
+        ? { map: tex, emissiveMap: tex, emissive: col(look.emissive), roughness: look.rough, metalness: look.metal }
+        : { map: tex, emissiveMap: tex, emissive: new THREE.Color(0.35, 0.55, 0.9), roughness: 0.3, metalness: 0.1 });
     } else {
       // 没有贴图（预览页用的减面版）：冰晶材质，平面着色，不需要法线
       material = new THREE.MeshStandardMaterial({ color: 0xa8e2ff, emissive: new THREE.Color(0.05, 0.3, 0.72), roughness: 0.12, metalness: 0.15, flatShading: true });
