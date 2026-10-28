@@ -141,7 +141,7 @@ test('拿了：记一级、再出带「·二」（招式字不在卡上标，选
 test('心法加成：没拿是原值；见切放宽完美闪避窗口、聚气多加气势、回元回得快、龙吟召龙格数变少', () => {
   const base = runMods(newRun());
   assert.deepEqual(base, { perfectWindow: TRIAL.perfect.window, perfectGauge: TRIAL.perfect.gauge, manaRegen: 1, ult: ULT_GAUGE,
-    chana: false, fanshou: false, canying: false, yuwei: false });
+    chana: false, fanshou: false, canying: false, yuwei: false, twin: false, guard: false });
   let run = newRun();
   for (const id of ['jianqie', 'juqi', 'huiyuan', 'longyin']) run = take(run, byId(id));
   const m = runMods(run);
@@ -169,6 +169,8 @@ test('心法刹那、反手、残影、余威：拿了才开；反手余威的�
   const m = runMods(run);
   assert.deepEqual([m.chana, m.fanshou, m.canying, m.yuwei], [true, true, true, true]);
   assert.equal(m.perfectWindow, TRIAL.perfect.window, '这四个不动闪避窗口');
+  // 领悟双龙、护身各管各的
+  assert.deepEqual([runMods(take(newRun(), byId('twin'))), runMods(take(newRun(), byId('guard')))].map((x) => [x.twin, x.guard]), [[true, false], [false, true]]);
   // 窗口
   assert.deepEqual(artBoost({ counter: 0, after: 0 }), { k: 1, counter: false, after: false });
   assert.equal(artBoost({ counter: 0.2, after: 0 }).k, RUN.arts.counter.mult);

@@ -221,6 +221,11 @@ export const TRIAL = { hp: 100, speed: 4.2, dash: { dist: 3.6, sec: 0.18, gap: 0
  * 燎——落地留一片火 liao.sec 秒，每 liao.tick 秒烧一下（这一下伤害的 liao.k），同时最多 liao.max 片；凝——冻住的时间 × ning.freeze，
  * boss 被冻住后下一招预警 × ning.tele；回——风飞回施法者手上，路线两侧 hui.r 米内再挨一下（伤害 × hui.mult）；
  * 返——土墙把冰锥弹回 boss（快 fan.speed 倍、伤害 × fan.mult）；引——雷链多跳 yin.jumps 下，闪电两侧 yin.r 米内的冰锥打碎。
+ * 领悟里改"怎么召龙"的两张（dragon）：
+ *   双龙——一次两条，各打满额（10-28 本人：不打六成）；第二条晚 twin.delay 秒出，扑离第一条落点至少 twin.apart 米的另一群，没有就在同一处再砸一下；
+ *   护身——龙不扑出去，从脚下钻出来绕着人转 guard.sec 秒（半径 r、离地 h、每秒 speed 米，人走圈跟着走），再冲上天：
+ *   龙身贴地那几段 block 米内的冰锥打碎；碰到龙身（reach 米加敌人身宽）的敌人挨这条龙伤害的 touch 倍、吃它的元素效果，
+ *   同一只每 every 秒最多挨一下。两张都拿了：第二条在外圈（半径 + outer.dr、高 + outer.dh）反着转。
  */
 export const RUN = {
   wave: { n: [16, 22, 28], first: 1.2, gap: [1.2, 2.8], batch: [2, 3], away: 5, warn: 0.8, alive: 10,
@@ -232,6 +237,8 @@ export const RUN = {
   runes: { po: 2, lian: { sec: 0.5, mult: 0.5 }, zhong: { dmg: 1.6, chant: 2, lock: 0.5 }, ji: { chantMs: 200, cost: 1.3 },
     liao: { sec: 3, r: 1.3, tick: 0.5, k: 0.1, max: 10 }, ning: { freeze: 1.5, tele: 1.5 }, hui: { mult: 0.6, r: 1.1 },
     fan: { speed: 1.3, mult: 2 }, yin: { jumps: 2, r: 0.9 } },
+  dragon: { twin: { delay: 1.2, apart: 6 },
+    guard: { sec: 5, r: 3.6, h: 1.2, speed: 13, block: 1.0, reach: 0.9, touch: 0.25, every: 0.8, outer: { dr: 1.6, dh: 0.7 } } },
 };
 
 /** 元素反应（只在程序里判断）：先中的元素 + 后来的元素 */

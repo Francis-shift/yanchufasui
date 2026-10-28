@@ -68,8 +68,8 @@ export const CARDS = [
     id: `learn-${el}`, kind: 'insight', name, lack: el, text: `领悟「${name}」，多一个${name}的按钮`, max: 1, ready: false })),
   { id: 'slot', kind: 'insight', name: '双诀', text: '每句咒多认一个字诀', max: 1, ready: true },
   { id: 'button', kind: 'insight', name: '一心二用', text: '多一个按钮，同一个元素能装两种招', max: 1, ready: false },
-  { id: 'twin', kind: 'insight', name: '双龙', text: '一次召两条龙，各打六成，分扑两个目标', max: 1, ready: false },
-  { id: 'guard', kind: 'insight', name: '护身', text: '龙不扑出去，绕着自己转 5 秒，挡掉碰到的冰锥', max: 1, ready: false },
+  { id: 'twin', kind: 'insight', name: '双龙', text: '一次召两条龙，各打满额，分扑两群（只有一群就前后砸两下）', max: 1, ready: true },
+  { id: 'guard', kind: 'insight', name: '护身', text: `龙不扑出去，绕着自己转 ${RUN.dragon.guard.sec} 秒，打碎碰到的冰锥，撞到的敌人吃它的元素`, max: 1, ready: true },
 ];
 
 /**
@@ -339,9 +339,10 @@ export const upLabel = (run, c) => (c.kind !== 'move' && level(run, c.id) > 0 ? 
  * 这一局拿过的心法合成的加成（守关、没拿的时候就是原值）。
  * @param {Run} run
  * @returns {{ perfectWindow: number, perfectGauge: number, manaRegen: number, ult: number,
- *             chana: boolean, fanshou: boolean, canying: boolean, yuwei: boolean }}
+ *             chana: boolean, fanshou: boolean, canying: boolean, yuwei: boolean, twin: boolean, guard: boolean }}
  *   perfectWindow：完美闪避窗口（秒）；perfectGauge：完美闪避加几格气势；manaRegen：法力回复倍数；ult：召龙要几格气势；
- *   chana / fanshou / canying / yuwei：拿没拿刹那、反手、残影、余威（怎么生效在 main.js 与 modes/trial.js）
+ *   chana / fanshou / canying / yuwei：拿没拿刹那、反手、残影、余威（怎么生效在 main.js 与 modes/trial.js）；
+ *   twin / guard：领悟了双龙、护身没有（召龙时在 main.js 换召法）
  */
 export function runMods(run) {
   const has = (/** @type {string} */ id) => level(run, id) > 0;
@@ -351,6 +352,7 @@ export function runMods(run) {
     manaRegen: has('huiyuan') ? RUN.arts.regen : 1,
     ult: has('longyin') ? RUN.arts.ult : ULT_GAUGE,
     chana: has('chana'), fanshou: has('fanshou'), canying: has('canying'), yuwei: has('yuwei'),
+    twin: has('twin'), guard: has('guard'),
   };
 }
 

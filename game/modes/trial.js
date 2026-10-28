@@ -1200,6 +1200,9 @@ export class Trial {
     return n;
   }
 
+  /** 敌人身子有多宽（米，俯看的半径）：弹回去的冰锥、护身的龙碰没碰到它 @param {any} e */
+  bodyR(e) { return e === this.boss ? BOSS_BODY : 0.45; }
+
   /**
    * 弹回去的冰锥飞一帧：穿过土墙（刚从墙上弹出来）、撞上石物件就碎、撞上敌人打它一下；拖一道金光
    * @param {{ x: number, y: number, z: number, vx: number, vz: number, t: number, life: number, dmg: number, r: number }} b @param {number} dt
@@ -1211,7 +1214,7 @@ export class Trial {
     if (b.t > b.life || Math.hypot(b.x, b.z) > PLAZA_R + 3) return true;
     for (const o of BLOCK) if ((b.x - o.x) ** 2 + (b.z - o.z) ** 2 < (o.r + b.r) ** 2) return true;
     for (const e of this.d.enemies.list) {
-      const r = (e === this.boss ? BOSS_BODY : 0.45) + b.r;
+      const r = this.bodyR(e) + b.r;
       if ((b.x - e.pos.x) ** 2 + (b.z - e.pos.z) ** 2 < r * r) { this.d.strike(e, b.dmg, b); return true; }
     }
     if (Math.random() < dt * 40) {

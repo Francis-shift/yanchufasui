@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { damageTo, planCast, resolveTarget, sentenceKey, totalCost } from '../game/rules/arbiter.js';
+import { damageTo, planCast, resolveTarget, sentenceKey, totalCost, twinTarget } from '../game/rules/arbiter.js';
 import { cleanName, sanitizeIntent } from '../game/rules/intent.js';
 import { guessElement, parseKeywords } from '../game/rules/keywords.js';
 
@@ -193,6 +193,18 @@ test('目标：最前面、最强、左边那几只、最密集', () => {
   assert.deepEqual(dense.ids.sort(), ['a', 'b']);
   assert.deepEqual(dense.point, { x: -3.5, z: -5.5 }, '爆的落点取那一群的中心');
   assert.equal(resolveTarget('rope', enemies, { objects: { rope: { x: 1, z: -8 } } }).point?.z, -8);
+});
+
+test('双龙的第二条：扑离第一条落点够远的最密一群；正好隔 apart 米也算远；都挤在一处就返回空（同一处再砸）', () => {
+  const at = (id, x, z) => ({ id, x, z, hp: 40, distToCore: -z });
+  const crowd = [at('a1', 0, -5), at('a2', 0.5, -5.5), at('a3', -0.5, -5), at('b1', 8, -6), at('b2', 8.5, -6.5), at('c', -7, -4)];
+  const first = { x: 0, z: -5.2 };
+  const two = twinTarget(first, crowd, { apart: 6, count: 3 });
+  assert.deepEqual(two.ids.sort(), ['b1', 'b2'], '远处两只挨着的胜过落单的那只');
+  assert.deepEqual(two.point, { x: 8.25, z: -6.25 });
+  assert.deepEqual(twinTarget(first, crowd.slice(0, 3), { apart: 6, count: 3 }), { ids: [], point: null });
+  assert.deepEqual(twinTarget({ x: 0, z: 0 }, [at('e', 6, 0)], { apart: 6 }).ids, ['e']);
+  assert.deepEqual(twinTarget({ x: 0, z: 0 }, [at('e', 5.99, 0)], { apart: 6 }).ids, []);
 });
 
 test('伤害：盾傀儡正面减伤，从天而降或背后打全额；冻住后火 = 蒸汽爆、风 = 碎冰', () => {

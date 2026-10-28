@@ -227,6 +227,18 @@ export function resolveTarget(target, enemies, opt = {}) {
 }
 
 /**
+ * 领悟「双龙」的第二条扑谁：离第一条的落点至少 apart 米的敌人里挑最密的一群（同 resolveTarget 的 densest）。
+ * 敌人都挤在第一条落点附近（或者场上没敌人）就返回 point 为 null：第二条在同一处再砸一下。
+ * @param {{ x: number, z: number }} first 第一条的落点
+ * @param {EnemyView[]} enemies @param {{ apart: number, count?: number, clusterR?: number }} opt
+ * @returns {{ ids: string[], point: { x: number, z: number } | null }}
+ */
+export function twinTarget(first, enemies, opt) {
+  const far = enemies.filter((e) => Math.hypot(e.x - first.x, e.z - first.z) >= opt.apart);
+  return far.length ? resolveTarget('densest', far, { count: opt.count, clusterR: opt.clusterR }) : { ids: [], point: null };
+}
+
+/**
  * 一次命中对一个敌人造成多少伤害、附加什么效果。反应只在这里判断。
  * @param {{ type: string, frozen: boolean, lastEl?: string }} enemy
  * @param {{ el: string, dmg: number, fromAbove?: boolean, fromBehind?: boolean }} hit

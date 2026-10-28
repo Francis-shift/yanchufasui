@@ -13,9 +13,10 @@
  * 砸中、劈雷时调用 main 给的钩子（伤害、火海、土墙圈、旋风都在 main 里结算），这里只演。
  *
  * 两种演法：
- *   - summon：真召出来；
+ *   - summon：真召出来；领悟了护身的不扑出去，从人脚下钻出来绕着人转（guardPlan）；
  *   - ghost：差一口气——只有一层发光的龙影从法阵里升起，盘到半空散掉，然后 main 放同元素的雨。
- * 同一时间只演一条（共用一份网格）；正在演时再来，龙影就省掉，雨照放。
+ * 可以同时演好几条（领悟了双龙一次两条）：模型共用，每条有自己的一份网格按自己的曲线变形；龙头的光只有一盏，跟最新的那条。
+ * 正在演龙时差一口气，龙影就省掉，雨照放。
  *
  * 模型按需加载（第一次要用时，或气势槽过半时预先加载）：DRG2 格式（读法见 world/drg2.js）。
  * 没有模型（没给地址、加载失败、等了 3 秒还没到）照样按曲线飞、钩子照样触发，只是看不到龙身，只有一串光点。
@@ -272,6 +273,25 @@ function ghostPlan(el) {
     speed: (s, f) => (s < f.sEmerge ? 16 : 10) };
 }
 
+/**
+ * 护身（领悟）：龙从人脚下钻出来，贴着地绕人转 g.sec 秒（半径 g.r、离地 g.h、每秒 g.speed 米；g.dir 是转的方向，
+ * 双龙护身的第二条在外圈反着转），转完盘上天。人走动时整圈跟着挪（move 是 0：每帧整条重算，龙随人平移）。
+ * hit 是转完那一点：不砸，main 拿它知道护身结束了。
+ * @param {THREE.Vector3} C 人站的地方（地面） @param {string} el
+ * @param {{ r: number, h: number, dir: number, speed: number, sec: number }} g @returns {FlightPlan}
+ */
+export function guardPlan(C, el, g) {
+  const turns = (g.speed * g.sec) / (2 * Math.PI * g.r), n = Math.ceil(turns * 12);
+  const a0 = Math.PI / 2;   // 从人前面（朝镜头那一侧）钻出来
+  const at = (/** @type {number} */ a, /** @type {number} */ r, /** @type {number} */ y) => v3(C.x + Math.cos(a) * r, C.y + y, C.z + Math.sin(a) * r);
+  const ring = Array.from({ length: n + 1 }, (_, i) => at(a0 + g.dir * (i / n) * turns * Math.PI * 2, g.r, g.h));
+  const end = a0 + g.dir * turns * Math.PI * 2;
+  return { sigil: C.clone(), rise: true, slam: false, hit: 2 + n, move: 0, sway: SWAY[/** @type {keyof typeof SWAY} */ (el)] || SWAY.ice,
+    pts: [at(a0 - g.dir * 0.7, g.r * 0.5, -6), at(a0 - g.dir * 0.35, g.r * 0.85, -0.6), ...ring,
+      at(end + g.dir * 0.8, g.r * 1.1, g.h + 3), at(end + g.dir * 1.4, g.r * 1.4, g.h + 12), at(end + g.dir * 1.8, g.r * 1.6, g.h + 32)],
+    speed: segs([[1, 22], [2 + n, g.speed]], 26) };
+}
+
 /** 外层辉光：同一份网格再画一遍，越是侧对镜头的面越亮（菲涅尔）。法线由屏幕空间导数算出，模型不必带法线 */
 function glowMat(color, alpha) {
   return new THREE.ShaderMaterial({
@@ -342,8 +362,10 @@ export class DragonFx {
     /** @type {Record<string, THREE.Material>} 借冰龙模型的龙换好色的材质 */
     this.tints = {};
     this.busy = 0;                                   // 正在下载的模型数
-    /** @type {Flight | null} */
-    this.active = null;
+    /** @type {Flight[]} 正在演的（双龙同时两条；每条有自己的一份网格） */
+    this.flights = [];
+    /** @type {Flight | null} 龙头的光跟着哪一条（只有一盏，跟最新的那条，它演完了交给还在演的） */
+    this.lit = null;
     this.light = new THREE.PointLight(0x66ccff, 0, 0, 2);   // 常驻，只改强度（增减灯光会让材质重编译）
     fx.scene.add(this.light);
     this.glow = glowMat(col(PALETTE.ice.secondary, 1.1), 0.55);
@@ -434,18 +456,22 @@ export class DragonFx {
       anchors: { whiskers: [anchor(0), anchor(1)], mouth: anchor(2) } };
   }
 
+  /** 正在演的第一条（调试接口用） */
+  get active() { return this.flights[0] ?? null; }
+
   /**
    * 真召唤：照这条龙的一套动作飞（flightPlan），砸中时调用 hooks.impact，雷龙每劈一道调用 hooks.strike（伤害都在 main 里结算）。
    * 模型还在下载就先亮法阵等着，最多等 3 秒；没有模型就不画龙身，照样飞、照样触发钩子。
    * 龙要飞好几秒，敌人在走：follow 每帧给出目标现在的位置，龙的后半段跟着挪，砸的就是锁定的那几只。
+   * guard 给了就是护身（guardPlan）：target、follow 是人，绕人转完调用 hooks.impact；转的时候每帧把龙身中线上的点交给 hooks.tick。
    * @param {THREE.Vector3} target @param {string} el
-   * @param {{ impact: (p: THREE.Vector3) => void, strike?: (from: THREE.Vector3, i: number) => void }} hooks
+   * @param {Hooks} hooks
    * @param {() => THREE.Vector3 | null} [follow]
+   * @param {{ r: number, h: number, dir: number, speed: number, sec: number }} [guard]
    */
-  summon(target, el, hooks, follow) {
+  summon(target, el, hooks, follow, guard) {
     this.preload(el);
-    if (this.active) this.active.finish();
-    this.active = new Flight(this, 'summon', target, el, hooks, follow);
+    this.flights.push(new Flight(this, 'summon', target, el, hooks, follow, guard));
     this.fx.pulseDim(0.85, 3.2);   // 龙出场：世界压暗，龙和它的光成为画面里最亮的东西
   }
 
@@ -455,17 +481,24 @@ export class DragonFx {
    */
   ghost(el, onDone) {
     this.preload(el);
-    if (this.active || !this.lookFor(el)) { onDone(); return; }
-    this.active = new Flight(this, 'ghost', EMERGE.clone().add(new THREE.Vector3(0, 7, 0)), el, { impact: () => onDone() });
+    if (this.flights.length || !this.lookFor(el)) { onDone(); return; }
+    this.flights.push(new Flight(this, 'ghost', EMERGE.clone().add(new THREE.Vector3(0, 7, 0)), el, { impact: () => onDone() }));
   }
 
   /** @param {number} dt */
   update(dt) {
-    if (this.active && !this.active.update(dt)) this.active = null;
+    let n = 0;
+    for (const f of this.flights) if (f.update(dt)) this.flights[n++] = f;
+    this.flights.length = n;
   }
 
-  clear() { if (this.active) { this.active.finish(); this.active = null; } }
+  clear() { for (const f of this.flights) f.finish(); this.flights.length = 0; this.lit = null; }
 }
+
+/**
+ * @typedef {{ impact: (p: THREE.Vector3) => void, strike?: (from: THREE.Vector3, i: number) => void,
+ *   tick?: (spine: THREE.Vector3[], dt: number) => void }} Hooks
+ */
 
 const _p = new THREE.Vector3(), _t = new THREE.Vector3(), _s = new THREE.Vector3(), _u = new THREE.Vector3();
 const _d = new THREE.Vector3(), _m = new THREE.Vector3(), _b = new THREE.Vector3(), _anc = new Float32Array(3);
@@ -474,15 +507,22 @@ const _d = new THREE.Vector3(), _m = new THREE.Vector3(), _b = new THREE.Vector3
 class Flight {
   /**
    * @param {DragonFx} owner @param {'summon' | 'ghost'} kind @param {THREE.Vector3} target @param {string} el
-   * @param {{ impact: (p: THREE.Vector3) => void, strike?: (from: THREE.Vector3, i: number) => void }} hooks
+   * @param {Hooks} hooks
    * @param {() => THREE.Vector3 | null} [follow]
+   * @param {{ r: number, h: number, dir: number, speed: number, sec: number }} [guard] 护身：绕人转（guardPlan）
    */
-  constructor(owner, kind, target, el, hooks, follow) {
-    this.o = owner; this.kind = kind; this.el = el; this.hooks = hooks; this.follow = follow;
+  constructor(owner, kind, target, el, hooks, follow, guard) {
+    this.o = owner; this.kind = kind; this.el = el; this.hooks = hooks; this.follow = follow; this.guard = guard;
     this.pal = PALETTE[el] || PALETTE.ice;
     this.target = target.clone();
     this.mode = diveMode(this.target);
-    this.plan = kind === 'summon' ? flightPlan(el, this.target, this.mode) : ghostPlan(el);
+    this.plan = kind === 'ghost' ? ghostPlan(el) : this.planFor(this.target);
+    this.done = false;
+    /** @type {THREE.Vector3[]} 龙身中线上隔一段取一个点（护身的 tick 用，每帧重写） */
+    this.spinePts = Array.from({ length: 17 }, () => new THREE.Vector3());
+    /** @type {THREE.BufferGeometry | null} 这一条自己的网格（同一个模型两条同时飞，各变形各的） */
+    this.geo = null;
+    owner.lit = this;
     this.sig = this.plan.sigil.clone();                // 法阵在哪（地面）；土龙的跟着目标挪
     this.curve = new THREE.CatmullRomCurve3(this.plan.pts.map((q) => q.clone()), false, 'centripetal');
     this.curve.arcLengthDivisions = 1500;
@@ -517,6 +557,11 @@ class Flight {
 
   placeSigil() { for (const m of [this.sigil, this.arcs]) m.position.set(this.sig.x, this.sig.y + 0.04, this.sig.z); }
 
+  /** 目标在 T 时怎么飞：护身绕人转，别的照这条龙的走法（走法沿用召唤时定下的 mode、pick） @param {THREE.Vector3} T @returns {FlightPlan} */
+  planFor(T) {
+    return this.guard ? guardPlan(T, this.el, this.guard) : flightPlan(this.el, T, this.mode, this.plan?.pick);
+  }
+
   /** 曲线变了（刚建好、目标走动）：重算全长、每个控制点所在的弧长、砸中处的弧长 */
   measure() {
     this.curve.updateArcLengths();
@@ -528,13 +573,20 @@ class Flight {
 
   /** 模型到了才挂上网格 @param {{ model: any, material: THREE.Material }} look */
   attach(look) {
-    const scene = this.o.fx.scene;
+    const scene = this.o.fx.scene, src = look.model.geo;
     this.model = look.model;
-    this.body = new THREE.Mesh(look.model.geo, this.kind === 'summon' ? look.material : this.o.ghostMat);
+    // 位置、法线每帧按这条龙的曲线重写，所以每条龙一份；贴图坐标、三角形共用模型那份
+    const geo = this.geo = new THREE.BufferGeometry();
+    for (const k of ['position', 'normal']) {
+      if (src.attributes[k]) geo.setAttribute(k, new THREE.BufferAttribute(new Float32Array(src.attributes[k].array.length), 3).setUsage(THREE.DynamicDrawUsage));
+    }
+    if (src.attributes.uv) geo.setAttribute('uv', src.attributes.uv);
+    geo.setIndex(src.index);
+    this.body = new THREE.Mesh(geo, this.kind === 'summon' ? look.material : this.o.ghostMat);
     this.body.castShadow = this.kind === 'summon';
     this.body.frustumCulled = false;
     scene.add(this.body);
-    this.glowMesh = new THREE.Mesh(look.model.geo, this.o.glow);
+    this.glowMesh = new THREE.Mesh(geo, this.o.glow);
     this.glowMesh.frustumCulled = false;
     this.glowMesh.renderOrder = 1;
     scene.add(this.glowMesh);
@@ -550,7 +602,7 @@ class Flight {
     const pts = this.curve.points;
     if (!p || this.plan.move >= pts.length || p.distanceToSquared(this.target) < 0.0025) return;
     this.target.copy(p);
-    const np = flightPlan(this.el, this.target, this.mode, this.plan.pick);
+    const np = this.planFor(this.target);
     for (let k = this.plan.move; k < pts.length; k++) pts[k].copy(np.pts[k]);
     if (!np.sigil.equals(this.sig)) { this.sig.copy(np.sigil); this.placeSigil(); }
     this.measure();
@@ -597,8 +649,8 @@ class Flight {
    * @param {THREE.Vector3} v @param {boolean} [tail] @returns {THREE.Vector3}
    */
   bodyPoint(v, tail = false) {
-    if (this.model) {
-      const m = this.model, pos = m.geo.attributes.position.array;
+    if (this.model && this.geo) {
+      const m = this.model, pos = this.geo.attributes.position.array;
       const j = (tail ? m.tail[Math.floor(Math.random() * m.tail.length)] : Math.floor(Math.random() * m.nv)) * 3;
       return v.set(pos[j], pos[j + 1], pos[j + 2]);
     }
@@ -648,8 +700,8 @@ class Flight {
     this.tailPos.set(st[(N - 1) * 12], st[(N - 1) * 12 + 1], st[(N - 1) * 12 + 2]);
     // 路径变形：每个顶点 = 两个截面之间插值出的中心点 + 侧向 × 侧偏移 + 上向 × 上偏移；有法线的模型法线一起转
     const model = this.model;
-    if (model) {
-      const rest = model.rest, attrs = model.geo.attributes, out = attrs.position.array;
+    if (model && this.geo) {
+      const rest = model.rest, attrs = this.geo.attributes, out = attrs.position.array;
       for (let i = 0, nv = model.nv; i < nv; i++) this.restToWorld(rest, i * REST, out, i * 3);
       attrs.position.needsUpdate = true;
       if (model.hasNormals && this.kind === 'summon') {
@@ -687,9 +739,14 @@ class Flight {
       this.hooks.strike?.(this.mouth(_m).clone(), this.nextStrike++);
     }
 
-    // 光跟着龙头：照亮身体和地面。灯放在龙头上方 4.5 米、身后 1.5 米，否则近景龙头发白
-    o.light.position.copy(headPos).addScaledVector(headU, 4.5).addScaledVector(headT, -1.5);
-    o.light.intensity = this.emerged && (!this.impacted || plan.pour !== 'in') ? 22 : Math.max(o.light.intensity - dt * 60, 0);
+    // 护身：转的时候把龙身中线交给 main（打碎冰锥、撞敌人）
+    if (this.hooks.tick && this.emerged && !this.impacted) this.hooks.tick(this.spine(), dt);
+
+    // 光跟着龙头：照亮身体和地面。灯放在龙头上方 4.5 米、身后 1.5 米，否则近景龙头发白（两条同时飞时只跟一条）
+    if (o.lit === this) {
+      o.light.position.copy(headPos).addScaledVector(headU, 4.5).addScaledVector(headT, -1.5);
+      o.light.intensity = this.emerged && (!this.impacted || plan.pour !== 'in') ? 22 : Math.max(o.light.intensity - dt * 60, 0);
+    }
 
     const at = plan.pour === 'out' ? G : T;            // 土龙砸的是它钻出来的地方
     if (!this.impacted && this.s >= this.sHit) {
@@ -785,8 +842,10 @@ class Flight {
     const k = this.age < end ? 1 : Math.max(0, 1 - (this.age - end) / 0.4);
     o.glow.uniforms.uAlpha.value = 1.1 * k;
     o.ghostMat.opacity = 0.5 * k;
-    o.light.position.copy(this.headPos).add(new THREE.Vector3(0, 3, 0));
-    o.light.intensity = this.age < end + 0.4 ? 10 : 0;
+    if (o.lit === this) {
+      o.light.position.copy(this.headPos).add(new THREE.Vector3(0, 3, 0));
+      o.light.intensity = this.age < end + 0.4 ? 10 : 0;
+    }
     if (this.age >= end && !this.impacted) {
       this.impacted = true;
       for (let i = 0; i < 700; i++) {
@@ -844,10 +903,26 @@ class Flight {
     }
   }
 
+  /** 龙身中线上从头到尾隔一段取的点（截面中心，不带摆动后的模型表面） @returns {THREE.Vector3[]} */
+  spine() {
+    const pts = this.spinePts, n = pts.length;
+    for (let i = 0; i < n; i++) {
+      const k = Math.round((i / (n - 1)) * (STATIONS - 1)) * 12;
+      pts[i].set(this.st[k], this.st[k + 1], this.st[k + 2]);
+    }
+    return pts;
+  }
+
   finish() {
-    const scene = this.o.fx.scene;
+    if (this.done) return;
+    this.done = true;
+    const o = this.o, scene = o.fx.scene;
     for (const m of [this.body, this.glowMesh, this.sigil, this.arcs]) if (m) scene.remove(m);
     this.sigil.material.dispose(); this.arcs.material.dispose();
-    this.o.light.intensity = 0;
+    this.geo?.dispose();
+    if (o.lit === this) {   // 光交给还在演的那条
+      o.lit = o.flights.find((f) => !f.done) ?? null;
+      if (!o.lit) o.light.intensity = 0;
+    }
   }
 }

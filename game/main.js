@@ -13,7 +13,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-import { chainTargets, damageTo, planCast, regenMana, resolveTarget } from './rules/arbiter.js';
+import { chainTargets, damageTo, planCast, regenMana, resolveTarget, twinTarget } from './rules/arbiter.js';
 import { inWave } from './rules/fusion.js';
 import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
@@ -966,24 +966,46 @@ export function start(root, opts = {}) {
    *   - 风：不砸，卷起旋风——几秒里一下下割、把小怪往中心卷，顺带吹散 boss 的冰锥；
    *   - 雷：不砸，绕圈时劈五道雷，轮着劈锁定的那几只，每道连锁比平常多跳一下，劈过的冰锥全碎。
    * 气势、首次发现的加成（sm.dmg 比表里的 dmg 大多少）按同样的比例乘到火海、旋风、雷上。
+   * 试炼里领悟了"怎么召"（设计文档第 4 节"领悟"）：
+   *   - 双龙：第二条晚 twin.delay 秒出，扑离第一条落点够远的另一群（twinTarget），没有就在同一处再砸一下；两条各打满额（10-28 本人定）；
+   *   - 护身：龙不扑出去，绕着人转（guardDragons）；两张都拿了就两条一里一外反着转。
    * @param {import('./rules/arbiter.js').SummonPlan} sm
    * @param {number} castId
    */
   function runSummon(sm, castId) {
-    const res = resolveTarget(sm.target, enemies.views(), { count: 3, caster: CASTER_POS, objects: OBJECTS });
+    const views = enemies.views();
+    const res = resolveTarget(sm.target, views, { count: 3, caster: CASTER_POS, objects: OBJECTS });
+    const el = /** @type {keyof typeof SUMMONS} */ (sm.el), k = sm.dmg / SUMMONS[el].dmg;
+    const twin = S.mods.twin, guard = S.mods.guard && S.mode === 'trial';
+    hud.bigText(`${sm.name}现世`, SUMMON_INK[el] ?? SUMMON_INK.ice, 1400);
+    fx.launchBurst(el);
+    if (twin || guard) floatAt(new THREE.Vector3(CASTER_POS.x, 3.1, CASTER_POS.z), twin && guard ? '双龙·护身' : twin ? '双龙' : '护身', '#ffd76a');
+    if (guard) { guardDragons(sm, el, twin); return; }
+    flyAt(sm, el, k, res, castId);
+    if (!twin) return;
+    const other = twinTarget(res.point ?? DEFAULT_AIM, views, { apart: RUN.dragon.twin.apart, count: 3 });
+    after(RUN.dragon.twin.delay, () => { if (S.phase === 'playing') flyAt(sm, el, k, other.point ? other : res, ++castSeq); });
+  }
+
+  /** 地面上的一点 @param {number} x @param {number} z */
+  const atGround = (x, z) => new THREE.Vector3(x, groundHeightAt(x, z) ?? 0, z);
+
+  /**
+   * 一条龙扑一群（res：锁定的几只与落点），砸中、劈雷时结算（runSummon 的说明）
+   * @param {import('./rules/arbiter.js').SummonPlan} sm @param {keyof typeof SUMMONS} el @param {number} k 加成倍数
+   * @param {{ ids: string[], point: { x: number, z: number } | null }} res @param {number} castId
+   */
+  function flyAt(sm, el, k, res, castId) {
     const pt = res.point ?? { x: DEFAULT_AIM.x, z: DEFAULT_AIM.z };
-    const at = (x, z) => new THREE.Vector3(x, groundHeightAt(x, z) ?? 0, z);
     // 龙要飞五六秒，锁定的几只一直在走：落点跟着它们（还活着的几只的中心）走；全死了就砸最后看到的位置
     const ids = res.ids;
     const follow = () => {
       const live = ids.map((id) => enemies.get(id)).filter(Boolean);
       if (!live.length) return null;
-      return at(live.reduce((a, e) => a + e.pos.x, 0) / live.length, live.reduce((a, e) => a + e.pos.z, 0) / live.length);
+      return atGround(live.reduce((a, e) => a + e.pos.x, 0) / live.length, live.reduce((a, e) => a + e.pos.z, 0) / live.length);
     };
-    const el = /** @type {keyof typeof SUMMONS} */ (sm.el), k = sm.dmg / SUMMONS[el].dmg, T = at(pt.x, pt.z);
+    const T = atGround(pt.x, pt.z);
     locks.show(castId, [{ el, ids, ring: ids.length ? null : { x: pt.x, y: T.y, z: pt.z, r: sm.radius } }]);
-    hud.bigText(`${sm.name}现世`, SUMMON_INK[el] ?? SUMMON_INK.ice, 1400);
-    fx.launchBurst(el);
     const impact = (/** @type {THREE.Vector3} */ p) => {
       locks.clear(castId);
       if (S.phase !== 'playing') return;
@@ -997,13 +1019,51 @@ export function start(root, opts = {}) {
         if (el === 'fire') fireSea(p, sm.radius * 0.8, k);
         if (el === 'earth') earthRing(p);
       }
-      if (S.mods.yuwei) {   // 心法余威：龙落地后一段时间所有招加伤
-        S.afterT = RUN.arts.after.sec;
-        floatAt(new THREE.Vector3(CASTER_POS.x, 2.6, CASTER_POS.z), '余威', '#ffd76a');
-      }
+      dragonLanded();
     };
     const strike = (/** @type {THREE.Vector3} */ from, /** @type {number} */ i) => dragonStrike(from, i, ids, follow() ?? T, SUMMONS.thunder.strike * k);
     dragon.summon(T, el, { impact, strike: el === 'thunder' ? strike : undefined }, ids.length ? follow : undefined);
+  }
+
+  /** 龙落地（护身是转完）：心法余威开窗口，之后一段时间所有招加伤 */
+  function dragonLanded() {
+    if (!S.mods.yuwei || S.phase !== 'playing') return;
+    S.afterT = RUN.arts.after.sec;
+    floatAt(new THREE.Vector3(CASTER_POS.x, 2.6, CASTER_POS.z), '余威', '#ffd76a');
+  }
+
+  /**
+   * 领悟「护身」：龙绕着人转（fx/dragon.js guardPlan），人走圈跟着走。转的时候每帧看龙身中线上贴地的那几段（离地 2.6 米以内）：
+   * 两侧 block 米内的冰锥打碎（trial.shatter）；碰到的敌人（reach 米加身宽）挨这条龙伤害的 touch 倍、吃它的元素效果，
+   * 同一只每 every 秒最多挨一下（两条护身共用这份计时）。转完算龙落地（余威）。
+   * @param {import('./rules/arbiter.js').SummonPlan} sm @param {keyof typeof SUMMONS} el @param {boolean} twin 两条：外圈那条反着转
+   */
+  function guardDragons(sm, el, twin) {
+    const G = RUN.dragon.guard;
+    const me = () => atGround(trial.p.x, trial.p.z);
+    /** @type {Map<string, number>} 敌人 → 到几秒（clock）才能再挨 */
+    const next = new Map();
+    let clock = 0;
+    const rings = [{ r: G.r, h: G.h, dir: 1 }];
+    if (twin) rings.push({ r: G.r + G.outer.dr, h: G.h + G.outer.dh, dir: -1 });
+    rings.forEach((g, ri) => {
+      const tick = (/** @type {THREE.Vector3[]} */ spine, /** @type {number} */ dt) => {
+        if (ri === 0) clock += dt;   // 只让第一条走钟，两条一起走就快了一倍
+        if (S.phase !== 'playing') return;
+        const y0 = me().y;
+        for (let i = 0; i + 1 < spine.length; i++) {
+          const a = spine[i], b = spine[i + 1];
+          if (Math.min(a.y, b.y) < y0 - 0.3 || Math.max(a.y, b.y) > y0 + 2.6) continue;   // 还在地里、或已经飞高了
+          trial.shatter(a, b, G.block);
+          for (const e of [...enemies.list]) {
+            if ((next.get(e.id) ?? 0) > clock || distToSegment(e.pos, a, b) > G.reach + trial.bodyR(e)) continue;
+            next.set(e.id, clock + G.every);
+            hitEnemy(e, { el }, sm.dmg * G.touch, a.clone().setY(e.pos.y), {});
+          }
+        }
+      };
+      dragon.summon(me(), el, { impact: dragonLanded, tick }, me, { ...g, speed: G.speed, sec: G.sec });
+    });
   }
 
   /** 火龙落下的火海：和字诀「燎」的地火一样每 tick 秒烧一下，只是大、烧得久 @param {THREE.Vector3} p @param {number} r @param {number} k */
@@ -1600,6 +1660,8 @@ export function start(root, opts = {}) {
     },
     /** 试炼：在 (x, z) 放一只小怪潮里的小怪（'grunt' | 'archer' | 'charger'） */
     minion: (/** @type {string} */ kind = 'archer', x = 0, z = -4) => { trial.spawnChaser({ x, z, kind }); },
+    /** 试炼：在 (x, z) 放一颗不动、不伤人的冰锥，活 life 秒（看护身、字诀「引」打不打得碎） */
+    shard: (x = 0, z = 1.6, life = 8) => trial.fire(x, 1, z, 0, 0, { life, dmg: 0, r: 0.3 }),
     cast: (text) => submit(text),
     spawn: (/** @type {any} */ type = 'grunt', path = 0) => enemies.spawn(type, path),
     state: () => ({ phase: S.phase, mana: Math.round(S.mana), core: S.core, gauge: S.gauge, enemies: enemies.views(), last: S.last && { source: S.last.source, ms: S.last.ms, plan: S.last.plan } }),
@@ -1655,6 +1717,9 @@ export function start(root, opts = {}) {
       return f && { kind: f.kind, el: f.el, pick: f.plan.pick, s: +f.s.toFixed(1), sHit: +f.sHit.toFixed(1), L: +f.L.toFixed(1), impacted: f.impacted,
         strikes: f.nextStrike, mesh: !!f.model, target: r(f.target), head: r(f.headPos) };
     },
+    /** 同时在飞的每一条（双龙、护身）：落点或绕的中心、龙头在哪、飞到哪了 */
+    flights: () => dragon.flights.map((f) => ({ kind: f.kind, el: f.el, s: +f.s.toFixed(1), sHit: +f.sHit.toFixed(1), impacted: f.impacted,
+      target: f.target.toArray().map((x) => +x.toFixed(1)), head: f.headPos.toArray().map((x) => +x.toFixed(1)) })),
     locks: () => ({ heads: locks.heads.filter((h) => h.mesh.visible).map((h) => h.id), rings: locks.rings.filter((r) => r.mesh.visible).length }),
     // 以下给检查页用
     refill: () => { S.mana = MANA_MAX; S.core = CORE_HP; hud.setCore(S.core, CORE_HP); },

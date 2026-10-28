@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as THREE from 'three';
 
-import { flightPlan, summonPoints } from '../game/fx/dragon.js';
+import { flightPlan, guardPlan, summonPoints } from '../game/fx/dragon.js';
+import { RUN } from '../game/rules/numbers.js';
 import { SOLIDS } from '../game/world/layout.js';
 
 /** @param {THREE.Vector3} p @param {{ min: number[], max: number[] }} b */
@@ -77,3 +78,24 @@ for (const [el, name] of [['fire', '火龙'], ['thunder', '雷龙'], ['wind', '�
     }
   });
 }
+
+test('护身：从人脚下的地里钻出来，贴着人绕圈（半径、离地高度不变），圈长约是速度乘时长，转完往天上走；外圈那条更大更高、反着转', () => {
+  const G = RUN.dragon.guard, C = new THREE.Vector3(3, -1, -5);
+  /** 绕 C 转的方向：俯看角度变大为正 @param {THREE.Vector3} a @param {THREE.Vector3} b */
+  const turn = (a, b) => Math.sign((a.x - C.x) * (b.z - C.z) - (a.z - C.z) * (b.x - C.x));
+  for (const g of [{ r: G.r, h: G.h, dir: 1 }, { r: G.r + G.outer.dr, h: G.h + G.outer.dh, dir: -1 }]) {
+    const p = guardPlan(C, 'ice', { ...g, speed: G.speed, sec: G.sec });
+    assert.ok(p.pts[0].y < C.y - 3, '起点在地里');
+    const ring = p.pts.slice(2, p.hit + 1);
+    let len = 0;
+    for (let i = 0; i < ring.length; i++) {
+      assert.ok(Math.abs(Math.hypot(ring[i].x - C.x, ring[i].z - C.z) - g.r) < 1e-9, `第 ${i} 点不在半径 ${g.r} 上`);
+      assert.ok(Math.abs(ring[i].y - C.y - g.h) < 1e-9, `第 ${i} 点离地不是 ${g.h}`);
+      if (i) { len += ring[i].distanceTo(ring[i - 1]); assert.equal(turn(ring[i - 1], ring[i]), g.dir, `第 ${i} 段转反了`); }
+    }
+    assert.ok(Math.abs(len / (G.speed * G.sec) - 1) < 0.03, `圈长 ${len.toFixed(1)} 米，速度乘时长是 ${G.speed * G.sec} 米`);
+    assert.ok(p.pts[p.pts.length - 1].y > C.y + 20, '转完飞上天');
+    assert.equal(p.slam, false);
+    assert.equal(p.move, 0, '每帧跟着人重算');
+  }
+});
