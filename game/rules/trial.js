@@ -2,14 +2,16 @@
 /**
  * 试炼模式的规则（纯函数，有单测）：boss 挨打怎么算冰甲、什么时候换阶段、下一招出什么、站在哪算被打中、玩家走到哪被挡住、
  * 完美闪避、追踪冰锥怎么转弯、旋转弹幕朝哪喷；石甲巨像的落石落在哪、地刺朝哪几个方向、地刺冒到人没有；
+ * 火灵的火圈落在哪（同落石）、火环和火浪扫到人没有；
  * 小怪潮冒几只、冒在哪、冒哪种，符箓傀儡往哪挪，铁头傀儡冲多远、冲到谁。
- * 数值全在 numbers.js 的 BOSS（寒甲傀儡王，也是各个 boss 共用的换阶段、快慢）、STONE（石甲巨像）、TRIAL、RUN、MINION。
+ * 数值全在 numbers.js 的 BOSS（寒甲傀儡王，也是各个 boss 共用的换阶段、快慢）、STONE（石甲巨像）、FLAME（火灵）、TRIAL、RUN、MINION。
  * 画面和 boss 的动作在 game/modes/trial.js。
  */
-import { BOSS, MINION, RUN, STONE, TRIAL } from './numbers.js';
+import { BOSS, FLAME, MINION, RUN, STONE, TRIAL } from './numbers.js';
+import { waveHalfW } from './fusion.js';
 
-/** @typedef {'slam' | 'sweep' | 'summon' | 'homing' | 'spiral' | 'rocks' | 'charge' | 'spikes'} Move */
-/** 哪个 boss 的招式表（BOSS 寒甲傀儡王、STONE 石甲巨像） @typedef {typeof BOSS | typeof STONE} BossCfg */
+/** @typedef {'slam' | 'sweep' | 'summon' | 'homing' | 'spiral' | 'rocks' | 'charge' | 'spikes' | 'pyre' | 'nova' | 'wave'} Move */
+/** 哪个 boss 的招式表（BOSS 寒甲傀儡王、STONE 石甲巨像、FLAME 火灵） @typedef {typeof BOSS | typeof STONE | typeof FLAME} BossCfg */
 
 /**
  * 血量 → 第几阶段（1～3）：降到 70% 进第 2 阶段，降到 30% 进第 3 阶段（狂暴）。
@@ -104,6 +106,24 @@ export function rockSpots(me, n, rnd, obstacles, R) {
   return out;
 }
 
+/**
+ * 火灵满场火圈的位置：第一个对准玩家此刻站的地方，其余在整个广场里均匀随机（推出障碍），圈与圈至少隔 apart 米。
+ * 和落石不同，挑 30 次都隔不开就少放一个：圈挤在一起，人从脚下那个圈走出来会踩进隔壁的。
+ * @param {P} me @param {number} n @param {() => number} rnd @param {{ x: number, z: number, r: number }[]} obstacles @param {number} R
+ * @returns {P[]}
+ */
+export function pyreSpots(me, n, rnd, obstacles, R) {
+  const S = FLAME.pyre, out = [keepInArena({ x: me.x, z: me.z }, obstacles, R, 0)];
+  for (let i = 1; i < n; i++) {
+    for (let k = 0; k < 30; k++) {
+      const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * R;
+      const p = keepInArena({ x: Math.cos(a) * r, z: Math.sin(a) * r }, obstacles, R, 0);
+      if (out.every((q) => Math.hypot(p.x - q.x, p.z - q.z) >= S.apart)) { out.push(p); break; }
+    }
+  }
+  return out;
+}
+
 /** 一线地刺朝哪几个方向：一道就朝 dir；狂暴时三道，左右各偏 fanDeg 度 @param {P} dir 单位向量 @param {number} n @returns {P[]} */
 export function spikeDirs(dir, n) {
   const a0 = Math.atan2(dir.z, dir.x), f = (STONE.spikes.fanDeg * Math.PI) / 180;
@@ -121,6 +141,40 @@ export function spikeDirs(dir, n) {
 export function spikeReach(p, from, dir, f0, f1, w, body = 0) {
   const x = p.x - from.x, z = p.z - from.z, along = x * dir.x + z * dir.z, side = Math.abs(x * dir.z - z * dir.x);
   return side <= w / 2 + body && along + body > f0 && along - body <= f1;
+}
+
+/**
+ * 火灵火环的缺口：偏开玩家此刻的方向（aim，弧度）gapOff 度区间里随机一个角度、随机往左或往右；半角 gapDeg 的一半。
+ * 缺口不会正对着人，站着不动躲不掉。连放的第二圈给上一圈的缺口 prev：缺口换到人的另一侧，躲进第一个缺口的人还得再动。
+ * @param {number} aim @param {() => number} rnd @param {number | null} [prev] @returns {{ a: number, half: number }}
+ */
+export function novaGap(aim, rnd, prev = null) {
+  const N = FLAME.nova, [o0, o1] = N.gapOff, off = ((o0 + (o1 - o0) * rnd()) * Math.PI) / 180;
+  const side = prev === null ? (rnd() < 0.5 ? -1 : 1) : Math.sin(prev - aim) > 0 ? -1 : 1;
+  return { a: aim + side * off, half: (N.gapDeg * Math.PI) / 360 };
+}
+
+/**
+ * 火灵的火环这一帧从半径 f0 推到 f1（以 c 为圆心），推到站在 p 的人没有：身体（半径 body）跟这一帧扫过的那一圈有重叠，
+ * 而且不在缺口里（缺口朝 gap.a 弧度、半角 gap.half；整个身子都在缺口的角度里才算躲开）。
+ * @param {P} p @param {P} c @param {number} f0 @param {number} f1 @param {number} [body] @param {{ a: number, half: number } | null} [gap]
+ */
+export function ringReach(p, c, f0, f1, body = 0, gap = null) {
+  const x = p.x - c.x, z = p.z - c.z, d = Math.hypot(x, z);
+  if (!(d + body > f0 && d - body <= f1)) return false;
+  if (!gap || d < 1e-6) return true;
+  const a = Math.atan2(z, x) - gap.a;
+  return Math.abs(Math.atan2(Math.sin(a), Math.cos(a))) + Math.asin(Math.min(1, body / d)) > gap.half;
+}
+
+/**
+ * 火灵的火浪（形状同豪火灭却：从 from 朝 dir 推 BEAM.len 米，越远越宽）这一帧浪头从 f0 推到 f1，推到站在 p 的人没有：
+ * 身体（顺着浪量，前后各 body）跟这一帧推过的那一段有重叠，而且在那里的宽度里（身体半径加在半宽上）。
+ * @param {P} p @param {P} from @param {P} dir 单位向量 @param {number} f0 @param {number} f1 @param {number} [body]
+ */
+export function waveReach(p, from, dir, f0, f1, body = 0) {
+  const x = p.x - from.x, z = p.z - from.z, along = x * dir.x + z * dir.z, side = Math.abs(x * dir.z - z * dir.x);
+  return along + body > f0 && along - body <= f1 && side <= waveHalfW(along) + body;
 }
 
 /**

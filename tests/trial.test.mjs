@@ -1,12 +1,14 @@
-// 试炼模式的规则（game/rules/trial.js）：冰甲只怕火、石甲只怕雷、石甲巨像的落石与地刺、70% / 30% 换阶段、挑招、红圈与扇形的判定、玩家被挡在广场里、小怪潮。
+// 试炼模式的规则（game/rules/trial.js）：冰甲只怕火、石甲只怕雷、火罩只怕冰、石甲巨像的落石与地刺、火灵的火圈火环火浪、70% / 30% 换阶段、挑招、
+// 红圈与扇形的判定、玩家被挡在广场里、小怪潮。
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { damageTo } from '../game/rules/arbiter.js';
-import { BOSS, ENEMIES, MINION, RUN, STONE, TRIAL } from '../game/rules/numbers.js';
+import { waveHalfW } from '../game/rules/fusion.js';
+import { BEAM, BOSS, ENEMIES, FLAME, MINION, RUN, STONE, TRIAL } from '../game/rules/numbers.js';
 import {
-  archerIntent, bossHit, bossPhase, canDash, chargeLen, homingTurn, inCircle, inSector, inStrip, isPerfect, keepInArena, nextBatch, pickMinion, pickMove,
-  recoverSec, regenStamina, rockSpots, slamCount, spawnSpot, spikeDirs, spikeReach, spiralAngles, teleSec,
+  archerIntent, bossHit, bossPhase, canDash, chargeLen, homingTurn, inCircle, inSector, inStrip, isPerfect, keepInArena, nextBatch, novaGap, pickMinion, pickMove,
+  pyreSpots, recoverSec, regenStamina, ringReach, rockSpots, slamCount, spawnSpot, spikeDirs, spikeReach, spiralAngles, teleSec, waveReach,
 } from '../game/rules/trial.js';
 
 const MAX = ENEMIES.boss.hp;
@@ -351,4 +353,112 @@ test('一线地刺：一道朝人，狂暴三道左右对称；冒到人那一�
     assert.equal(n, 1, `每帧冒 ${step} 米`);
   }
   assert.ok(TRIAL.speed * S.tele * BOSS.pace[2] > S.w / 2 + 0.35, '预警时间里横着走得出去');
+});
+// ---------------------------------------------------------------- 第三个 boss 火灵（numbers.js FLAME）
+const flameMoves = (phase, s) => new Set(ROLLS.map((r) => pickMove(phase, s, r, FLAME)));
+
+test('火罩：甲在时只有冰照常伤害并削罩，别的元素（连火）只剩两成；削穿就熄', () => {
+  const b = { armor: FLAME.armor, freezeCd: 0 };
+  const ice = bossHit(b, 'ice', hit('ice', 50), false, FLAME);
+  assert.equal(ice.r.dmg, 50);
+  assert.equal(ice.armor, FLAME.armor - 50);
+  assert.equal(ice.r.reaction, '熄焰');
+  assert.equal(ice.r.freezeSec, 0, '火罩在时冰也冻不住');
+  for (const el of ['fire', 'wind', 'earth', 'thunder']) {
+    const h = bossHit(b, el, hit(el, 50), false, FLAME);
+    assert.equal(h.r.dmg, 50 * FLAME.armoredMult, `${el} 打在火罩上`);
+    assert.equal(h.armor, FLAME.armor, `${el} 不削罩`);
+    assert.equal(h.r.reaction, '火罩');
+  }
+  assert.equal(bossHit({ armor: 30, freezeCd: 0 }, 'ice', hit('ice', 50), false, FLAME).broke, true);
+  assert.ok(bossHit({ armor: 0, freezeCd: 0 }, 'ice', hit('ice', 50), false, FLAME).r.freezeSec > 0, '火罩熄了冰才冻得住');
+});
+
+test('火灵挑招：第 1 阶段火圈、火球，第 2 阶段加火环，第 3 阶段加火浪；远近都出；不出别的 boss 的招', () => {
+  const far = { dist: 9, minions: 0, sinceSummon: 0 }, near = { ...far, dist: 2 };
+  assert.deepEqual([...flameMoves(1, far)].sort(), ['homing', 'pyre']);
+  assert.deepEqual([...flameMoves(1, near)].sort(), ['homing', 'pyre']);
+  assert.deepEqual([...flameMoves(2, far)].sort(), ['homing', 'nova', 'pyre']);
+  assert.deepEqual([...flameMoves(3, far)].sort(), ['homing', 'nova', 'pyre', 'wave']);
+  assert.equal(pickMove(1, { ...far, sinceSummon: FLAME.summon.cd }, 0.5, FLAME), 'summon');
+  assert.ok(!flameMoves(3, { ...far, last: 'wave' }).has('wave'), '刚推过火浪不连着推');
+  for (const m of ['pyre', 'homing', 'nova', 'wave']) assert.ok(teleSec(m, 3, FLAME) < teleSec(m, 1, FLAME), `${m} 越来越快`);
+});
+
+test('满场火圈：第一个对准人，其余撒满广场、彼此隔得开（放不下宁可少放）；预警里走得出自己脚下那个圈，而且走出来不会踩进旁边的圈', () => {
+  const P = FLAME.pyre, R = 9.8, pillar = { x: 3, z: 3, r: 1 };
+  let seed = 11;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  let short = 0, total = 0;
+  for (const me of [{ x: 0, z: 3 }, { x: -8, z: 4 }, { x: 0, z: -9.8 }]) {
+    for (let rep = 0; rep < 30; rep++) {
+      for (const n of P.n) {
+        const s = pyreSpots(me, n, rnd, [pillar], R);
+        assert.ok(s.length <= n);
+        assert.deepEqual(s[0], me, '第一个对准人');
+        short += n - s.length; total += n;
+        for (const [i, p] of s.entries()) {
+          assert.ok(Math.hypot(p.x, p.z) <= R + 1e-9, '在广场里');
+          assert.ok(Math.hypot(p.x - pillar.x, p.z - pillar.z) >= pillar.r - 1e-9, '不在柱子里');
+          for (const q of s.slice(i + 1)) assert.ok(Math.hypot(p.x - q.x, p.z - q.z) >= P.apart - 1e-9, `隔得开（${n} 个）`);
+        }
+      }
+    }
+  }
+  assert.ok(short / total < 0.02, `少放的不到 2%（实际 ${short}/${total}）`);
+  // 塞不下：要 40 个，宁可少放也不挤
+  const crowd = pyreSpots({ x: 0, z: 0 }, 40, rnd, [], R);
+  assert.ok(crowd.length < 40);
+  for (const [i, p] of crowd.entries()) for (const q of crowd.slice(i + 1)) assert.ok(Math.hypot(p.x - q.x, p.z - q.z) >= P.apart - 1e-9, '塞不下时也不挤');
+  // 从圈心往任何方向走出半径加身体，离隔壁圈心（至少 apart）还剩半径加身体以外
+  assert.ok(P.apart - (P.r + 0.35) >= P.r + 0.35, '两圈之间站得下人');
+  assert.ok(TRIAL.speed * P.tele * BOSS.pace[2] * P.again > P.r + 0.35, '狂暴第二轮也走得出去');
+});
+
+test('火环：前沿扫过身体才算，一帧推多推少都不漏不重；缺口里整个身子在里面才躲得开；缺口不正对着人', () => {
+  const c = { x: 0, z: 0 }, me = { x: 6, z: 0 };
+  assert.ok(ringReach(me, c, 5.5, 5.8, 0.35));
+  assert.ok(!ringReach(me, c, 2, 3, 0.35), '还没推到');
+  assert.ok(!ringReach(me, c, 7, 8, 0.35), '已经推过去了');
+  for (const step of [0.05, 0.3, 0.9]) {
+    let n = 0;
+    for (let f = 0; f < 20; f += step) if (ringReach(me, c, f, f + step)) n++;
+    assert.equal(n, 1, `每帧推 ${step} 米`);
+  }
+  const gap = { a: 0, half: (FLAME.nova.gapDeg * Math.PI) / 360 };
+  assert.ok(!ringReach(me, c, 5.5, 5.8, 0.35, gap), '站在缺口正中');
+  const edge = (deg) => ({ x: 6 * Math.cos((deg * Math.PI) / 180), z: 6 * Math.sin((deg * Math.PI) / 180) });
+  assert.ok(!ringReach(edge(FLAME.nova.gapDeg / 2 - 4), c, 5.5, 6.2, 0.35, gap), '整个身子在缺口里');
+  assert.ok(ringReach(edge(FLAME.nova.gapDeg / 2 - 2), c, 5.5, 6.2, 0.35, gap), '身子中心在缺口里，半边露在火里');
+  assert.ok(ringReach(edge(-FLAME.nova.gapDeg / 2 - 10), c, 5.5, 6.2, 0.35, gap), '缺口另一边外头');
+  const rnd = (() => { let i = 0; return () => [0, 0.2, 0.999, 0.7, 0.5, 0.1][i++ % 6]; })();
+  for (let k = 0; k < 6; k++) {
+    const aim = k * 1.1, g = novaGap(aim, rnd);
+    const off = Math.abs(Math.atan2(Math.sin(g.a - aim), Math.cos(g.a - aim)));
+    assert.ok(off >= g.half + 0.3, '人站着不动就在火里');
+    assert.ok(ringReach({ x: 6 * Math.cos(aim), z: 6 * Math.sin(aim) }, c, 5.5, 5.8, 0.35, g));
+    // 连放的第二圈：缺口换到人的另一侧，和第一个缺口一点不重叠
+    const g2 = novaGap(aim, rnd, g.a), apart = Math.abs(Math.atan2(Math.sin(g2.a - g.a), Math.cos(g2.a - g.a)));
+    assert.ok(Math.sin(g.a - aim) * Math.sin(g2.a - aim) < 0, '两个缺口分在人的两侧');
+    assert.ok(apart > 2 * g.half, '两个缺口不重叠');
+  }
+  // 火环比人跑得快：躲不开就得闪；闪避一下冲过去的距离比环加身体厚得多
+  assert.ok(FLAME.nova.speed > TRIAL.speed);
+  assert.ok(TRIAL.dash.dist > 2 * 0.35 + FLAME.nova.speed * TRIAL.dash.sec);
+});
+
+test('火浪：形状同豪火灭却，浪头扫过才算；身后、两侧张开的边外不挨；预警时间里横着走得出去', () => {
+  const from = { x: 0, z: 0 }, dir = { x: 0, z: 1 };
+  assert.ok(waveReach({ x: 0, z: 5 }, from, dir, 4.8, 5.1, 0.35));
+  assert.ok(!waveReach({ x: 0, z: 5 }, from, dir, 1, 2, 0.35), '还没推到');
+  assert.ok(!waveReach({ x: 0, z: -1 }, from, dir, 0, BEAM.len, 0.35), '身后');
+  assert.ok(waveReach({ x: waveHalfW(10) + 0.3, z: 10 }, from, dir, 9.9, 10.2, 0.35), '远处浪宽，挨着边也算');
+  assert.ok(!waveReach({ x: waveHalfW(2) + 0.4, z: 2 }, from, dir, 1.9, 2.2, 0.35), '近处浪窄，站在边外');
+  for (const step of [0.1, 0.4, 1.2]) {
+    let n = 0;
+    for (let f = 0; f < BEAM.len; f += step) if (waveReach({ x: 1, z: 7 }, from, dir, f, Math.min(BEAM.len, f + step))) n++;
+    assert.equal(n, 1, `每帧推 ${step} 米`);
+  }
+  // 站在火灵停下来的那么远（keepDist）：狂暴时的预警里横着走得出那里的半宽加身体
+  assert.ok(TRIAL.speed * teleSec('wave', 3, FLAME) > waveHalfW(FLAME.keepDist) + 0.35);
 });

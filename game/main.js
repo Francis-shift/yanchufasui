@@ -27,7 +27,7 @@ import {
   toggleTalent,
 } from './rules/talents.js';
 import {
-  BEAM, BUTTON_CHANT_MS, CHANT_MIN_MS, CORE_HP, ELEMENTS, ENEMIES, FORMS, INPUT_MAX_CHARS, MANA_MAX, MOMENTUM_FX, MOMENTUM_RANGE, PARSE_TIMEOUT_MS, RAIN,
+  BEAM, BUTTON_CHANT_MS, CHANT_MIN_MS, CORE_HP, ELEMENTS, FORMS, INPUT_MAX_CHARS, MANA_MAX, MOMENTUM_FX, MOMENTUM_RANGE, PARSE_TIMEOUT_MS, RAIN,
   RUN, SLOWMO_MAX_SEC, SLOWMO_SCALE, SUMMONS, TALENTS, TORNADO, TRIAL, WALL,
 } from './rules/numbers.js';
 import { Caster } from './actors/caster.js';
@@ -176,6 +176,7 @@ export function start(root, opts = {}) {
   }
   const trial = new Trial(scene, { enemies, fx, particles, hud, caster: layout.caster, origins: [origin, fx.origin],
     dodge: () => caster.dodge(), ghost: (mat) => caster.ghost(mat),
+    fireWave: (from, dir) => fusions.beam(new THREE.Vector3(from.x, 1.3, from.z), new THREE.Vector3(dir.x, 0, dir.z), null),   // 火灵的火浪借豪火灭却的火云
     canvas: renderer.domElement, mobile, floatText: floatAt, win: trialWon, lose: trialLost,
     blockers: () => walls.obstacles(),   // 土墙挡得住冰锥
     reward: (mana, gauge) => {   // 完美闪避：回法力、加气势；拿了刹那、反手的开窗口
@@ -372,7 +373,7 @@ export function start(root, opts = {}) {
       if (S.phase === 'won' && S.mode === 'trial') {
         const sec = Math.round(trial.runT);
         hud.showOverlay('试炼通过', `${BOSS_COUNT} 个 boss 尽数击碎。用时 ${Math.floor(sec / 60)} 分 ${sec % 60} 秒，完美闪避 ${trial.perfects} 次，`
-          + `气血还剩 ${Math.ceil(trial.hp)}。第三个 boss 还在做，暂由${ENEMIES.boss.name}顶替。`, '去守关', '再战试炼');
+          + `气血还剩 ${Math.ceil(trial.hp)}。`, '去守关', '再战试炼');
       }
     });
   }
@@ -1273,6 +1274,7 @@ export function start(root, opts = {}) {
       }
     }
     for (const wv of fusions.waves) {
+      if (!wv.step) continue;   // 火灵放的火浪：只烧人，试炼模式里判
       const front = wv.t * BEAM.speed, at = wv.from.clone().setY(1.3);
       for (const e of [...enemies.list]) {
         if (wv.hit.has(e.id) || !inWave(e.pos, wv.from, wv.dir, front, 0.4)) continue;
@@ -1524,7 +1526,10 @@ export function start(root, opts = {}) {
     engage: () => trial.engage(),
     walk: (x = 0, z = 5.2) => { trial.p.set(x, 0, z); trial.sync(); },
     bossHp: (n) => { if (trial.boss) trial.boss.hp = n; },
-    /** 让 boss 马上出这一招，看招用：寒甲傀儡王 slam / sweep / summon / homing / spiral，石甲巨像 slam / rocks / charge / spikes / summon */
+    /**
+     * 让 boss 马上出这一招，看招用：寒甲傀儡王 slam / sweep / summon / homing / spiral，石甲巨像 slam / rocks / charge / spikes / summon，
+     * 火灵 pyre / homing / nova / wave / summon
+     */
     bossMove: (m) => trial.force(m),
     trialState: () => {
       const b = trial.boss;

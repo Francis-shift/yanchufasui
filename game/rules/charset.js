@@ -62,7 +62,7 @@ const GROUPS = [
 /** 界面上会用书法字体显示的固定文字（单元测试逐字检查都在表里） */
 export const UI_TEXTS = ['言出法随', '守住了这一波', '天道不允', '法力不足', '未能成咒', '气势如虹',
   '阵眼破碎', '护山大阵守住了', '无名', '第 1 波', '差一口气', '冰龙现世',
-  '试炼通过', '败下阵来', '冰甲碎了', '冰甲重凝', '狂暴', '闪', '石甲碎了', '石甲重凝', '打断'];
+  '试炼通过', '败下阵来', '冰甲碎了', '冰甲重凝', '狂暴', '闪', '石甲碎了', '石甲重凝', '打断', '火罩碎了', '火罩重燃'];
 
 /**
  * 大字（屏幕中央闪的字、标题、结算标题）用另一款更飘逸的行书，只显示固定的字，
@@ -71,7 +71,7 @@ export const UI_TEXTS = ['言出法随', '守住了这一波', '天道不允', '
  */
 export const BIG_CHARS = [...new Set([...UI_TEXTS.join(''),
   ...Object.values(FUSIONS).flatMap((f) => [...f.name, ...f.idiom]), ...Object.values(SUMMONS).flatMap((s) => [...s.name]),
-  ...ENEMIES.boss.name, ...ENEMIES.stone.name, ...'第波0123456789 '])].join('');
+  ...ENEMIES.boss.name, ...ENEMIES.stone.name, ...ENEMIES.flame.name, ...'第波0123456789 '])].join('');
 
 /**
  * 名字里允许的标点与数字（数字给"第 3 波"这种大字用）。

@@ -8,7 +8,7 @@
  */
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
-import { BOSS, ELEMENTS, ENEMIES, MINION, STONE } from '../rules/numbers.js';
+import { BOSS, ELEMENTS, ENEMIES, FLAME, MINION, STONE } from '../rules/numbers.js';
 import { archerIntent, keepInArena } from '../rules/trial.js';
 import { attachToBone, makeRig, playRig } from './rig.js';
 import { CASTER_POS, CORE_POS, groundHeightAt, OBSTACLES, PATHS, PLAZA_R, SPAWN_FOG } from '../world/layout.js';
@@ -27,7 +27,7 @@ const STATIC_OBSTACLES = [...OBSTACLES, { x: CASTER_POS.x, z: CASTER_POS.z, r: 0
 /** 试炼模式：追上来的小傀儡离施法者这么近就自爆；铁头傀儡贴到这么近就站住等着冲 */
 const TOUCH_REACH = 0.9;
 const CHARGER_STOP = 1.0;
-/** @typedef {'grunt' | 'shield' | 'colossus' | 'boss' | 'stone' | 'archer' | 'charger'} EnemyType */
+/** @typedef {'grunt' | 'shield' | 'colossus' | 'boss' | 'stone' | 'flame' | 'archer' | 'charger'} EnemyType */
 /**
  * 小傀儡模型（actors/rig.js）到了以后三种小怪的样子：同一个模型，颜色乘在贴图上、身高（米）各不同，挂件另加（spawn 里）。
  * 盾傀儡、巨像、boss 还是方块。chip：碎块的颜色（木头色乘上染色）
@@ -102,6 +102,8 @@ export class Enemies {
       rigCharm: new THREE.BoxGeometry(0.08, 0.22, 0.012),
       rigHelmet: new THREE.SphereGeometry(1, 16, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(0.205, 0.17, 0.18),
       rigRam: new THREE.BoxGeometry(0.26, 0.04, 0.08),
+      // 火灵的火罩：裹住全身的一团火（椭球），头顶再窜一簇火苗（底在原点，试炼模式按时间拉高拉矮）
+      shroud: new THREE.SphereGeometry(1, 18, 12).scale(0.62, 0.95, 0.5), wisp: new THREE.ConeGeometry(0.22, 0.7, 8).translate(0, 0.35, 0),
     };
     /** @type {import('./rig.js').Rig | null} 小傀儡模型，没到之前（或下载失败）用方块 */
     this.rig = null;
@@ -114,6 +116,10 @@ export class Enemies {
       emissive: 0x2f7fc0, emissiveIntensity: 0.5, depthWrite: false });
     // 石甲巨像的石甲：胸前一整块石板、两肩各压一块大石头（棱角分明），石缝里透一点土黄的光
     this.rockMat = new THREE.MeshStandardMaterial({ color: 0x5f5548, roughness: 0.95, flatShading: true, emissive: 0x3a2408, emissiveIntensity: 0.6 });
+    // 火灵的火罩：半透明、自己发光（亮过泛光阈值）；透明度由试炼模式按剩多少罩、一闪一闪地调
+    // 1.6 倍发光、0.58 不透明那版整团橙色糊成一颗实心的蛋，里面只透出两只眼睛（10-28 截图），压下来让身形透出来
+    this.flameMat = new THREE.MeshStandardMaterial({ color: 0xff9a4a, emissive: 0xff5a14, emissiveIntensity: 1.0, roughness: 0.6, transparent: true,
+      opacity: 0.4, depthWrite: false });
     this.barBg = new THREE.MeshBasicMaterial({ color: 0x1a1a1a, transparent: true, opacity: 0.6, depthTest: false });
     this._p = new THREE.Vector3(); this._d = new THREE.Vector3();
   }
@@ -126,12 +132,12 @@ export class Enemies {
     const spec = ENEMIES[type];
     const look = this.rig ? RIG_LOOK[/** @type {keyof typeof RIG_LOOK} */ (type)] : undefined;
     // 符箓傀儡紫、铁头傀儡浅钢灰：0x585d66 那版在紫色天光下和符箓傀儡一样黑（10-28 截图）
-    const tint = look?.tint ?? { shield: 0x6f6a62, boss: 0x7f93a8, stone: 0x8a8378, archer: 0x7a5aa8, charger: 0x9097a3 }[type] ?? 0x8b7355;
+    const tint = look?.tint ?? { shield: 0x6f6a62, boss: 0x7f93a8, stone: 0x8a8378, flame: 0x6a3022, archer: 0x7a5aa8, charger: 0x9097a3 }[type] ?? 0x8b7355;
     const mat = new THREE.MeshStandardMaterial({ color: tint, roughness: look ? 0.85 : 0.8, map: look ? this.rig?.tex : null });
     const base = mat.color.clone(), fromFog = pathIndex % this.paths.length === SPAWN_FOG.path;
     if (fromFog) { mat.transparent = true; mat.opacity = 0; mat.color.copy(EMERGE_DARK); }   // 眼睛是另一种材质，一开始就亮着
     const g = new THREE.Group();
-    const scale = { boss: BOSS.scale, stone: STONE.scale, colossus: 2.2, shield: 1.15, archer: 0.85, charger: 1.05 }[type] ?? 0.9;
+    const scale = { boss: BOSS.scale, stone: STONE.scale, flame: FLAME.scale, colossus: 2.2, shield: 1.15, archer: 0.85, charger: 1.05 }[type] ?? 0.9;
     let armorMesh = null, rig = null;
     if (look && this.rig) {
       // 模型：骨骼动作代替一跳一跳；scale 仍按方块那套算（瞄准点、互相挤开的距离不变），画出来的大小按身高
@@ -162,6 +168,13 @@ export class Enemies {
           b.position.set(sx * 0.5, 0.3, 0); b.rotation.set(0.4, sx * 0.7, 0.2); b.castShadow = true;
           armorMesh.add(b);
         }
+      }
+      if (type === 'flame') {   // 火罩：裹住全身的一团火，头顶一簇火苗（第一个子物体，试炼模式让它跳），一起显隐
+        armorMesh = part(this.geo.shroud, 0, 0.85, 0, this.flameMat);
+        armorMesh.castShadow = false;
+        const w = new THREE.Mesh(this.geo.wisp, this.flameMat);
+        w.position.y = 0.85;
+        armorMesh.add(w);
       }
       g.scale.setScalar(scale);
     }

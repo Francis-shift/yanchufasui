@@ -116,6 +116,7 @@ export const ENEMIES = {
   colossus: { name: '巨像',   hp: 300, speed: 0.6, coreDmg: 50, freezeMult: 0.5 },
   boss:     { name: '寒甲傀儡王', hp: 1500, speed: 1.3, coreDmg: 0, freezeMult: 0.5 },   // 试炼模式的 boss，招式与冰甲见下面 BOSS
   stone:    { name: '石甲巨像', hp: 1800, speed: 1.0, coreDmg: 0, freezeMult: 0.5 },     // 试炼的第二个 boss（10-28 加），招式与石甲见下面 STONE
+  flame:    { name: '火灵', hp: 2100, speed: 1.4, coreDmg: 0, freezeMult: 0.5 },         // 试炼的第三个 boss（10-28 加），招式与火罩见下面 FLAME
   // 只在试炼的小怪潮里出现（10-28 加），怎么打人见下面 MINION
   archer:   { name: '符箓傀儡', hp: 30,  speed: 1.6, coreDmg: 10 },
   charger:  { name: '铁头傀儡', hp: 70,  speed: 1.7, coreDmg: 20 },
@@ -174,6 +175,27 @@ export const STONE = {
   rocks:  { tele: 1.1, n: [5, 6, 9], spread: 4.5, apart: 1.6, r: 1.3, gap: 0.22, dmg: 14, weight: 3 },
   charge: { tele: [2.2, 2.0, 1.8], again: 0.6, w: 2.4, len: 14, speed: 13, dmg: 26, breakDmg: 70, stagger: 2.6, staggerMult: 1.3, times: [1, 1, 2], weight: 3 },
   spikes: { tele: 0.9, w: 1.3, len: 16, speed: 11, dmg: 18, lines: [1, 1, 3], fanDeg: 28, weight: 3 },
+  summon: { tele: 0.9, n: [2, 3, 3], cd: 16, keep: 1 },
+};
+/**
+ * 第三个 boss 火灵（火；设计文档第 4 节"第三个 boss"，10-28 我定的初值，等本人试玩）。换阶段、预警快慢（pace）、喘息、冻住后的保护照 BOSS。
+ * 火罩只怕冰：冰照常伤害并削罩，别的元素只剩 armoredMult；削穿就熄，第 2 阶段重燃（reform）。火灵不贴身，离玩家 keepDist 米就不再靠近。
+ * 招随阶段变多（moves）：第 1 阶段满场火圈、追踪火球、召小傀儡；第 2 阶段加火环；第 3 阶段狂暴，加一道火浪，火圈烧两轮、火环连放两圈（times）。
+ * 满场火圈（pyre）：第一个对准玩家此刻站的地方，其余 n - 1 个撒满整个广场，圈与圈至少隔 apart 米（放不下就少放），
+ *   每个半径 r，tele 秒后一起喷火，人在圈里挨 dmg；第二轮重新对准人，预警 × again。
+ * 追踪火球（homing）：同寒甲傀儡王的追踪冰锥，多一颗、转得快一点。
+ * 火环（nova）：tele 秒后从脚下往外推一圈火，每秒 speed 米，一直推出广场；环上留一道 gapDeg 度的缺口（偏开玩家此刻的方向 gapOff 度区间里随机）。
+ *   火环的前沿扫过人挨 dmg：跑进缺口，或者迎着火环闪避穿过去（完美闪避）；第二圈预警 × again、缺口另找地方。
+ * 火浪（wave）：朝玩家亮一片越远越宽的红色梯形（形状同豪火灭却，BEAM），tele 秒后火浪推出去，浪头扫过人挨 dmg。
+ */
+export const FLAME = {
+  type: 'flame', el: 'fire', weak: 'ice', armorName: '火罩', weakText: '熄焰', reform: '重燃',
+  armor: 160, armoredMult: 0.2, scale: 2.4, keepDist: 6,
+  moves: [['pyre', 'homing', 'summon'], ['pyre', 'homing', 'nova', 'summon'], ['pyre', 'homing', 'nova', 'wave', 'summon']],
+  pyre:   { tele: 1.3, n: [7, 9, 11], apart: 3.6, r: 1.4, dmg: 16, times: [1, 1, 2], again: 0.7, weight: 3 },
+  homing: { tele: 0.8, n: [3, 4, 5], speed: 6.5, turn: 2.0, life: 3.8, dmg: 12, r: 0.32, weight: 2 },
+  nova:   { tele: 1.0, speed: 7, gapDeg: 50, gapOff: [45, 100], dmg: 18, times: [1, 1, 2], again: 0.8, weight: 2 },
+  wave:   { tele: 1.4, dmg: 24, weight: 3 },
   summon: { tele: 0.9, n: [2, 3, 3], cd: 16, keep: 1 },
 };
 /**

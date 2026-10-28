@@ -87,6 +87,7 @@ export class FusionFx {
 
   /**
    * 豪火灭却：推出一片火浪，返回它（main 每帧按浪头推到哪判断烧到了谁）。
+   * step 给 null 是火灵放的火浪（试炼模式自己判烧没烧到人）：不烧敌人，也不顿帧、不压暗（那是玩家放大招的手感）。
    * @param {THREE.Vector3} from 施法者身前、胸口高度 @param {THREE.Vector3} dir 水平单位向量
    */
   beam(from, dir, step) {
@@ -94,10 +95,12 @@ export class FusionFx {
     const wv = { from: new THREE.Vector3(from.x, g, from.z), dir: dir.clone(), side: new THREE.Vector3(-dir.z, 0, dir.x),
       t: 0, hit: new Set(), step, done: 0, scorched: 0 };
     this.waves.push(wv);
-    this.fx.shake = Math.max(this.fx.shake, 0.55);
-    this.fx.hitStop = Math.max(this.fx.hitStop, 0.06);
-    this.fx.pulseDim(0.65, 1.6);
-    this.fx.impact(from.clone().addScaledVector(dir, 3), 0.8);
+    this.fx.shake = Math.max(this.fx.shake, step ? 0.55 : 0.4);
+    if (step) {
+      this.fx.hitStop = Math.max(this.fx.hitStop, 0.06);
+      this.fx.pulseDim(0.65, 1.6);
+    }
+    this.fx.impact(from.clone().addScaledVector(dir, 3), step ? 0.8 : 0.4);
     // 出手那一下：身前先炸开一团
     for (let i = Math.round(14 * this.k); i > 0; i--) {
       const u = rand(-1, 1);
