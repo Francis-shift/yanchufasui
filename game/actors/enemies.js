@@ -8,7 +8,7 @@
  */
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
-import { BOSS, ELEMENTS, ENEMIES, MINION } from '../rules/numbers.js';
+import { BOSS, ELEMENTS, ENEMIES, MINION, STONE } from '../rules/numbers.js';
 import { archerIntent, keepInArena } from '../rules/trial.js';
 import { attachToBone, makeRig, playRig } from './rig.js';
 import { CASTER_POS, CORE_POS, groundHeightAt, OBSTACLES, PATHS, PLAZA_R, SPAWN_FOG } from '../world/layout.js';
@@ -27,7 +27,7 @@ const STATIC_OBSTACLES = [...OBSTACLES, { x: CASTER_POS.x, z: CASTER_POS.z, r: 0
 /** 试炼模式：追上来的小傀儡离施法者这么近就自爆；铁头傀儡贴到这么近就站住等着冲 */
 const TOUCH_REACH = 0.9;
 const CHARGER_STOP = 1.0;
-/** @typedef {'grunt' | 'shield' | 'colossus' | 'boss' | 'archer' | 'charger'} EnemyType */
+/** @typedef {'grunt' | 'shield' | 'colossus' | 'boss' | 'stone' | 'archer' | 'charger'} EnemyType */
 /**
  * 小傀儡模型（actors/rig.js）到了以后三种小怪的样子：同一个模型，颜色乘在贴图上、身高（米）各不同，挂件另加（spawn 里）。
  * 盾傀儡、巨像、boss 还是方块。chip：碎块的颜色（木头色乘上染色）
@@ -95,7 +95,7 @@ export class Enemies {
       arm: new THREE.BoxGeometry(0.16, 0.6, 0.16), leg: new THREE.BoxGeometry(0.18, 0.42, 0.18),
       eye: new THREE.BoxGeometry(0.08, 0.06, 0.02), shard: new THREE.BoxGeometry(0.22, 0.22, 0.22),
       shield: new THREE.BoxGeometry(0.9, 1.0, 0.1), bar: new THREE.PlaneGeometry(0.8, 0.07),
-      armor: new THREE.BoxGeometry(0.86, 1.5, 0.62),
+      armor: new THREE.BoxGeometry(0.86, 1.5, 0.62), boulder: new THREE.DodecahedronGeometry(0.34, 0),
       charm: new THREE.BoxGeometry(0.1, 0.36, 0.02), helmet: new THREE.BoxGeometry(0.5, 0.2, 0.5), ram: new THREE.BoxGeometry(0.2, 0.14, 0.12),
       // 挂在模型头骨上的（模型单位：头从 0.68 到顶 1.0，最宽在 0.85 处、左右 ±0.19、前后 ±0.16，往上收窄；脸朝 +z）。
       // 铁盔是贴着头形的半球（底边在眼睛上面），前沿一道帽檐：方盒子扣在圆头上像顶着箱子（10-28 截图）
@@ -112,6 +112,8 @@ export class Enemies {
     /** boss 的冰甲：罩住上身的一层半透明冰（只有一个 boss，材质共用；透明度由试炼模式按剩多少甲调） */
     this.armorMat = new THREE.MeshStandardMaterial({ color: 0xcdeeff, roughness: 0.12, transparent: true, opacity: 0.55,
       emissive: 0x2f7fc0, emissiveIntensity: 0.5, depthWrite: false });
+    // 石甲巨像的石甲：胸前一整块石板、两肩各压一块大石头（棱角分明），石缝里透一点土黄的光
+    this.rockMat = new THREE.MeshStandardMaterial({ color: 0x5f5548, roughness: 0.95, flatShading: true, emissive: 0x3a2408, emissiveIntensity: 0.6 });
     this.barBg = new THREE.MeshBasicMaterial({ color: 0x1a1a1a, transparent: true, opacity: 0.6, depthTest: false });
     this._p = new THREE.Vector3(); this._d = new THREE.Vector3();
   }
@@ -124,12 +126,12 @@ export class Enemies {
     const spec = ENEMIES[type];
     const look = this.rig ? RIG_LOOK[/** @type {keyof typeof RIG_LOOK} */ (type)] : undefined;
     // 符箓傀儡紫、铁头傀儡浅钢灰：0x585d66 那版在紫色天光下和符箓傀儡一样黑（10-28 截图）
-    const tint = look?.tint ?? { shield: 0x6f6a62, boss: 0x7f93a8, archer: 0x7a5aa8, charger: 0x9097a3 }[type] ?? 0x8b7355;
+    const tint = look?.tint ?? { shield: 0x6f6a62, boss: 0x7f93a8, stone: 0x8a8378, archer: 0x7a5aa8, charger: 0x9097a3 }[type] ?? 0x8b7355;
     const mat = new THREE.MeshStandardMaterial({ color: tint, roughness: look ? 0.85 : 0.8, map: look ? this.rig?.tex : null });
     const base = mat.color.clone(), fromFog = pathIndex % this.paths.length === SPAWN_FOG.path;
     if (fromFog) { mat.transparent = true; mat.opacity = 0; mat.color.copy(EMERGE_DARK); }   // 眼睛是另一种材质，一开始就亮着
     const g = new THREE.Group();
-    const scale = { boss: BOSS.scale, colossus: 2.2, shield: 1.15, archer: 0.85, charger: 1.05 }[type] ?? 0.9;
+    const scale = { boss: BOSS.scale, stone: STONE.scale, colossus: 2.2, shield: 1.15, archer: 0.85, charger: 1.05 }[type] ?? 0.9;
     let armorMesh = null, rig = null;
     if (look && this.rig) {
       // 模型：骨骼动作代替一跳一跳；scale 仍按方块那套算（瞄准点、互相挤开的距离不变），画出来的大小按身高
@@ -153,6 +155,14 @@ export class Enemies {
       if (type === 'archer') part(this.geo.charm, 0, 1.38, 0.225, this.charmMat);   // 两眼之间垂下一道黄符
       if (type === 'charger') { part(this.geo.helmet, 0, 1.52, 0, this.ironMat); part(this.geo.ram, 0, 1.5, 0.28, this.ironMat); }
       if (type === 'boss') { armorMesh = part(this.geo.armor, 0, 1.0, 0, this.armorMat); armorMesh.castShadow = false; }
+      if (type === 'stone') {   // 石甲：胸前石板加两肩的大石头，一起显隐（armorMesh）
+        armorMesh = part(this.geo.armor, 0, 0.95, 0.02, this.rockMat);
+        for (const sx of [-1, 1]) {
+          const b = new THREE.Mesh(this.geo.boulder, this.rockMat);
+          b.position.set(sx * 0.5, 0.3, 0); b.rotation.set(0.4, sx * 0.7, 0.2); b.castShadow = true;
+          armorMesh.add(b);
+        }
+      }
       g.scale.setScalar(scale);
     }
     g.rotation.order = 'YXZ';   // 先转向、再前倾、再左右晃

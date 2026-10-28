@@ -142,6 +142,7 @@ const CSS = FONT_CSS + `
 .yc-boss .yc-label b { color: #9a2a1e; }
 .yc-bosshp > i { background: linear-gradient(90deg, #b3261e, #ff6b4a); }
 .yc-armor { height: 5px; } .yc-armor > i { background: linear-gradient(90deg, #7cc8ff, #e2f4ff); }
+.yc-armor.stone > i { background: linear-gradient(90deg, #8a6a44, #d8c3a0); }
 .yc-dash { width: 54px; height: 54px; border-radius: 50%; border: 2px solid #5d6b7a; background: rgba(255,255,255,0.9); color: #3b4856;
   font-family: ${BRUSH}; font-size: 26px; line-height: 1; padding: 0; cursor: pointer; touch-action: manipulation; position: relative; }
 .yc-dash.cd { opacity: 0.45; }
@@ -436,8 +437,8 @@ export class Hud {
   }
 
   /**
-   * boss 血条（null 收起）：名字、第几阶段、血、冰甲。
-   * @param {{ name: string, phase: string, hp: number, max: number, armor: number, armorMax: number } | null} b
+   * boss 血条（null 收起）：名字、第几阶段、血、甲（stone：石甲，甲条画成土色；不给就是冰甲的淡蓝）。
+   * @param {{ name: string, phase: string, hp: number, max: number, armor: number, armorMax: number, stone?: boolean } | null} b
    */
   setBoss(b) {
     this.boss.hidden = !b;
@@ -445,7 +446,9 @@ export class Hud {
     this.q('[data-bossname]').textContent = b.name;
     this.q('[data-bossphase]').textContent = b.phase;
     this.q('[data-bosshp]').style.width = `${Math.max(0, b.hp / b.max) * 100}%`;
-    this.q('[data-armor]').style.width = `${Math.max(0, b.armor / b.armorMax) * 100}%`;
+    const armor = this.q('[data-armor]');
+    armor.style.width = `${Math.max(0, b.armor / b.armorMax) * 100}%`;
+    armor.parentElement?.classList.toggle('stone', !!b.stone);
     this.placeBoss();
   }
   /** boss 血条居中靠上；和左上角的面板左右重叠（竖屏）就放到面板下面 */

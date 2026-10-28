@@ -115,6 +115,7 @@ export const ENEMIES = {
   shield:   { name: '盾傀儡', hp: 80,  speed: 1.2, coreDmg: 20, frontReduce: 0.8 },
   colossus: { name: '巨像',   hp: 300, speed: 0.6, coreDmg: 50, freezeMult: 0.5 },
   boss:     { name: '寒甲傀儡王', hp: 1500, speed: 1.3, coreDmg: 0, freezeMult: 0.5 },   // 试炼模式的 boss，招式与冰甲见下面 BOSS
+  stone:    { name: '石甲巨像', hp: 1800, speed: 1.0, coreDmg: 0, freezeMult: 0.5 },     // 试炼的第二个 boss（10-28 加），招式与石甲见下面 STONE
   // 只在试炼的小怪潮里出现（10-28 加），怎么打人见下面 MINION
   archer:   { name: '符箓傀儡', hp: 30,  speed: 1.6, coreDmg: 10 },
   charger:  { name: '铁头傀儡', hp: 70,  speed: 1.7, coreDmg: 20 },
@@ -141,6 +142,7 @@ export const MINION = {
  * pace：每个阶段预警、喘息、召唤冷却的倍数（越小越快）。冻住过一次，化开后 freezeGrace 秒内冻不住（免得被冰弹冻到死）。
  */
 export const BOSS = {
+  type: 'boss', el: 'ice', weak: 'fire', armorName: '冰甲', weakText: '融甲',   // 只怕 weak 这一种元素；挨那一下飘 weakText，别的元素飘 armorName
   armor: 120, armoredMult: 0.2, scale: 2.6, freezeGrace: 3, stunMax: 0.2,
   phases: [0.7, 0.3], pace: [1, 0.8, 0.62], recover: [1.3, 2.0], roarSec: 1.6, keepDist: 3.4, enrageSpeed: 1.3,
   moves: [['slam', 'sweep', 'summon'], ['slam', 'sweep', 'summon', 'homing'], ['slam', 'sweep', 'summon', 'homing', 'spiral']],
@@ -151,6 +153,28 @@ export const BOSS = {
   homing: { tele: 0.8, n: [3, 3, 5], speed: 6, turn: 1.8, life: 3.6, dmg: 12, r: 0.3, weight: 2 },
   // 旋转弹幕：原地转着往外喷冰锥，arms 条臂、每条每 every 秒一颗，持续 sec 秒；臂与臂之间的空当钻得过去
   spiral: { tele: 0.7, arms: [3, 3, 4], spin: 1.5, every: 0.14, sec: 2.4, speed: 5, dmg: 10, r: 0.3, weight: 2 },
+};
+/**
+ * 第二个 boss 石甲巨像（土；设计文档第 4 节"第二个 boss"，10-28 我定的初值，等本人试玩）。换阶段、预警快慢（pace）、喘息、冻住后的保护照 BOSS。
+ * 石甲只怕雷：雷照常伤害并削甲，别的元素只剩 armoredMult；削穿就碎，第 2 阶段重凝。
+ * 招随阶段变多（moves）：第 1 阶段重踏（红圈，同寒甲傀儡王的砸地）、落石雨、蓄力冲撞、召小傀儡；第 2 阶段加一线地刺；第 3 阶段狂暴（落石更多、地刺三道、冲撞连冲两次）。
+ * 落石雨（rocks）：在玩家四周落 n 块（第一块对准玩家此刻站的地方，其余落在玩家 spread 米内随机，块与块至少隔 apart 米），
+ *   每块一个半径 r 的红圈，一块接一块落（间隔 gap 秒），每块预警 tele 秒。
+ * 蓄力冲撞（charge）：蹲下蓄力，地上从脚下朝玩家亮一条宽 w 的红条（最长 len，撞到障碍、广场边就短），蓄力 tele 秒（按阶段，不跟 pace 走：
+ *   要留得出打断的时间）；蓄力时挨够 breakDmg 伤害（石甲在时只有雷打得动）就被打断，硬直 stagger 秒、这时挨打 × staggerMult；
+ *   没被打断就沿红条冲过去（每秒 speed 米），撞到人打 dmg；狂暴时冲完再蓄一次（times），第二次蓄力 × again。
+ * 一线地刺（spikes）：从脚下朝玩家亮一条宽 w 的红条，tele 秒后地刺从近往远一路冒出来（每秒 speed 米，冒到广场边为止），刺到人打 dmg；
+ *   狂暴时三道（lines），左右两道各偏 fanDeg 度。
+ */
+export const STONE = {
+  type: 'stone', el: 'earth', weak: 'thunder', armorName: '石甲', weakText: '裂甲',
+  armor: 150, armoredMult: 0.2, scale: 3.0,
+  moves: [['slam', 'rocks', 'charge', 'summon'], ['slam', 'rocks', 'charge', 'spikes', 'summon'], ['slam', 'rocks', 'charge', 'spikes', 'summon']],
+  slam:   { r: 3.0, tele: 1.3, dmg: 24, weight: 2 },
+  rocks:  { tele: 1.1, n: [5, 6, 9], spread: 4.5, apart: 1.6, r: 1.3, gap: 0.22, dmg: 14, weight: 3 },
+  charge: { tele: [2.2, 2.0, 1.8], again: 0.6, w: 2.4, len: 14, speed: 13, dmg: 26, breakDmg: 70, stagger: 2.6, staggerMult: 1.3, times: [1, 1, 2], weight: 3 },
+  spikes: { tele: 0.9, w: 1.3, len: 16, speed: 11, dmg: 18, lines: [1, 1, 3], fanDeg: 28, weight: 3 },
+  summon: { tele: 0.9, n: [2, 3, 3], cd: 16, keep: 1 },
 };
 /**
  * 试炼模式的玩家：气血、走速（米/秒）、闪避（冲多远、多少秒冲完；冲刺中不受伤）、挨打后多少秒不再受伤；小傀儡贴身自爆的伤害。

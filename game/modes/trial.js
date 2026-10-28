@@ -4,15 +4,16 @@
  * 战中不打字：WASD / 方向键走位、空格闪避、1～3 放天赋、4 召唤（手机横过来玩：左手摇杆走位，右手点"闪"和天赋）；战前可以给按钮写咒。
  * 规则（冰甲、换阶段、挑招、判定、走位边界）在 rules/trial.js；这里管玩家走位与受伤、boss 的动作、地上的预警。
  * 一局（rules/run.js RUN_STAGES）：小怪潮 → 三选一 → boss → 三选一 → …… → 第三个 boss；这里按顺序推进，选卡交给 main.js（d.pick）。
- * 第二、三个 boss（石甲巨像、火灵）还没做，先用寒甲傀儡王顶上。
+ * 第一个 boss 寒甲傀儡王（冰甲只怕火）；第二个石甲巨像（石甲只怕雷：重踏、落石雨、蓄力冲撞——蓄力时打够伤害就打断、硬直，一线地刺）；
+ * 第三个火灵还没做，先用寒甲傀儡王顶上。招式表在 numbers.js 的 BOSS、STONE（this.cfg 指向当前这个 boss 的）。
  * 施法者的位置就是 CASTER_POS：玩家走到哪，法术就从哪放出（同步脚下法阵和特效起点）；回到守关时放回原处。
  */
 import * as THREE from 'three';
-import { BOSS, ENEMIES, MINION, RUN, TRIAL } from '../rules/numbers.js';
+import { BOSS, ENEMIES, MINION, RUN, STONE, TRIAL } from '../rules/numbers.js';
 import { BOSS_COUNT, RUN_STAGES, newRun, runMods } from '../rules/run.js';
 import {
   bossHit, bossPhase, canDash, chargeLen, homingTurn, inCircle, inSector, inStrip, isPerfect, keepInArena, nextBatch, pickMinion, pickMove,
-  recoverSec, regenStamina, slamCount, spawnSpot, spiralAngles, teleSec,
+  recoverSec, regenStamina, rockSpots, slamCount, spawnSpot, spikeDirs, spikeReach, spiralAngles, teleSec,
 } from '../rules/trial.js';
 import { CASTER_POS, CORE_POS, OBSTACLES, PLAZA_R } from '../world/layout.js';
 import { rand } from '../fx/common.js';
@@ -31,7 +32,22 @@ const PHASE_NAME = ['', '第一阶段', '第二阶段', '第三阶段 · 狂暴'
 const SWEEP_HALF = (BOSS.sweep.halfDeg * Math.PI) / 180;
 /** 同时在飞的冰锥最多这么多（旋转弹幕狂暴时一轮约 70 颗） */
 const MAX_BULLETS = 200;
+/** 第几个 boss 用哪张招式表（第三个火灵还没做，先用寒甲傀儡王顶上） */
+const BOSS_CFG = [BOSS, STONE, BOSS];
+/** 每个 boss 现身时的提示：手机版、电脑版 @type {Record<string, [string, string]>} */
+const BOSS_HINT = {
+  boss: ['躲开地上的红圈和红扇；冰甲只怕火，先用火打碎它', '躲开地上的红圈和红扇；冰甲只怕火，先用火打碎它。1、2、3 放天赋，4 召唤，空格闪避'],
+  stone: ['石甲只怕雷；它蹲下蓄力时猛打能打断冲撞，打断了趁它硬直多打几下；落石看红圈，地刺横着躲',
+    '石甲只怕雷；它蹲下蓄力时猛打能打断冲撞，打断了趁它硬直多打几下；落石看红圈，地刺横着躲。1、2、3 放天赋，4 召唤，空格闪避'],
+};
+/** 每个 boss 的大字颜色：现身时的名字、甲碎了与重凝 @type {Record<string, [string, string]>} */
+const BOSS_INK = { boss: ['#1f4f7a', '#2f6fae'], stone: ['#4a3a28', '#6b5236'] };
+/** 落石最后这几秒从天上砸下来（之前只有地上的红圈）；从多高落 */
+const ROCK_FALL = 0.45, ROCK_FROM = 10;
+/** 地刺：每隔多远冒一根；一根冒出来、停住、缩回去各要几秒（之后消失）；同时最多多少根 */
+const SPIKE_GAP = 0.55, SPIKE_UP = 0.08, SPIKE_HOLD = 0.5, SPIKE_DOWN = 0.35, MAX_SPIKES = 160;
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
+const ROCK_AXIS = new THREE.Vector3(0.4, 1, 0.3).normalize();
 const NO_SIZE = new THREE.Vector3(0, 0, 0);
 /** 小怪追人时被拦在这个半径里（enemies.js chaseStep）；铁头傀儡冲锋也冲不出去 */
 const CHASE_R = PLAZA_R - 0.6;
@@ -86,6 +102,8 @@ export class Trial {
     this.strips = new Set();
     /** @type {any} */
     this.boss = null;
+    /** 当前这个 boss 的招式表（BOSS 寒甲傀儡王、STONE 石甲巨像） @type {typeof BOSS | typeof STONE} */
+    this.cfg = BOSS;
     this.armor = 0; this.phase = 1; this.freezeCd = 0;
     this.state = 'idle'; this.t = 0; this.teleLen = 1; this.move = /** @type {import('../rules/trial.js').Move} */ ('slam');
     this.left = 0; this.sinceSummon = 0; this.spinFrom = 0;
@@ -130,6 +148,22 @@ export class Trial {
     // 地上的预警：底（淡）、由内向外长满的填充、外边一圈
     this.circle = this.decal(new THREE.CircleGeometry(1, 48), new THREE.RingGeometry(0.95, 1, 48));
     this.sector = this.decal(new THREE.CircleGeometry(1, 32, -SWEEP_HALF, SWEEP_HALF * 2), new THREE.RingGeometry(0.97, 1, 32, 1, -SWEEP_HALF, SWEEP_HALF * 2));
+    // 石甲巨像：落石的红圈（一块一个）、最后一下从天上砸下来的石头、地刺；冲撞和地刺地上的红条在 lanes
+    this.rockMarks = Array.from({ length: Math.max(...STONE.rocks.n) }, () => this.decal(new THREE.CircleGeometry(1, 40), new THREE.RingGeometry(0.94, 1, 40)));
+    /** 这一轮落石：落点、还有几秒落地、预警一共几秒、落了没有、石头多大、转角 @type {{ x: number, z: number, t: number, len: number, landed: boolean, s: number, a: number }[]} */
+    this.rocks = [];
+    this.rockFx = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.62, 0),
+      new THREE.MeshStandardMaterial({ color: 0x6a6052, roughness: 0.95, flatShading: true }), this.rockMarks.length);
+    this.spikeFx = new THREE.InstancedMesh(new THREE.ConeGeometry(0.26, 1.4, 5).translate(0, 0.7, 0),
+      new THREE.MeshStandardMaterial({ color: 0x7a6e5e, roughness: 0.9, flatShading: true }), MAX_SPIKES);
+    for (const m of [this.rockFx, this.spikeFx]) { m.count = 0; m.frustumCulled = false; m.castShadow = true; scene.add(m); }
+    /** 冒出来的地刺：位置、冒了几秒、粗细、朝哪歪 @type {{ x: number, z: number, t: number, s: number, a: number, tx: number, tz: number }[]} */
+    this.spikes = [];
+    /** 冲撞、地刺在地上的红条，各自的起点、方向、长；next：地刺下一根冒在多远 @type {{ s: { g: THREE.Group, fill: THREE.Mesh }, from: { x: number, z: number }, dir: { x: number, z: number }, len: number, next: number }[]} */
+    this.lanes = [];
+    this._rq = new THREE.Quaternion(); this._rs = new THREE.Vector3(); this._re = new THREE.Euler();
+    // 地刺冒到多远了；蓄力冲撞时挨了多少伤害（够了就打断）、冲出去多远、撞到人没有（一次只撞一下）
+    this.front = 0; this.chargeDmg = 0; this.ran = 0; this.struck = false;
     this.unbind = this.attach(d.canvas);
   }
 
@@ -424,11 +458,11 @@ export class Trial {
   }
 
   /**
-   * 铁头傀儡冲锋前地上的红条：从 at 朝 dir 长 len、宽 MINION.charger.w；填充由近往远长满（fill.scale.x 从 0 到 1）
-   * @param {{ x: number, z: number }} at @param {{ x: number, z: number }} dir @param {number} len
+   * 冲锋前地上的红条：从 at 朝 dir 长 len、宽 w（默认铁头傀儡的）；填充由近往远长满（fill.scale.x 从 0 到 1）
+   * @param {{ x: number, z: number }} at @param {{ x: number, z: number }} dir @param {number} len @param {number} [w]
    */
-  strip(at, dir, len) {
-    const h = MINION.charger.w / 2, t = 0.06;
+  strip(at, dir, len, w = MINION.charger.w) {
+    const h = w / 2, t = 0.06;
     const area = new THREE.PlaneGeometry(len, h * 2).translate(len / 2, 0, 0);
     const edge = new THREE.Shape([new THREE.Vector2(0, -h), new THREE.Vector2(len, -h), new THREE.Vector2(len, h), new THREE.Vector2(0, h)]);
     edge.holes.push(new THREE.Path([new THREE.Vector2(t, -h + t), new THREE.Vector2(t, h - t), new THREE.Vector2(len - t, h - t), new THREE.Vector2(len - t, -h + t)]));
@@ -451,37 +485,57 @@ export class Trial {
     s.g.traverse((o) => { if (o instanceof THREE.Mesh) { o.geometry.dispose(); /** @type {THREE.Material} */ (o.material).dispose(); } });
   }
 
-  /** 第 n 个 boss 从广场那头现身，吼一声再出招（石甲巨像、火灵还没做，先用寒甲傀儡王顶上） @param {number} n */
+  /** 第 n 个 boss 从广场那头现身，吼一声再出招（第三个火灵还没做，先用寒甲傀儡王顶上） @param {number} n */
   spawnBoss(n) {
-    const b = this.d.enemies.spawnAt('boss', BOSS_AT.x, BOSS_AT.z, 'boss');
+    const cfg = this.cfg = BOSS_CFG[Math.min(n, BOSS_CFG.length) - 1];
+    const b = this.d.enemies.spawnAt(/** @type {'boss' | 'stone'} */ (cfg.type), BOSS_AT.x, BOSS_AT.z, 'boss');
     this.boss = b;
-    this.armor = BOSS.armor; this.phase = 1; this.freezeCd = 0; this.sinceSummon = 0; this.lastMove = '';
+    this.armor = cfg.armor; this.phase = 1; this.freezeCd = 0; this.sinceSummon = 0; this.lastMove = '';
     this.state = 'roar'; this.t = BOSS.roarSec;
     const { hud, fx } = this.d;
-    fx.burst(new THREE.Vector3(b.pos.x, 0.4, b.pos.z), 'ice', 3, 0.8);
-    hud.bigText(ENEMIES.boss.name, '#1f4f7a', 1600);
+    fx.burst(new THREE.Vector3(b.pos.x, 0.4, b.pos.z), cfg.el, 3, 0.8);
+    if (cfg === STONE) { fx.crack(new THREE.Vector3(b.pos.x, 0, b.pos.z), 3.2); fx.shake = Math.max(fx.shake, 0.5); }   // 巨像落地，地面裂开
+    hud.bigText(this.bossName(), BOSS_INK[cfg.type][0], 1600);
     hud.setWave(`试炼 ${n}/${BOSS_COUNT}`, PHASE_NAME[1]);
-    hud.setHint(this.d.mobile ? '躲开地上的红圈和红扇；冰甲只怕火，先用火打碎它' : '躲开地上的红圈和红扇；冰甲只怕火，先用火打碎它。1、2、3 放天赋，4 召唤，空格闪避');
+    hud.setHint(BOSS_HINT[cfg.type][this.d.mobile ? 0 : 1]);
     this.shown = '';
     this.showBoss();
   }
 
+  /** 当前这个 boss 叫什么 */
+  bossName() { return ENEMIES[/** @type {'boss' | 'stone'} */ (this.cfg.type)].name; }
+
   /** 这个 boss 碎了：场上的小傀儡一起碎掉、冰锥收起，喘口气进下一段（最后一个 boss 就是打通了） @param {any} e */
   bossDown(e) {
-    this.circle.g.visible = this.sector.g.visible = false;
+    this.hideTele();
     this.clearBullets();
     for (const o of [...this.d.enemies.list]) if (o.chase) this.d.enemies.kill(o, o.pos);
     this.d.hud.setBoss(null);
-    this.d.fx.burst(new THREE.Vector3(e.pos.x, 1.2, e.pos.z), 'ice', 3.2, 0.9);
+    this.d.fx.burst(new THREE.Vector3(e.pos.x, 1.2, e.pos.z), this.cfg.el, 3.2, 0.9);
     if (this.stage + 1 >= RUN_STAGES.length) { this.end(true); return; }
-    this.d.hud.bigText(`${ENEMIES.boss.name}碎了`, '#16202b', 1400);
+    this.d.hud.bigText(`${this.bossName()}碎了`, '#16202b', 1400);
     this.state = 'rest'; this.t = RUN.rest;
+  }
+
+  /** 收起地上所有预警：红圈、红扇、落石的红圈、冲撞与地刺的红条（还没落的石头也不落了；已经冒出来的地刺自己缩回去） */
+  hideTele() {
+    this.circle.g.visible = this.sector.g.visible = false;
+    for (const m of this.rockMarks) m.g.visible = false;
+    this.rocks.length = 0; this.rockFx.count = 0;
+    this.dropLanes();
+  }
+
+  /** 收起冲撞、地刺的红条 */
+  dropLanes() {
+    for (const l of this.lanes) this.dropStrip({ strip: l.s });
+    this.lanes.length = 0;
   }
 
   /** 收场（回守关、重开）：玩家放回原处，预警收起 */
   stop() {
     this.on = false; this.fighting = false; this.boss = null;
-    this.circle.g.visible = this.sector.g.visible = false;
+    this.hideTele();
+    this.spikes.length = 0; this.spikeFx.count = 0;
     this.clearBullets();
     this.dashAt = -Infinity; this.perfectUsed = true; this.glow = 0; this.lastMove = '';
     this.keys.clear(); this.ptr = null; this.stick.x = this.stick.y = 0;
@@ -504,9 +558,9 @@ export class Trial {
 
   dispose() {
     this.stop(); this.unbind();
-    for (const x of [this.circle, this.sector]) this.scene.remove(x.g);
+    for (const x of [this.circle, this.sector, ...this.rockMarks]) this.scene.remove(x.g);
     this.scene.remove(this.ghost); this.ghostMat.dispose();
-    for (const m of [this.shards, this.orbs, this.dots]) { this.scene.remove(m); m.geometry.dispose(); /** @type {THREE.Material} */ (m.material).dispose(); m.dispose(); }
+    for (const m of [this.shards, this.orbs, this.dots, this.rockFx, this.spikeFx]) { this.scene.remove(m); m.geometry.dispose(); /** @type {THREE.Material} */ (m.material).dispose(); m.dispose(); }
   }
 
   // ---------------------------------------------------------------- 玩家
@@ -655,18 +709,31 @@ export class Trial {
 
   // ---------------------------------------------------------------- boss
   /**
-   * boss 挨一下（main.js hitEnemy 在结算前调）：按冰甲改这一下，削穿了演一下碎甲。po：这一下带着字诀「破」
+   * boss 挨一下（main.js hitEnemy 在结算前调）：按甲（冰甲、石甲）改这一下，削穿了演一下碎甲。po：这一下带着字诀「破」。
+   * 石甲巨像：蓄力冲撞时挨的伤害攒起来，够了就打断；打断后的硬直里挨打更疼
    * @template {{ dmg: number, reaction: string, freezeSec: number, push: number, stunSec: number }} R
    * @param {any} e @param {string} el @param {R} r @param {boolean} [po] @returns {R}
    */
   hitBoss(e, el, r, po = false) {
-    const h = bossHit({ armor: this.armor, freezeCd: this.freezeCd }, el, r, po);
+    const cfg = this.cfg, h = bossHit({ armor: this.armor, freezeCd: this.freezeCd }, el, r, po, cfg);
     this.armor = h.armor;
     if (h.broke) {
-      this.d.hud.bigText('冰甲碎了', '#2f6fae', 1100);
-      this.d.fx.burst(new THREE.Vector3(e.pos.x, 2, e.pos.z), 'ice', 2.6, 0.9);
+      this.d.hud.bigText(`${cfg.armorName}碎了`, BOSS_INK[cfg.type][1], 1100);
+      this.d.fx.burst(new THREE.Vector3(e.pos.x, 2, e.pos.z), cfg.el, 2.6, 0.9);
     }
+    if (this.state === 'stagger') h.r.dmg *= STONE.charge.staggerMult;
+    else if (this.state === 'tele' && this.move === 'charge' && (this.chargeDmg += h.r.dmg) >= STONE.charge.breakDmg) this.interrupt();
     return h.r;
+  }
+
+  /** 蓄力冲撞被打断：红条收起，boss 往前一栽、硬直几秒（这时挨打更疼），不再连冲 */
+  interrupt() {
+    const b = this.boss, { hud, fx } = this.d;
+    this.dropLanes();
+    this.state = 'stagger'; this.t = STONE.charge.stagger; this.left = 0; this.kick = 0.3;
+    hud.bigText('打断', '#16202b', 1100);
+    fx.burst(new THREE.Vector3(b.pos.x, 1.2, b.pos.z), 'earth', 2.4, 0.6);
+    this.shown = '';
   }
 
   /** 有敌人没了（enemies 的 onGone）：是 boss 就过了这一段 @param {any} e @param {string} how */
@@ -680,30 +747,35 @@ export class Trial {
   /** @param {boolean} won */
   end(won) {
     this.fighting = false;
-    this.circle.g.visible = this.sector.g.visible = false;
+    this.hideTele();
     this.clearBullets();
     if (won) for (const o of [...this.d.enemies.list]) if (o.chase) this.d.enemies.kill(o, o.pos);
     this.d.hud.setBoss(null);
     (won ? this.d.win : this.d.lose)();
   }
 
-  /** 换阶段：手上的招作废，吼一声；第 2 阶段冰甲重凝，第 3 阶段狂暴 @param {number} ph */
+  /** 换阶段：手上的招作废，吼一声；第 2 阶段甲重凝，第 3 阶段狂暴 @param {number} ph */
   enterPhase(ph) {
-    const b = this.boss;
+    const b = this.boss, cfg = this.cfg;
     this.phase = ph;
-    this.circle.g.visible = this.sector.g.visible = false;
+    this.hideTele();
     this.state = 'roar'; this.t = BOSS.roarSec * 0.8; this.leanTo = -0.25;
-    if (ph === 2) this.armor = BOSS.armor;
-    if (ph === 2) this.d.hud.bigText('冰甲重凝', '#2f6fae', 1300);
+    if (ph === 2) this.armor = cfg.armor;
+    if (ph === 2) this.d.hud.bigText(`${cfg.armorName}重凝`, BOSS_INK[cfg.type][1], 1300);
     else this.d.hud.bigText('狂暴', '#b3261e', 1300);
     this.d.hud.setWave(`试炼 ${this.round}/${BOSS_COUNT}`, PHASE_NAME[ph]);
-    this.d.fx.burst(new THREE.Vector3(b.pos.x, 1.2, b.pos.z), 'ice', 3.2, 0.9);
+    this.d.fx.burst(new THREE.Vector3(b.pos.x, 1.2, b.pos.z), cfg.el, 3.2, 0.9);
   }
 
-  /** 调试：马上出这一招 @param {import('../rules/trial.js').Move} m */
+  /** 这一招连出几下：砸地狂暴时连砸两下，石甲巨像的冲撞狂暴时连冲两次 @param {import('../rules/trial.js').Move} m */
+  moveCount(m) {
+    return m === 'slam' ? slamCount(this.phase) : m === 'charge' ? STONE.charge.times[this.phase - 1] : 1;
+  }
+
+  /** 调试：马上出这一招（当前这个 boss 没有这招就不出） @param {import('../rules/trial.js').Move} m */
   force(m) {
-    if (!this.fighting || !this.boss) return;
-    this.move = m; this.lastMove = m; this.left = m === 'slam' ? slamCount(this.phase) : 1;
+    if (!this.fighting || !this.boss || !(m in this.cfg)) return;
+    this.move = m; this.lastMove = m; this.left = this.moveCount(m);
     this.startTele();
   }
 
@@ -711,19 +783,55 @@ export class Trial {
     this.state = 'recover'; this.t = recoverSec(this.phase, Math.random()); this.leanTo = 0;
   }
 
-  /** 预警开始：红圈落在玩家此刻站的地方；扇形朝玩家；召唤先在落点冒紫烟 */
+  /**
+   * 预警开始：红圈落在玩家此刻站的地方；扇形朝玩家；召唤先在落点冒紫烟。
+   * 石甲巨像：落石在玩家四周一块一个红圈；冲撞从脚下朝玩家亮一条红条（冲不出去就改成重踏）；地刺朝玩家亮一到三条红条
+   */
   startTele() {
-    const b = this.boss, second = this.move === 'slam' && this.left < slamCount(this.phase);
+    const b = this.boss, cfg = this.cfg, again = this.left < this.moveCount(this.move);
     this.state = 'tele';
-    // 连砸的第二下快一点；字诀「凝」冻住过它，这一招慢一些
-    this.t = this.teleLen = teleSec(this.move, this.phase) * (second ? 0.7 : 1) * (this.slowTele ? RUN.runes.ning.tele : 1);
+    // 连砸的第二下快一点、连冲的第二次蓄力短一些；字诀「凝」冻住过它，这一招慢一些
+    const quick = !again ? 1 : this.move === 'slam' ? 0.7 : this.move === 'charge' ? STONE.charge.again : 1;
+    this.t = this.teleLen = teleSec(this.move, this.phase, cfg) * quick * (this.slowTele ? RUN.runes.ning.tele : 1);
     this.slowTele = false;
+    const dx = this.p.x - b.pos.x, dz = this.p.z - b.pos.z, d = Math.hypot(dx, dz);
+    const aim = d > 1e-3 ? { x: dx / d, z: dz / d } : { x: b.dir.x, z: b.dir.z };
     if (this.move === 'slam') {
       this.target.set(this.p.x, 0, this.p.z);
       this.circle.g.position.set(this.target.x, 0.03, this.target.z);
-      this.circle.g.scale.set(BOSS.slam.r, 1, BOSS.slam.r);
+      this.circle.g.scale.set(cfg.slam.r, 1, cfg.slam.r);
       this.circle.g.visible = true;
       this.leanTo = -0.22;
+    } else if (this.move === 'rocks') {
+      const R = STONE.rocks, tele = this.t, spots = rockSpots(this.p, R.n[this.phase - 1], Math.random, BLOCK, ARENA_R - 0.3);
+      this.rocks = spots.map((s, i) => ({ x: s.x, z: s.z, t: tele + i * R.gap, len: tele + i * R.gap, landed: false, s: rand(0.9, 1.25), a: rand(0, 6.3) }));
+      spots.forEach((s, i) => {
+        const m = this.rockMarks[i];
+        m.g.position.set(s.x, 0.03, s.z); m.g.scale.set(R.r, 1, R.r); m.fill.scale.set(0.001, 0.001, 1); m.g.visible = true;
+      });
+      this.t = this.teleLen = tele + (spots.length - 1) * R.gap;
+      this.leanTo = -0.3;   // 仰头举手，把石头召下来
+    } else if (this.move === 'charge') {
+      const C = STONE.charge, len = chargeLen(b.pos, aim, [...BLOCK, ...this.d.blockers()], ARENA_R - 0.3, C.len, BOSS_BODY);
+      if (len < 2) {   // 贴着障碍冲不出去：头一次改成重踏，连冲的第二次就不冲了
+        if (again) this.recover(); else { this.move = 'slam'; this.left = this.moveCount('slam'); this.startTele(); }
+        return;
+      }
+      this.sweepDir.set(aim.x, 0, aim.z);
+      // 红条画到冲到头时身体的前沿
+      this.lanes.push({ s: this.strip(b.pos, aim, len + BOSS_BODY, C.w), from: { x: b.pos.x, z: b.pos.z }, dir: aim, len, next: 0 });
+      this.chargeDmg = 0;
+      this.leanTo = -0.35;   // 蹲下蓄力
+      this.shown = '';
+    } else if (this.move === 'spikes') {
+      const S = STONE.spikes;
+      this.sweepDir.set(aim.x, 0, aim.z);
+      for (const dir of spikeDirs(aim, S.lines[this.phase - 1])) {
+        const from = { x: b.pos.x + dir.x * BOSS_BODY, z: b.pos.z + dir.z * BOSS_BODY };
+        const len = chargeLen(from, dir, [], PLAZA_R - 0.3, S.len, 0);
+        if (len > 0.5) this.lanes.push({ s: this.strip(from, dir, len, S.w), from, dir, len, next: 0.3 });
+      }
+      this.leanTo = -0.25;
     } else if (this.move === 'sweep') {
       this.sweepDir.set(this.p.x - b.pos.x, 0, this.p.z - b.pos.z);
       if (this.sweepDir.lengthSq() < 1e-4) this.sweepDir.copy(b.dir);
@@ -734,7 +842,7 @@ export class Trial {
       this.sector.g.visible = true;
       this.leanTo = -0.12;
     } else if (this.move === 'summon') {
-      const n = BOSS.summon.n[this.phase - 1], a0 = Math.atan2(this.p.z - b.pos.z, this.p.x - b.pos.x);
+      const n = cfg.summon.n[this.phase - 1], a0 = Math.atan2(aim.z, aim.x);
       this.spots = Array.from({ length: n }, (_, i) => keepInArena(
         { x: b.pos.x + Math.cos(a0 + (i - (n - 1) / 2) * 0.8) * 2.4, z: b.pos.z + Math.sin(a0 + (i - (n - 1) / 2) * 0.8) * 2.4 }, BLOCK, ARENA_R, 0.3));
       this.leanTo = -0.32;
@@ -753,6 +861,126 @@ export class Trial {
   }
 
   clearBullets() { this.bullets.length = 0; this.shards.count = this.orbs.count = this.dots.count = 0; }
+
+  /**
+   * 落石：红圈由内向外长满，最后 ROCK_FALL 秒石头从天上砸下来（越落越快）；落地时人在红圈里就挨一下。
+   * boss 冻住了也照落（石头已经召到天上了）。
+   * @param {number} dt
+   */
+  updateRocks(dt) {
+    if (!this.rocks.length) return;
+    const R = STONE.rocks;
+    let n = 0, live = 0;
+    for (let i = 0; i < this.rocks.length; i++) {
+      const r = this.rocks[i], m = this.rockMarks[i];
+      if (r.landed) continue;
+      r.t -= dt;
+      if (r.t <= 0) {
+        r.landed = true; m.g.visible = false;
+        this.d.fx.burst(new THREE.Vector3(r.x, 0.3, r.z), 'earth', R.r, 0.45);
+        if (inCircle(this.p, r, R.r, BODY)) { this.hurt(R.dmg); if (!this.fighting) return; }
+        else this.checkPerfect((q) => inCircle(q, r, R.r, BODY));
+        continue;
+      }
+      live++;
+      const k = Math.max(0.001, 1 - r.t / r.len);
+      m.fill.scale.set(k, k, 1);
+      if (r.t < ROCK_FALL) {
+        const s = 1 - r.t / ROCK_FALL;
+        this._rq.setFromAxisAngle(ROCK_AXIS, r.a + s * 2.5);
+        this.rockFx.setMatrixAt(n++, this._m4.compose(this._bp.set(r.x, 0.4 + ROCK_FROM * (1 - s * s), r.z), this._rq, this._rs.setScalar(r.s)));
+      }
+    }
+    this.rockFx.count = n; this.rockFx.instanceMatrix.needsUpdate = true;
+    if (!live) this.rocks.length = 0;
+  }
+
+  /** 冒一根地刺（满了就不冒；冒在障碍里的不画） @param {number} x @param {number} z */
+  spike(x, z) {
+    if (this.spikes.length >= MAX_SPIKES || BLOCK.some((o) => (x - o.x) ** 2 + (z - o.z) ** 2 < o.r * o.r)) return;
+    this.spikes.push({ x, z, t: 0, s: rand(0.75, 1.25), a: rand(0, 6.3), tx: rand(-0.22, 0.22), tz: rand(-0.22, 0.22) });
+  }
+
+  /** 地刺：一下冒出来、停一会儿、缩回地里（boss 碎了、冻住了也照样缩回去） @param {number} dt */
+  updateSpikes(dt) {
+    if (!this.spikes.length && !this.spikeFx.count) return;
+    let n = 0;
+    for (let i = this.spikes.length - 1; i >= 0; i--) {
+      const s = this.spikes[i];
+      s.t += dt;
+      const h = s.t < SPIKE_UP ? s.t / SPIKE_UP : s.t < SPIKE_UP + SPIKE_HOLD ? 1 : 1 - (s.t - SPIKE_UP - SPIKE_HOLD) / SPIKE_DOWN;
+      if (h <= 0) { this.spikes.splice(i, 1); continue; }
+      this._rq.setFromEuler(this._re.set(s.tx, s.a, s.tz));
+      this.spikeFx.setMatrixAt(n++, this._m4.compose(this._bp.set(s.x, -0.05, s.z), this._rq, this._rs.set(s.s, s.s * h, s.s)));
+    }
+    this.spikeFx.count = n; this.spikeFx.instanceMatrix.needsUpdate = true;
+  }
+
+  /**
+   * 地刺这一帧从近往远冒一段：每隔 SPIKE_GAP 冒一对（左右错开）；冒到人就打一下（一招只打一下），
+   * 没冒到、闪避按得够晚、按的时候站在这一段上：完美闪避。全冒到头了就收招。
+   * @param {number} dt
+   */
+  spikeStep(dt) {
+    const S = STONE.spikes, f0 = this.front, f1 = (this.front += S.speed * dt), { particles } = this.d;
+    let more = false;
+    for (const l of this.lanes) {
+      if (f0 >= l.len) continue;
+      more = true;
+      const end = Math.min(f1, l.len), sx = -l.dir.z, sz = l.dir.x;
+      for (; l.next < end; l.next += SPIKE_GAP) {
+        for (const side of [-1, 1]) {
+          const off = side * S.w * 0.22 + rand(-0.12, 0.12), along = l.next + rand(-0.1, 0.1);
+          this.spike(l.from.x + l.dir.x * along + sx * off, l.from.z + l.dir.z * along + sz * off);
+        }
+      }
+      const fx = l.from.x + l.dir.x * end, fz = l.from.z + l.dir.z * end;
+      for (let i = 0; i < 2; i++) {   // 冒刺的地方翻起一股土
+        particles.emit(fx + rand(-0.4, 0.4), 0.1, fz + rand(-0.4, 0.4), l.dir.x * rand(1, 3), rand(1, 2.5), l.dir.z * rand(1, 3),
+          rand(0.3, 0.55), rand(0.1, 0.18), [0.85, 0.72, 0.55], [0.55, 0.45, 0.33], { alpha: 0.4, drag: 2.5 });
+      }
+      if (this.struck) continue;
+      if (spikeReach(this.p, l.from, l.dir, f0, end, S.w, BODY)) {
+        this.struck = true;
+        this.hurt(S.dmg);
+        if (!this.fighting) return;
+      } else this.checkPerfect((q) => spikeReach(q, l.from, l.dir, f0, end, S.w, BODY));
+    }
+    if (!more) { this.dropLanes(); this.recover(); }
+  }
+
+  /**
+   * 冲撞冲一帧：沿红条每秒冲 speed 米，身体前沿扫过人就撞一下（一次只撞一下）；撞上新立起的土墙就停。
+   * 冲到头：狂暴时再蓄一次，不然喘口气。
+   * @param {number} dt
+   */
+  rushStep(dt) {
+    const C = STONE.charge, b = this.boss, l = this.lanes[0], { fx, particles } = this.d;
+    const f0 = this.ran === 0 ? -BOSS_BODY : this.ran + BOSS_BODY;
+    const step = Math.min(C.speed * dt, l.len - this.ran);
+    b.pos.x += l.dir.x * step; b.pos.z += l.dir.z * step; this.ran += step;
+    b.dir.set(l.dir.x, 0, l.dir.z); b.moving = true; this.leanTo = 0.35;
+    if (this.d.blockers().some((o) => (b.pos.x - o.x) ** 2 + (b.pos.z - o.z) ** 2 < (o.r + BOSS_BODY) ** 2)) this.ran = l.len;
+    const f1 = this.ran + BOSS_BODY;
+    if (!this.struck) {
+      if (spikeReach(this.p, l.from, l.dir, f0, f1, C.w, BODY)) {
+        this.struck = true;
+        if (this.hurt(C.dmg)) fx.shake = Math.max(fx.shake, 0.7);
+        if (!this.fighting) return;
+      } else this.checkPerfect((q) => spikeReach(q, l.from, l.dir, f0, f1, C.w, BODY));
+    }
+    for (let i = 0; i < 3; i++) {   // 脚下扬起的土
+      particles.emit(b.pos.x + rand(-0.8, 0.8), 0.1, b.pos.z + rand(-0.8, 0.8), -l.dir.x * rand(1, 3), rand(0.3, 1.2), -l.dir.z * rand(1, 3),
+        rand(0.4, 0.7), rand(0.15, 0.28), [0.85, 0.78, 0.66], [0.58, 0.52, 0.44], { alpha: 0.4, drag: 2 });
+    }
+    if (this.ran < l.len - 1e-6) return;
+    keepInArena(b.pos, BLOCK, ARENA_R - 0.3, BOSS_BODY);
+    this.dropLanes();
+    fx.crack(new THREE.Vector3(b.pos.x + l.dir.x * BOSS_BODY, 0, b.pos.z + l.dir.z * BOSS_BODY), 1.4);
+    fx.shake = Math.max(fx.shake, 0.45);
+    this.kick = 0.4;
+    if (--this.left > 0) this.startTele(); else this.recover();
+  }
 
   /**
    * 字诀「返」：冰锥撞上写了「返」的土墙，被推回墙外、掉头飞向 boss（没有 boss 就照墙面反射），快一些、伤害翻倍，从此不伤人
@@ -886,16 +1114,30 @@ export class Trial {
 
   /** 预警到点：判定、演出 */
   resolve() {
-    const b = this.boss, { fx, particles } = this.d;
+    const b = this.boss, cfg = this.cfg, { fx, particles } = this.d;
     if (this.move === 'slam') {
+      const S = cfg.slam;
       this.circle.g.visible = false;
-      if (inCircle(this.p, this.target, BOSS.slam.r, BODY)) this.hurt(BOSS.slam.dmg);
-      else this.checkPerfect((q) => inCircle(q, this.target, BOSS.slam.r, BODY));
-      fx.burst(new THREE.Vector3(this.target.x, 0.3, this.target.z), 'ice', BOSS.slam.r, 0.7);
-      fx.crack(this.target, BOSS.slam.r * 0.8);
+      if (inCircle(this.p, this.target, S.r, BODY)) this.hurt(S.dmg);
+      else this.checkPerfect((q) => inCircle(q, this.target, S.r, BODY));
+      fx.burst(new THREE.Vector3(this.target.x, 0.3, this.target.z), cfg.el, S.r, 0.7);
+      fx.crack(this.target, S.r * 0.8);
       this.kick = 0.45;
       if (--this.left > 0) { this.startTele(); return; }
       this.recover();
+    } else if (this.move === 'rocks') {
+      this.recover();   // 石头已经在天上，自己接着落（updateRocks）
+    } else if (this.move === 'charge') {
+      // 冲出去；预警到点时人已经不在红条里、闪避又按得够晚：算完美闪避（同铁头傀儡）
+      const l = this.lanes[0], C = STONE.charge;
+      if (!inStrip(this.p, l.from, l.dir, l.len + BOSS_BODY, C.w, BODY)) this.checkPerfect((q) => inStrip(q, l.from, l.dir, l.len + BOSS_BODY, C.w, BODY));
+      this.state = 'rush'; this.ran = 0; this.struck = false; this.kick = 0.3;
+      fx.shake = Math.max(fx.shake, 0.3);
+      this.shown = '';
+    } else if (this.move === 'spikes') {
+      this.state = 'spikes'; this.front = 0; this.struck = false; this.kick = 0.55;
+      fx.crack(new THREE.Vector3(b.pos.x + this.sweepDir.x * BOSS_BODY, 0, b.pos.z + this.sweepDir.z * BOSS_BODY), 1.6);
+      fx.shake = Math.max(fx.shake, 0.4);
     } else if (this.move === 'sweep') {
       this.sector.g.visible = false;
       if (inSector(this.p, b.pos, this.sweepDir, SWEEP_HALF, BOSS.sweep.r, BODY)) this.hurt(BOSS.sweep.dmg);
@@ -949,6 +1191,7 @@ export class Trial {
       this.ghostMat.opacity = 0.15 + 0.4 * Math.max(0, this.ghostT / RUN.arts.ghost.sec);
       if (this.ghostT <= 0) this.ghost.visible = false;
     }
+    this.updateSpikes(dt);
     if (!this.fighting) return;
     this.runT += dt;
     if (this.state === 'wave') {   // 小怪潮：火球照飞（打死了人就停），小怪出招，到点冒下一批
@@ -962,7 +1205,9 @@ export class Trial {
     if (!b) return;
     this.updateBullets(dt);   // 冰锥照飞，boss 冻住了也一样
     if (this.fighting) this.updateMinions(dt);   // 小怪潮剩下的（调试放进来的）照样出招
-    if (!this.fighting) return;   // 被冰锥打死了
+    if (this.fighting) this.updateRocks(dt);
+    if (!this.fighting) return;   // 被冰锥、落石打死了
+    const cfg = this.cfg;
     const held = b.frozen > 0 || b.stun > 0;
     if (b.frozen > 0) this.freezeCd = BOSS.freezeGrace; else this.freezeCd = Math.max(0, this.freezeCd - dt);
     const ph = bossPhase(b.hp, b.maxHp);
@@ -979,16 +1224,16 @@ export class Trial {
       } else if (this.state === 'recover') {
         turn(dx, dz, 5);
         if (dist > BOSS.keepDist) {
-          const v = ENEMIES.boss.speed * (this.phase >= 3 ? BOSS.enrageSpeed : 1) * dt;
+          const v = ENEMIES[/** @type {'boss' | 'stone'} */ (cfg.type)].speed * (this.phase >= 3 ? BOSS.enrageSpeed : 1) * dt;
           b.pos.x += (dx / dist) * v; b.pos.z += (dz / dist) * v;
           keepInArena(b.pos, BLOCK, ARENA_R - 0.3, BOSS_BODY);
           b.moving = true;
         }
         if (this.t <= 0) {
           const minions = this.d.enemies.list.filter((o) => o.chase).length;
-          this.move = pickMove(this.phase, { dist, minions, sinceSummon: this.sinceSummon, last: this.lastMove }, Math.random());
+          this.move = pickMove(this.phase, { dist, minions, sinceSummon: this.sinceSummon, last: this.lastMove }, Math.random(), cfg);
           this.lastMove = this.move;
-          this.left = this.move === 'slam' ? slamCount(this.phase) : 1;
+          this.left = this.moveCount(this.move);
           this.startTele();
         }
       } else if (this.state === 'tele') {
@@ -1004,6 +1249,26 @@ export class Trial {
             const s = this.spots[Math.floor(Math.random() * this.spots.length)];
             this.d.particles.emit(s.x + rand(-0.3, 0.3), 0.1, s.z + rand(-0.3, 0.3), 0, rand(0.8, 1.6), 0, rand(0.5, 0.8), rand(0.12, 0.22),
               [0.9, 0.45, 1.5], [0.25, 0.08, 0.4], { alpha: 0.35, drag: 1 });
+          }
+        } else if (this.move === 'rocks') {
+          turn(dx, dz, 4);
+        } else if (this.move === 'charge' || this.move === 'spikes') {
+          for (const l of this.lanes) l.s.fill.scale.x = k;
+          turn(this.sweepDir.x, this.sweepDir.z, 8);
+          if (this.move === 'charge') {
+            // 蓄力：后脚刨地，土黄的光往身上收
+            const back = -BOSS_BODY * 0.8;
+            if (Math.random() < dt * 25) {
+              this.d.particles.emit(b.pos.x + this.sweepDir.x * back + rand(-0.5, 0.5), 0.08, b.pos.z + this.sweepDir.z * back + rand(-0.5, 0.5),
+                -this.sweepDir.x * rand(1.5, 3), rand(0.4, 1.2), -this.sweepDir.z * rand(1.5, 3), rand(0.4, 0.6), rand(0.14, 0.24),
+                [0.85, 0.78, 0.66], [0.58, 0.52, 0.44], { alpha: 0.4, drag: 2 });
+            }
+            for (let i = 0; i < 2; i++) {
+              if (Math.random() > dt * 30) continue;
+              const a = rand(0, Math.PI * 2), r = rand(2, 3), x = b.pos.x + Math.cos(a) * r, z = b.pos.z + Math.sin(a) * r;
+              this.d.particles.emit(x, rand(0.6, 2.4), z, (b.pos.x - x) * 2.2, 0, (b.pos.z - z) * 2.2, 0.42, rand(0.06, 0.12),
+                [2.2, 1.3, 0.4], [0.8, 0.4, 0.1], { drag: 0.3 });
+            }
           }
         } else {
           // 冰锥、旋转弹幕的蓄力：寒气往 boss 身上收（冰锥收到举高的手上，弹幕收到腰间）
@@ -1035,25 +1300,42 @@ export class Trial {
         const a = this.spinFrom + SWEEP_HALF * 2 * (1 - Math.max(0, this.t) / 0.28);
         b.dir.set(Math.cos(a), 0, Math.sin(a));
         if (this.t <= 0) this.recover();
+      } else if (this.state === 'rush') {
+        this.rushStep(dt);
+        if (!this.fighting) return;
+      } else if (this.state === 'spikes') {
+        this.spikeStep(dt);
+        if (!this.fighting) return;
+      } else if (this.state === 'stagger') {
+        // 被打断：往前栽着喘不上气，头上冒金星
+        this.leanTo = 0.45;
+        if (Math.random() < dt * 14) {
+          const a = rand(0, Math.PI * 2), y = 1.75 * b.scale;
+          this.d.particles.emit(b.pos.x + Math.cos(a) * 0.9, y, b.pos.z + Math.sin(a) * 0.9, -Math.sin(a) * 2, 0.3, Math.cos(a) * 2, 0.5, rand(0.1, 0.16),
+            [2.4, 2.0, 0.8], [0.9, 0.6, 0.2], { drag: 1 });
+        }
+        if (this.t <= 0) this.recover();
       }
     }
     // 出招的身段：蓄力后仰、砸下去前扑一下
     this.kick = Math.max(0, this.kick - dt * 2.5);
     b.lean += (this.leanTo + this.kick - b.lean) * Math.min(1, dt * 12);
     if (b.armorMesh) b.armorMesh.visible = this.armor > 0;
-    this.d.enemies.armorMat.opacity = 0.2 + 0.4 * (this.armor / BOSS.armor);
+    if (cfg === BOSS) this.d.enemies.armorMat.opacity = 0.2 + 0.4 * (this.armor / BOSS.armor);   // 冰甲越削越透
     this.showBoss();
   }
 
-  /** 顶上的 boss 血条（数变了才改界面） */
+  /** 顶上的 boss 血条（数变了才改界面）；石甲巨像蓄力冲撞时写还差多少伤害打断，被打断时写硬直 */
   showBoss() {
     const b = this.boss;
     if (!b) return;
-    const key = `${Math.ceil(b.hp)}|${Math.ceil(this.armor)}|${this.phase}`;
+    const cfg = this.cfg, need = this.state === 'tele' && this.move === 'charge' ? Math.max(0, Math.ceil(STONE.charge.breakDmg - this.chargeDmg)) : -1;
+    const key = `${Math.ceil(b.hp)}|${Math.ceil(this.armor)}|${this.phase}|${need}|${this.state === 'stagger'}`;
     if (key === this.shown) return;
     this.shown = key;
-    this.d.hud.setBoss({ name: ENEMIES.boss.name, phase: `${PHASE_NAME[this.phase]}${this.armor > 0 ? ' · 冰甲' : ''}`,
-      hp: b.hp, max: b.maxHp, armor: this.armor, armorMax: BOSS.armor });
+    const tail = need >= 0 ? ` · 蓄力！再打 ${need} 就打断` : this.state === 'stagger' ? ' · 硬直' : '';
+    this.d.hud.setBoss({ name: this.bossName(), phase: `${PHASE_NAME[this.phase]}${this.armor > 0 ? ` · ${cfg.armorName}` : ''}${tail}`,
+      hp: b.hp, max: b.maxHp, armor: this.armor, armorMax: cfg.armor, stone: cfg === STONE });
   }
 
   /** 天色（world/invasion.js，一轮一档）用：这一轮打到几成——小怪潮占前一半（这段小怪打掉几成），boss 占后一半（血掉了几成） */

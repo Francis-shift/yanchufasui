@@ -1,12 +1,12 @@
-// 试炼模式的规则（game/rules/trial.js）：冰甲只怕火、70% / 30% 换阶段、挑招、红圈与扇形的判定、玩家被挡在广场里、小怪潮。
+// 试炼模式的规则（game/rules/trial.js）：冰甲只怕火、石甲只怕雷、石甲巨像的落石与地刺、70% / 30% 换阶段、挑招、红圈与扇形的判定、玩家被挡在广场里、小怪潮。
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { damageTo } from '../game/rules/arbiter.js';
-import { BOSS, ENEMIES, MINION, RUN, TRIAL } from '../game/rules/numbers.js';
+import { BOSS, ENEMIES, MINION, RUN, STONE, TRIAL } from '../game/rules/numbers.js';
 import {
   archerIntent, bossHit, bossPhase, canDash, chargeLen, homingTurn, inCircle, inSector, inStrip, isPerfect, keepInArena, nextBatch, pickMinion, pickMove,
-  recoverSec, regenStamina, slamCount, spawnSpot, spiralAngles, teleSec,
+  recoverSec, regenStamina, rockSpots, slamCount, spawnSpot, spikeDirs, spikeReach, spiralAngles, teleSec,
 } from '../game/rules/trial.js';
 
 const MAX = ENEMIES.boss.hp;
@@ -269,4 +269,86 @@ test('铁头傀儡：冲到障碍或广场边就停，直冲不受挡时冲满�
   assert.ok(inStrip({ x: 4, z: C.w / 2 + 0.2 }, s, dir, 9, C.w, 0.35), '身体半径算进去');
   // 预警够看清：蓄力时间里玩家能横着走出半条宽度加身体
   assert.ok(TRIAL.speed * C.tele > C.w / 2 + 0.35);
+});
+// ---------------------------------------------------------------- 第二个 boss 石甲巨像（numbers.js STONE）
+const stoneMoves = (phase, s) => new Set(ROLLS.map((r) => pickMove(phase, s, r, STONE)));
+
+test('石甲：甲在时只有雷照常伤害并削甲，别的元素（连火）只剩两成；字诀「破」照样破', () => {
+  const b = { armor: STONE.armor, freezeCd: 0 };
+  const th = bossHit(b, 'thunder', hit('thunder', 50), false, STONE);
+  assert.equal(th.r.dmg, 50);
+  assert.equal(th.armor, STONE.armor - 50);
+  assert.equal(th.r.reaction, '裂甲');
+  for (const el of ['fire', 'ice', 'wind', 'earth']) {
+    const h = bossHit(b, el, hit(el, 50), false, STONE);
+    assert.equal(h.r.dmg, 50 * STONE.armoredMult, `${el} 打在石甲上`);
+    assert.equal(h.armor, STONE.armor, `${el} 不削甲`);
+    assert.equal(h.r.reaction, '石甲');
+  }
+  assert.equal(bossHit(b, 'fire', hit('fire', 50), true, STONE).armor, STONE.armor - 50, '「破」什么元素都削甲');
+  assert.equal(bossHit({ armor: 30, freezeCd: 0 }, 'thunder', hit('thunder', 50), false, STONE).broke, true);
+  assert.equal(bossHit({ armor: BOSS.armor, freezeCd: 0 }, 'fire', hit('fire', 50)).armor, BOSS.armor - 50, '不给 boss 就是寒甲傀儡王：火照常削冰甲');
+});
+
+test('石甲巨像挑招：第 1 阶段重踏、落石、冲撞，第 2 阶段起加地刺；远近都出；不出寒甲傀儡王的招；冷却好了照样召', () => {
+  const far = { dist: 8, minions: 0, sinceSummon: 0 }, near = { ...far, dist: 3 };
+  assert.deepEqual([...stoneMoves(1, far)].sort(), ['charge', 'rocks', 'slam']);
+  assert.deepEqual([...stoneMoves(1, near)].sort(), ['charge', 'rocks', 'slam']);
+  for (const ph of [2, 3]) assert.deepEqual([...stoneMoves(ph, far)].sort(), ['charge', 'rocks', 'slam', 'spikes'], `第 ${ph} 阶段`);
+  assert.equal(pickMove(1, { ...far, sinceSummon: STONE.summon.cd }, 0.5, STONE), 'summon');
+  assert.ok(!stoneMoves(2, { ...far, last: 'charge' }).has('charge'), '刚冲过不连着冲');
+});
+
+test('蓄力冲撞：蓄力按阶段单写、不跟着越来越快；石甲在时两发雷弹打得断、两发火弹打不断；红条躲得开', () => {
+  const C = STONE.charge;
+  assert.deepEqual([1, 2, 3].map((p) => teleSec('charge', p, STONE)), C.tele);
+  assert.ok(teleSec('rocks', 3, STONE) < teleSec('rocks', 1, STONE), '别的招照样越来越快');
+  // 按键默认的弹：威力 2 时雷 30 × 1.1 × 1.5、火 30 × 1.3 × 1.5
+  const on = (el, dmg) => bossHit({ armor: STONE.armor, freezeCd: 0 }, el, hit(el, dmg), false, STONE).r.dmg;
+  assert.ok(2 * on('thunder', 49.5) >= C.breakDmg, '两发雷弹');
+  assert.ok(2 * on('fire', 58.5) < C.breakDmg, '两发火弹打在石甲上');
+  assert.ok(2 * 58.5 >= C.breakDmg, '石甲碎了以后两发火弹也打得断');
+  // 狂暴时连冲的第二下蓄力最短，也要横着走得出半条宽度加身体
+  assert.ok(TRIAL.speed * C.tele[2] * C.again > C.w / 2 + 0.35);
+});
+
+test('落石雨：第一块对准人，其余落在人身边、彼此隔得开、都在广场里、不落进障碍', () => {
+  const S = STONE.rocks, R = 9.5, pillar = { x: 3, z: 3, r: 1 };
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (const me of [{ x: 0, z: 2 }, { x: 8.5, z: 0 }]) {
+    for (const n of S.n) {
+      const s = rockSpots(me, n, rnd, [pillar], R);
+      assert.equal(s.length, n);
+      assert.deepEqual(s[0], me, '第一块对准人');
+      for (const [i, p] of s.entries()) {
+        assert.ok(Math.hypot(p.x, p.z) <= R + 1e-9, '在广场里');
+        assert.ok(Math.hypot(p.x - pillar.x, p.z - pillar.z) >= pillar.r - 1e-9, '不在柱子里');
+        assert.ok(Math.hypot(p.x - me.x, p.z - me.z) <= S.spread + 1e-9, '在人身边');
+        for (const q of s.slice(i + 1)) assert.ok(Math.hypot(p.x - q.x, p.z - q.z) >= S.apart - 1e-9, `隔得开（人在 ${me.x}, ${me.z}，${n} 块）`);
+      }
+    }
+  }
+  // 预警够看清：一块落下前横着走得出红圈半径加身体
+  assert.ok(TRIAL.speed * S.tele * BOSS.pace[2] > S.r + 0.35);
+});
+
+test('一线地刺：一道朝人，狂暴三道左右对称；冒到人那一段才算，宽度含身体；一帧冒多冒少都不漏不重', () => {
+  const S = STONE.spikes, from = { x: 0, z: 0 }, dir = { x: 1, z: 0 }, me = { x: 5, z: 0 };
+  const one = spikeDirs({ x: 0, z: 1 }, 1);
+  assert.ok(Math.abs(one[0].x) < 1e-9 && Math.abs(one[0].z - 1) < 1e-9);
+  const three = spikeDirs(dir, 3).map((d) => (Math.atan2(d.z, d.x) * 180) / Math.PI);
+  assert.ok(Math.abs(three[0] + S.fanDeg) < 1e-9 && Math.abs(three[1]) < 1e-9 && Math.abs(three[2] - S.fanDeg) < 1e-9);
+  assert.ok(spikeReach(me, from, dir, 4.8, 5.1, S.w, 0.35));
+  assert.ok(!spikeReach(me, from, dir, 2, 3, S.w, 0.35), '还没冒到');
+  assert.ok(!spikeReach(me, from, dir, 6, 7, S.w, 0.35), '已经冒过去了');
+  assert.ok(spikeReach({ x: 5, z: S.w / 2 + 0.3 }, from, dir, 4.8, 5.1, S.w, 0.35), '身子挨着边');
+  assert.ok(!spikeReach({ x: 5, z: S.w / 2 + 0.4 }, from, dir, 4.8, 5.1, S.w, 0.35), '站在边外');
+  assert.ok(!spikeReach({ x: -1, z: 0 }, from, dir, 0, S.len, S.w, 0.35), '身后不挨');
+  for (const step of [0.05, 0.3, 0.9]) {
+    let n = 0;
+    for (let f = 0; f < S.len; f += step) if (spikeReach(me, from, dir, f, f + step, S.w)) n++;
+    assert.equal(n, 1, `每帧冒 ${step} 米`);
+  }
+  assert.ok(TRIAL.speed * S.tele * BOSS.pace[2] > S.w / 2 + 0.35, '预警时间里横着走得出去');
 });

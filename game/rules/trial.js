@@ -1,12 +1,15 @@
 // @ts-check
 /**
  * 试炼模式的规则（纯函数，有单测）：boss 挨打怎么算冰甲、什么时候换阶段、下一招出什么、站在哪算被打中、玩家走到哪被挡住、
- * 完美闪避、追踪冰锥怎么转弯、旋转弹幕朝哪喷；小怪潮冒几只、冒在哪、冒哪种，符箓傀儡往哪挪，铁头傀儡冲多远、冲到谁。
- * 数值全在 numbers.js 的 BOSS、TRIAL、RUN、MINION。画面和 boss 的动作在 game/modes/trial.js。
+ * 完美闪避、追踪冰锥怎么转弯、旋转弹幕朝哪喷；石甲巨像的落石落在哪、地刺朝哪几个方向、地刺冒到人没有；
+ * 小怪潮冒几只、冒在哪、冒哪种，符箓傀儡往哪挪，铁头傀儡冲多远、冲到谁。
+ * 数值全在 numbers.js 的 BOSS（寒甲傀儡王，也是各个 boss 共用的换阶段、快慢）、STONE（石甲巨像）、TRIAL、RUN、MINION。
+ * 画面和 boss 的动作在 game/modes/trial.js。
  */
-import { BOSS, MINION, RUN, TRIAL } from './numbers.js';
+import { BOSS, MINION, RUN, STONE, TRIAL } from './numbers.js';
 
-/** @typedef {'slam' | 'sweep' | 'summon' | 'homing' | 'spiral'} Move */
+/** @typedef {'slam' | 'sweep' | 'summon' | 'homing' | 'spiral' | 'rocks' | 'charge' | 'spikes'} Move */
+/** 哪个 boss 的招式表（BOSS 寒甲傀儡王、STONE 石甲巨像） @typedef {typeof BOSS | typeof STONE} BossCfg */
 
 /**
  * 血量 → 第几阶段（1～3）：降到 70% 进第 2 阶段，降到 30% 进第 3 阶段（狂暴）。
@@ -18,8 +21,8 @@ export function bossPhase(hp, max) {
 }
 
 /**
- * boss 挨一下：先照常由 damageTo 算出这一下，再按冰甲改。
- * 甲在时：火照常伤害、同时削甲（削穿就碎）；别的元素只剩 armoredMult，也冻不住。boss 太重，风推不动；麻痹最多 stunMax 秒。
+ * boss 挨一下：先照常由 damageTo 算出这一下，再按甲改（寒甲傀儡王的冰甲只怕火，石甲巨像的石甲只怕雷：cfg.weak）。
+ * 甲在时：怕的那种元素照常伤害、同时削甲（削穿就碎）；别的元素只剩 armoredMult，也冻不住。boss 太重，风推不动；麻痹最多 stunMax 秒。
  * 冻过一次、化开后 freezeGrace 秒内（freezeCd > 0）再冻不住。
  * 字诀「破」（po）：甲在时伤害 × RUN.runes.po、不打折，什么元素都照常削甲（削掉的按翻倍前算）。
  * @template {{ dmg: number, reaction: string, freezeSec: number, push: number, stunSec: number }} R
@@ -27,20 +30,21 @@ export function bossPhase(hp, max) {
  * @param {string} el
  * @param {R} r
  * @param {boolean} [po]
+ * @param {BossCfg} [cfg]
  * @returns {{ r: R, armor: number, broke: boolean }}
  */
-export function bossHit(b, el, r, po = false) {
+export function bossHit(b, el, r, po = false, cfg = BOSS) {
   const out = { ...r, push: 0, stunSec: Math.min(r.stunSec, BOSS.stunMax) };
   let armor = b.armor, broke = false;
   if (armor > 0) {
-    if (el === 'fire' || po) {
+    if (el === cfg.weak || po) {
       armor = Math.max(0, armor - r.dmg);
       broke = armor === 0;
-      out.reaction = out.reaction || (po ? '破甲' : '融甲');
+      out.reaction = out.reaction || (po ? '破甲' : cfg.weakText);
       if (po) out.dmg = r.dmg * RUN.runes.po;
     } else {
-      out.dmg = r.dmg * BOSS.armoredMult;
-      out.reaction = out.reaction || '冰甲';
+      out.dmg = r.dmg * cfg.armoredMult;
+      out.reaction = out.reaction || cfg.armorName;
     }
     out.freezeSec = 0;
   }
@@ -54,14 +58,15 @@ export function bossHit(b, el, r, po = false) {
  * @param {number} phase 1～3
  * @param {{ dist: number, minions: number, sinceSummon: number, last?: string }} s dist：boss 到玩家的距离；last：上一招
  * @param {number} roll 0～1 的随机数（测试里给定）
+ * @param {BossCfg} [cfg] 哪个 boss
  * @returns {Move}
  */
-export function pickMove(phase, s, roll) {
-  const sm = BOSS.summon, pool = /** @type {Move[]} */ (BOSS.moves[phase - 1]);
+export function pickMove(phase, s, roll, cfg = BOSS) {
+  const sm = cfg.summon, pool = /** @type {Move[]} */ (cfg.moves[phase - 1]);
   if (pool.includes('summon') && s.sinceSummon >= sm.cd * BOSS.pace[phase - 1] && s.minions <= sm.keep) return 'summon';
   let c = pool.filter((m) => m !== 'summon' && (m !== 'sweep' || s.dist <= BOSS.sweep.reach));
   if (c.length > 1) c = c.filter((m) => m !== s.last);
-  const w = (/** @type {Move} */ m) => /** @type {any} */ (BOSS)[m].weight;
+  const w = (/** @type {Move} */ m) => /** @type {any} */ (cfg)[m].weight;
   let x = roll * c.reduce((a, m) => a + w(m), 0);
   for (const m of c) { x -= w(m); if (x < 0) return m; }
   return c[c.length - 1];
@@ -70,9 +75,52 @@ export function pickMove(phase, s, roll) {
 /** 狂暴时红圈连砸两下（第二下落在玩家那时站的地方） @param {number} phase */
 export const slamCount = (phase) => (phase >= 3 ? 2 : 1);
 
-/** 这一招预警多久（秒），阶段越后越快 @param {Move} move @param {number} phase */
-export function teleSec(move, phase) {
-  return BOSS[move].tele * BOSS.pace[phase - 1];
+/**
+ * 这一招预警多久（秒），阶段越后越快（× pace）；按阶段单写了的（石甲巨像的蓄力冲撞，要留出打断的时间）就照写的
+ * @param {Move} move @param {number} phase @param {BossCfg} [cfg]
+ */
+export function teleSec(move, phase, cfg = BOSS) {
+  const t = /** @type {any} */ (cfg)[move].tele;
+  return Array.isArray(t) ? t[phase - 1] : t * BOSS.pace[phase - 1];
+}
+
+/**
+ * 石甲巨像落石雨的落点：第一块对准玩家此刻站的地方，其余落在玩家 spread 米内随机（拉回广场里、推出障碍），
+ * 块与块至少隔 apart 米（挑 20 次都隔不开就用最后一次挑的）。
+ * @param {P} me @param {number} n @param {() => number} rnd @param {{ x: number, z: number, r: number }[]} obstacles @param {number} R
+ * @returns {P[]}
+ */
+export function rockSpots(me, n, rnd, obstacles, R) {
+  const S = STONE.rocks, out = [keepInArena({ x: me.x, z: me.z }, obstacles, R, 0)];
+  while (out.length < n) {
+    let p = out[0];
+    for (let k = 0; k < 20; k++) {
+      const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * S.spread;
+      p = keepInArena({ x: me.x + Math.cos(a) * r, z: me.z + Math.sin(a) * r }, obstacles, R, 0);
+      if (out.every((q) => Math.hypot(p.x - q.x, p.z - q.z) >= S.apart)) break;
+    }
+    out.push(p);
+  }
+  return out;
+}
+
+/** 一线地刺朝哪几个方向：一道就朝 dir；狂暴时三道，左右各偏 fanDeg 度 @param {P} dir 单位向量 @param {number} n @returns {P[]} */
+export function spikeDirs(dir, n) {
+  const a0 = Math.atan2(dir.z, dir.x), f = (STONE.spikes.fanDeg * Math.PI) / 180;
+  return Array.from({ length: n }, (_, i) => {
+    const a = a0 + (i - (n - 1) / 2) * f;
+    return { x: Math.cos(a), z: Math.sin(a) };
+  });
+}
+
+/**
+ * 地刺这一帧从 f0 冒到 f1（离起点多远），冒到站在 p 的人没有：人在这一道的宽度里（w，身体半径 body 加在宽度上），
+ * 而且身体（顺着这一道量，前后各 body）跟这一帧冒出来的那一段有重叠。
+ * @param {P} p @param {P} from 起点 @param {P} dir 单位向量 @param {number} f0 @param {number} f1 @param {number} w @param {number} [body]
+ */
+export function spikeReach(p, from, dir, f0, f1, w, body = 0) {
+  const x = p.x - from.x, z = p.z - from.z, along = x * dir.x + z * dir.z, side = Math.abs(x * dir.z - z * dir.x);
+  return side <= w / 2 + body && along + body > f0 && along - body <= f1;
 }
 
 /**

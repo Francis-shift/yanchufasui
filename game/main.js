@@ -359,7 +359,7 @@ export function start(root, opts = {}) {
       if (S.phase === 'won' && S.mode === 'trial') {
         const sec = Math.round(trial.runT);
         hud.showOverlay('试炼通过', `${BOSS_COUNT} 个 boss 尽数击碎。用时 ${Math.floor(sec / 60)} 分 ${sec % 60} 秒，完美闪避 ${trial.perfects} 次，`
-          + `气血还剩 ${Math.ceil(trial.hp)}。第二、三个 boss 还在做，暂由${ENEMIES.boss.name}顶替。`, '去守关', '再战试炼');
+          + `气血还剩 ${Math.ceil(trial.hp)}。第三个 boss 还在做，暂由${ENEMIES.boss.name}顶替。`, '去守关', '再战试炼');
       }
     });
   }
@@ -1504,7 +1504,7 @@ export function start(root, opts = {}) {
     engage: () => trial.engage(),
     walk: (x = 0, z = 5.2) => { trial.p.set(x, 0, z); trial.sync(); },
     bossHp: (n) => { if (trial.boss) trial.boss.hp = n; },
-    /** 让 boss 马上出这一招（slam / sweep / summon / homing / spiral），看招用 */
+    /** 让 boss 马上出这一招，看招用：寒甲傀儡王 slam / sweep / summon / homing / spiral，石甲巨像 slam / rocks / charge / spikes / summon */
     bossMove: (m) => trial.force(m),
     trialState: () => {
       const b = trial.boss;
