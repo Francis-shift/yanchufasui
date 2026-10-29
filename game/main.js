@@ -47,6 +47,7 @@ import { buildEnvironment } from './world/environment.js';
 import { invasionTarget, stepInvasion } from './world/invasion.js';
 import { buildBarrier } from './world/barrier.js';
 import { fitFrame } from './world/framing.js';
+import { FOLLOW, followPose, offscreenArrow } from './world/trialcam.js';
 import { loadProps } from './world/props.js';
 import { buildLayout, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS, OBSTACLES } from './world/layout.js';
 import { Hud, preloadFonts } from './ui/hud.js';
@@ -217,6 +218,8 @@ export function start(root, opts = {}) {
 
   // ---------------------------------------------------------------- 镜头：第三人称，平时固定；开口时轻推近
   const cam = { base: new THREE.Vector3(), look: new THREE.Vector3(), near: new THREE.Vector3(), nearLook: new THREE.Vector3(), focus: 0 };
+  /** 试炼的跟随镜头（world/trialcam.js）：平滑后的看的点、离多远；on 为 false 时下一帧直接跳到位 */
+  const tcam = { look: new THREE.Vector3(), dist: 0, on: false };
   function layoutCamera() {
     const w = root.clientWidth || window.innerWidth, h = root.clientHeight || window.innerHeight;
     camera.aspect = w / h;
@@ -236,6 +239,7 @@ export function start(root, opts = {}) {
       cam.nearLook.set(0, 1.2, -6);
     }
     env.aim(_v.copy(cam.look).sub(cam.base));   // 雾取镜头朝向那段天边的颜色
+    tcam.on = false;   // 试炼的跟随镜头下一帧按新的宽高比重新取景（雾色也跟着重取）
     renderer.setSize(w, h);
     composer.setSize(w, h);
     bloom.setSize(w, h);
@@ -1696,6 +1700,36 @@ export function start(root, opts = {}) {
   let raf = 0, lastNow = performance.now(), timeScale = 1, fpsAcc = 0, fpsN = 0, fps = 0, dbgT = 0, idleT = 0, worldDim = 0, labT = 0;
   const impactUv = new THREE.Vector2(0.5, 0.5);
   const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), shakeOff = new THREE.Vector3();
+  /** boss 有多高（边缘箭头和跟随镜头取景时框它的头顶；三个 boss 差不多高，取一个数） */
+  const BOSS_H = 3.2;
+
+  /**
+   * 试炼的跟随镜头（设计文档第 4 节"10-29 定：试炼的镜头与三档视角"）：看的点跟得快、离多远拉远快推近慢
+   * （boss 冲过来时先把它框进来，走近了再慢慢推回去）；开口时推近一点
+   * @param {number} rdt 现实时间（慢放、顿帧时镜头照常跟）
+   */
+  function trialCamera(rdt) {
+    const b = trial.boss;
+    const safe = { ...FOLLOW.safe, top: Math.min(FOLLOW.safe.top, hud.safeTop()) };   // 矮屏幕上 boss 血条占得多，量着它来
+    const pose = followPose(camera, trial.p, b ? { x: b.pos.x, z: b.pos.z, h: BOSS_H } : null, { safe });
+    if (!tcam.on) {
+      tcam.on = true; tcam.look.copy(pose.look); tcam.dist = pose.dist;
+      env.aim(_v.copy(pose.dir).negate());
+    }
+    tcam.look.lerp(pose.look, 1 - Math.exp(-rdt * 6));
+    tcam.dist += (pose.dist - tcam.dist) * (1 - Math.exp(-rdt * (pose.dist > tcam.dist ? 4 : 1.2)));
+    camLook.copy(tcam.look);
+    camPos.copy(tcam.look).addScaledVector(pose.dir, tcam.dist * (1 - 0.25 * cam.focus));
+  }
+
+  /** boss 跑出画面时，屏幕边缘出一个箭头指着它（只在试炼打 boss 时） */
+  function bossArrow() {
+    const b = trial.boss;
+    if (!(S.mode === 'trial' && trial.on && b && S.phase === 'playing')) { hud.setArrow(null); return; }
+    camera.updateMatrixWorld();
+    const a = offscreenArrow(_v.set(b.pos.x, BOSS_H * 0.5, b.pos.z), camera);
+    hud.setArrow(a && { x: (a.x + 1) / 2, y: (1 - a.y) / 2, angle: a.angle });
+  }
   function frame() {
     raf = requestAnimationFrame(frame);
     const now = performance.now();
@@ -1777,11 +1811,16 @@ export function start(root, opts = {}) {
     // 镜头：咏唱时推近，动完回到固定位置
     const focusT = (fx.chanting > 0 && !buttonChant) || (slowSince > 0 && S.phase === 'playing') ? 0.35 : 0;
     cam.focus += (focusT - cam.focus) * Math.min(1, realDt * 3);
-    camPos.copy(cam.base).lerp(cam.near, cam.focus);
-    camLook.copy(cam.look).lerp(cam.nearLook, cam.focus);
+    if (S.mode === 'trial' && trial.on) trialCamera(realDt);
+    else {
+      tcam.on = false;
+      camPos.copy(cam.base).lerp(cam.near, cam.focus);
+      camLook.copy(cam.look).lerp(cam.nearLook, cam.focus);
+    }
     shakeOff.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(fx.shake * 0.5);
     camera.position.copy(camPos).add(shakeOff);
     camera.lookAt(camLook);
+    bossArrow();
     env.update(dt, camera.position);   // 云、雾流动，雾里的闪电（游戏时间，慢放时一起变慢）
     fx.cameraPos.copy(camera.position);
     fx.impactK *= Math.exp(-realDt * 9);
@@ -1918,6 +1957,14 @@ export function start(root, opts = {}) {
     },
     /** 竖屏取景的参数（调镜头用：改完这些向量再触发一次 resize） */
     framing: { dir: NARROW_DIR, look: NARROW_LOOK, wide: FRAME_WIDE, near: FRAME_NEAR },
+    /** 试炼跟随镜头的参数（直接改，下一帧生效）；cam() 看镜头现在离多远、人和 boss 在画面上哪儿 */
+    follow: FOLLOW,
+    cam: () => {
+      const at = (/** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ z) => { const p = _v.set(x, y, z).project(camera); return [+p.x.toFixed(2), +p.y.toFixed(2)]; };
+      const b = trial.boss;
+      return { dist: +tcam.dist.toFixed(2), feet: at(trial.p.x, 0, trial.p.z), head: at(trial.p.x, 1.9, trial.p.z),
+        boss: b && [at(b.pos.x, 0, b.pos.z), at(b.pos.x, BOSS_H, b.pos.z)] };
+    },
     dragon: (el = 'ice') => dragon.preload(el),
     flight: () => {
       const f = dragon.active, r = (/** @type {THREE.Vector3} */ v) => v.toArray().map((x) => +x.toFixed(1));

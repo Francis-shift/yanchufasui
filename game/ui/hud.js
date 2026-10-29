@@ -118,6 +118,12 @@ const CSS = FONT_CSS + `
 .yc-report { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
   padding: 12px; background: rgba(20, 28, 38, 0.72); backdrop-filter: blur(3px); pointer-events: auto; }
 .yc-report[hidden], .yc-report [hidden] { display: none; }
+.yc-arrow { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; pointer-events: none;
+  filter: drop-shadow(0 0 2px #fff) drop-shadow(0 2px 4px rgba(20, 0, 40, 0.5)); }
+.yc-arrow[hidden] { display: none; }
+.yc-arrow i { display: block; width: 100%; height: 100%; background: #8a2fc9; clip-path: polygon(100% 50%, 8% 8%, 30% 50%, 8% 92%);
+  animation: yc-nudge 0.9s ease-in-out infinite; }
+@keyframes yc-nudge { 50% { transform: translateX(5px); } }
 .yc-report img { max-width: min(400px, 92%); max-height: calc(100% - 100px); border-radius: 10px; background: #f6f1e7;
   box-shadow: 0 10px 40px -10px rgba(0,0,0,0.6); -webkit-touch-callout: default; }
 .yc-report-msg { margin: 0; color: #e8edf3; font-size: 13px; text-align: center; }
@@ -179,6 +185,7 @@ const CSS = FONT_CSS + `
   width: min(440px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 5px; padding: 8px 14px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(6px); }
 .yc-boss[hidden] { display: none; }
+.yc-boss.yc-side { right: 60px; width: auto; max-width: 440px; transform: none; }   /* 矮窗口：放到左上面板右边，left 由 placeBoss 给 */
 .yc-boss .yc-label b { color: #9a2a1e; }
 .yc-bosshp > i { background: linear-gradient(90deg, #b3261e, #ff6b4a); }
 .yc-armor { height: 5px; } .yc-armor > i { background: linear-gradient(90deg, #7cc8ff, #e2f4ff); }
@@ -342,7 +349,11 @@ export class Hud {
     this.reportUrl = ''; this.reportSeq = 0;
     /** @type {HTMLElement} */ (this.overlay.querySelector('[data-report]')).addEventListener('click', () => { if (this.reportMake) this.openReport(this.reportMake); });
     /** @type {HTMLElement} */ (this.report.querySelector('[data-close]')).addEventListener('click', () => this.closeReport());
-    this.root.append(this.floats, this.stick, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay, this.report, this.mute);
+    // boss 跑出画面时指着它的箭头（试炼的跟随镜头）
+    this.arrow = el(`<div class="yc-arrow" hidden><i></i></div>`);
+    /** boss 血条下沿（界面坐标，没有血条为 0），placeBoss 量 */
+    this.bossEdge = 0;
+    this.root.append(this.floats, this.stick, this.arrow, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay, this.report, this.mute);
     root.append(this.root);
     this.input = /** @type {HTMLInputElement} */ (this.bottom.querySelector('input'));
     this.go = /** @type {HTMLButtonElement} */ (this.bottom.querySelector('[data-go]'));
@@ -542,7 +553,7 @@ export class Hud {
    */
   setBoss(b) {
     this.boss.hidden = !b;
-    if (!b) return;
+    if (!b) { this.bossEdge = 0; return; }
     this.q('[data-bossname]').textContent = b.name;
     this.q('[data-bossphase]').textContent = b.phase;
     this.q('[data-bosshp]').style.width = `${Math.max(0, b.hp / b.max) * 100}%`;
@@ -551,13 +562,26 @@ export class Hud {
     for (const k of ['stone', 'flame']) armor.parentElement?.classList.toggle(k, b.kind === k);
     this.placeBoss();
   }
-  /** boss 血条居中靠上；和左上角的面板左右重叠（竖屏）就放到面板下面 */
+  /**
+   * boss 血条居中靠上；和左上角的面板左右重叠时，面板右边放得下（矮窗口）就挪到面板右边，放不下（竖屏）才放到面板下面——
+   * 矮窗口里放到面板下面就落在画面正中，正挡着试炼镜头框人和 boss 的地方
+   */
   placeBoss() {
+    this.bossEdge = 0;
     if (this.boss.hidden) return;
-    if (this.root.classList.contains('yc-pad')) { this.boss.style.top = ''; return; }   // 手机试炼布局由 CSS 放在面板右边
-    const W = this.root.clientWidth, w = this.boss.offsetWidth || Math.min(440, W - 32);
-    const overlaps = (W - w) / 2 < this.topRight() + 8;
-    this.boss.style.top = overlaps ? `${this.topBottom() + 6}px` : '';
+    const pad = this.root.classList.contains('yc-pad');   // 手机试炼布局由 CSS 放在面板右边
+    const W = this.root.clientWidth, w = Math.min(440, W - 32), right = this.topRight() + 8;
+    const overlaps = !pad && (W - w) / 2 < right;
+    const side = overlaps && W - right - 60 >= 280;
+    this.boss.classList.toggle('yc-side', side);
+    this.boss.style.left = side ? `${right}px` : '';
+    this.boss.style.top = overlaps && !side ? `${this.topBottom() + 6}px` : '';
+    this.bossEdge = this.boss.offsetTop + this.boss.offsetHeight;
+  }
+  /** boss 血条下沿换成画面的投影坐标（顶上是 1）：试炼镜头别把 boss 放到它底下。没有血条给 1 */
+  safeTop() {
+    const H = this.root.clientHeight;
+    return this.bossEdge && H ? 1 - 2 * (this.bossEdge + 8) / H : 1;
   }
   // 左上面板的右边、下边（界面坐标）：用布局尺寸，不用 getBoundingClientRect——试炼横过来转了 90° 时后者是转完的屏幕坐标
   topRight() { return this.top.offsetLeft + this.top.offsetWidth; }
@@ -594,6 +618,16 @@ export class Hud {
     const W = this.root.clientWidth, cardW = this.card.offsetWidth || Math.min(560, W - 32);
     const overlaps = (W - cardW) / 2 < this.topRight() + 8;
     this.card.style.top = overlaps ? `${this.topBottom() + 8}px` : '';
+  }
+
+  /**
+   * boss 在画面外时的箭头：x、y 是在游戏区域里的位置（0～1，从左上角算），angle 朝哪（弧度，0 朝右、逆时针为正）；给 null 收起
+   * @param {{ x: number, y: number, angle: number } | null} a
+   */
+  setArrow(a) {
+    if (!a) { if (!this.arrow.hidden) this.arrow.hidden = true; return; }
+    this.arrow.hidden = false;
+    Object.assign(this.arrow.style, { left: `${(a.x * 100).toFixed(2)}%`, top: `${(a.y * 100).toFixed(2)}%`, transform: `rotate(${(-a.angle).toFixed(3)}rad)` });
   }
 
   /** 画面上、下被界面挡住的比例（给镜头取景用） @returns {{ top: number, bottom: number }} */
