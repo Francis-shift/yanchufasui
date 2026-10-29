@@ -16,6 +16,7 @@
       python tools/build_preview.py casters --asset public/models/caster.rig.gz --asset preview/assets/caster-192.webp  → preview/casters.html
         （施法者模型的动作检查页，game/dev/castercheck.js；只有地面和灯，不带场景）
       python tools/build_preview.py bosses --asset preview/assets/boss.rig.gz --asset preview/assets/boss-192.webp  → preview/bosses.html
+        （石甲巨像、火灵把 boss 换成 stone、flame，先用 tools/lite_rig.py 做减面版；一次只放一个 boss）
         （寒甲傀儡王的动作检查页，game/dev/bosscheck.js；正式模型放不下，先用 tools/lite_rig.py 做减面版）
 只打包页面真正引用到的库（扫本地模块里的 import）：检查页用不到物理引擎，省下来给模型。
 """
@@ -163,7 +164,7 @@ TARGETS = {
                " for (const s of document.querySelectorAll('script[data-asset]'))"
                " assets[s.dataset.asset] = URL.createObjectURL(new Blob([Uint8Array.from(atob(s.textContent.trim()), (c) => c.charCodeAt(0))]));"
                " startBossCheck(document.getElementById('app'), assets);",
-               "言出法随 · 寒甲傀儡王检查", "bosses.html"),
+               "言出法随 · boss 模型检查", "bosses.html"),
 }
 BARE_IMPORT = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(?\s*)(['"])([^'".][^'"]*)\1""")
 

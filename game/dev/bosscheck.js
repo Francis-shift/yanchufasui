@@ -1,12 +1,13 @@
 // @ts-check
 /**
- * 寒甲傀儡王模型检查页（只给本机预览面板用：python tools/build_preview.py bosses --asset preview/assets/boss.rig.gz --asset preview/assets/boss-192.webp）。
- * 正式模型 352 KB、贴图 226 KB，塞不进面板 512 KB 的上限，检查页用减面版（tools/lite_rig.py，约 4500 面、动作隔帧取）和缩到 192 的贴图：
- * 看身高、朝向、冰甲罩没罩住上身、各招的动作跟预警对不对得上；细节以正式模型为准。游戏本身不引用这个文件。
+ * boss 模型检查页（只给本机预览面板用：python tools/build_preview.py bosses --asset preview/assets/boss.rig.gz --asset preview/assets/boss-192.webp；
+ * 石甲巨像、火灵把 boss 换成 stone、flame）。看哪个 boss 按内嵌的模型文件名定。
+ * 正式模型 315～352 KB、贴图 226～252 KB，塞不进面板 512 KB 的上限，检查页用减面版（tools/lite_rig.py，约 4500 面、动作隔帧取）和缩到 192 的贴图：
+ * 看身高、朝向、甲罩没罩住、各招的动作跟预警对不对得上；细节以正式模型为准。游戏本身不引用这个文件。
  * 同一套天光、广场和敌人代码（actors/enemies.js），每招摆哪段动作的第几秒用和试炼模式同一个函数（actors/bossanim.js）；
- * 招的顺序、预警和喘息的长短照 rules/numbers.js 的 BOSS：吼 → 砸地 → 横扫 → 召小怪 → 追踪冰锥 → 旋转弹幕（预警 + 持续喷）→ 绕圈走一圈。
+ * 招的顺序、预警和喘息的长短照 rules/numbers.js：吼 → 这个 boss 的各招（落石的预警加上后面几块落地的时间；冲撞蓄力完接被打断的硬直）→ 绕圈走一圈。
  * 调试接口 window.bc：view('front' | 'close' | 'side' | 'top')、cam(镜头位置, 看的点)、pause、step(秒)、snap(w, h) 返回 JPEG 地址、
- * pose(动作, 第几秒) 定住某一帧（cycle() 接着循环）、seek(第几步) 跳到某一招、armor(0～1) 冰甲剩多少、now 当前在哪一步。
+ * pose(动作, 第几秒) 定住某一帧（cycle() 接着循环）、seek(第几步) 跳到某一招、armor(0～1) 甲剩多少（0 是碎了）、now 当前在哪一步。
  * 面板是竖长的：先 snap(innerWidth, innerHeight) 让画布和窗口同比例再截图，不然画面被横向拉扁。
  */
 import * as THREE from 'three';
@@ -15,11 +16,11 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { Enemies } from '../actors/enemies.js';
+import { Enemies, FLAME_SHELL_K } from '../actors/enemies.js';
 import { loadRig } from '../actors/rig.js';
-import { bossPose, ICE_KING } from '../actors/bossanim.js';
+import { BOSS_CLIPS, bossPose } from '../actors/bossanim.js';
 import { GradePass } from '../fx/grade.js';
-import { BOSS, ENEMIES } from '../rules/numbers.js';
+import { BOSS, ENEMIES, FLAME, STONE } from '../rules/numbers.js';
 import { TIERS } from '../quality.js';
 import { buildEnvironment } from '../world/environment.js';
 import { buildLayout } from '../world/layout.js';
@@ -35,19 +36,42 @@ const VIEWS = {
 };
 const ORBIT = 2.4;
 const REST = BOSS.recover[0];
-/** 一步：[试炼的状态, 招, 几秒] */
-const SEQ = /** @type {[string, string, number][]} */ ([
-  ['roar', '', BOSS.roarSec], ['idle', '', 0.8],
-  ['tele', 'slam', BOSS.slam.tele], ['recover', 'slam', REST],
-  ['tele', 'sweep', BOSS.sweep.tele], ['recover', 'sweep', REST],
-  ['tele', 'summon', BOSS.summon.tele], ['recover', 'summon', REST],
-  ['tele', 'homing', BOSS.homing.tele], ['recover', 'homing', REST],
-  ['tele', 'spiral', BOSS.spiral.tele], ['channel', 'spiral', BOSS.spiral.sec], ['recover', 'spiral', REST],
-  ['walk', '', (2 * Math.PI * ORBIT) / ENEMIES.boss.speed],
-]);
+const ROCK_LEAD = (STONE.rocks.n[0] - 1) * STONE.rocks.gap;
+/** 一步：[试炼的状态, 招, 几秒, 预警最后几秒算出手以后（落石后面几块）]；每个 boss 最后再绕圈走一圈 @type {Record<string, [string, string, number, number?][]>} */
+const SEQS = {
+  boss: [
+    ['roar', '', BOSS.roarSec], ['idle', '', 0.8],
+    ['tele', 'slam', BOSS.slam.tele], ['recover', 'slam', REST],
+    ['tele', 'sweep', BOSS.sweep.tele], ['recover', 'sweep', REST],
+    ['tele', 'summon', BOSS.summon.tele], ['recover', 'summon', REST],
+    ['tele', 'homing', BOSS.homing.tele], ['recover', 'homing', REST],
+    ['tele', 'spiral', BOSS.spiral.tele], ['channel', 'spiral', BOSS.spiral.sec], ['recover', 'spiral', REST],
+  ],
+  stone: [
+    ['roar', '', BOSS.roarSec], ['idle', '', 0.8],
+    ['tele', 'slam', STONE.slam.tele], ['recover', 'slam', REST],
+    ['tele', 'rocks', STONE.rocks.tele + ROCK_LEAD, ROCK_LEAD], ['recover', 'rocks', REST],
+    ['tele', 'charge', STONE.charge.tele[0]], ['stagger', '', STONE.charge.stagger], ['recover', '', REST],
+    ['tele', 'spikes', STONE.spikes.tele], ['recover', 'spikes', REST],
+    ['tele', 'summon', STONE.summon.tele], ['recover', 'summon', REST],
+  ],
+  flame: [
+    ['roar', '', BOSS.roarSec], ['idle', '', 0.8],
+    ['tele', 'wave', FLAME.wave.tele], ['recover', 'wave', REST],
+    ['tele', 'homing', FLAME.homing.tele], ['recover', 'homing', REST],
+    ['tele', 'pyre', FLAME.pyre.tele], ['recover', 'pyre', REST],
+    ['tele', 'nova', FLAME.nova.tele], ['recover', 'nova', REST],
+    ['tele', 'summon', FLAME.summon.tele], ['recover', 'summon', REST],
+  ],
+};
 
 /** @param {HTMLElement} root @param {Record<string, string>} assets 文件名 → 地址 */
 export function startBossCheck(root, assets) {
+  const file = Object.keys(assets).find((f) => f.endsWith('.rig.gz')) ?? 'boss.rig.gz';
+  const type = /** @type {'boss' | 'stone' | 'flame'} */ (file.replace('.rig.gz', ''));
+  const speed = ENEMIES[type].speed;
+  const SEQ = [...SEQS[type], /** @type {[string, string, number]} */ (['walk', '', (2 * Math.PI * ORBIT) / speed])];
+  const clips = /** @type {import('../actors/bossanim.js').BossClips} */ (BOSS_CLIPS[type]);
   const q = TIERS.cinema;
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(1);
@@ -78,21 +102,21 @@ export function startBossCheck(root, assets) {
   let tail = null;
   /** @type {{ clip: string, time: number } | null} 定住的那一帧（bc.pose） */
   let fixed = null;
-  const tex = Object.keys(assets).find((f) => f.startsWith('boss-') && f.endsWith('.webp'));
-  const ready = loadRig(assets['boss.rig.gz'], tex && assets[tex]).then((rig) => {
-    enemies.useBossRig('boss', rig);
-    b = enemies.spawnAt('boss', C.x, C.z, 'boss');
+  const tex = Object.keys(assets).find((f) => f.startsWith(`${type}-`) && f.endsWith('.webp'));
+  const ready = loadRig(assets[file], tex && assets[tex]).then((rig) => {
+    enemies.useBossRig(type, rig);
+    b = enemies.spawnAt(type, C.x, C.z, 'boss');
     b.dir.set(0, 0, 1);
     return rig;
   });
 
-  /** 进第 n 步：出手（预警结束）和喷完时记下收招从哪算起，同试炼模式 @param {number} n */
+  /** 进第 n 步：出手（预警结束）和喷完时记下收招从哪算起，吼、硬直清掉，同试炼模式 @param {number} n */
   function enter(n) {
-    const [prev, move] = SEQ[i];
-    if (prev === 'tele' && SEQ[n % SEQ.length][0] !== 'channel') tail = { move, t: 0 };
+    const [prev, move, , lead = 0] = SEQ[i];
+    if (prev === 'tele' && SEQ[n % SEQ.length][0] !== 'channel') tail = { move, t: lead };
     if (prev === 'channel') tail = { move, t: 0 };
     i = n % SEQ.length; t = SEQ[i][2]; chT = 0;
-    if (SEQ[i][0] === 'roar') tail = null;
+    if (SEQ[i][0] === 'roar' || SEQ[i][0] === 'stagger') tail = null;
   }
 
   /** @param {number} dt */
@@ -102,9 +126,9 @@ export function startBossCheck(root, assets) {
     if (SEQ[i][0] === 'channel') chT += dt;
     if (tail) tail.t += dt;
     if (t <= 0) enter(i + 1);
-    const [state, move, len] = SEQ[i];
+    const [state, move, len, lead] = SEQ[i];
     if (state === 'walk') {
-      a += (ENEMIES.boss.speed / ORBIT) * dt;
+      a += (speed / ORBIT) * dt;
       b.pos.set(C.x + Math.sin(a) * ORBIT, 0, C.z - ORBIT + Math.cos(a) * ORBIT);
       b.dir.set(Math.cos(a), 0, -Math.sin(a));
     } else {
@@ -112,7 +136,7 @@ export function startBossCheck(root, assets) {
       b.dir.set(0, 0, 1);
     }
     b.moving = state === 'walk';
-    b.pose = fixed ?? bossPose(ICE_KING, { state, move, t, len, chT, tail });
+    b.pose = fixed ?? bossPose(clips, { state, move, t, len, chT, tail, lead });
     enemies.update(dt, camera);
   }
 
@@ -139,7 +163,7 @@ export function startBossCheck(root, assets) {
   requestAnimationFrame(loop);
 
   const bc = {
-    ready, enemies, scene,
+    ready, enemies, scene, type,
     get boss() { return b; },
     get now() { return b && { step: i, state: SEQ[i][0], move: SEQ[i][1], left: +t.toFixed(2), pose: b.pose, clip: b.rig?.cur, time: +(b.rig?.actions[b.rig.cur]?.time ?? 0).toFixed(3) }; },
     /** @param {keyof typeof VIEWS} v */
@@ -155,8 +179,14 @@ export function startBossCheck(root, assets) {
     cycle: () => { fixed = null; },
     /** @param {number} n */
     seek: (n) => { tail = null; i = n % SEQ.length; t = SEQ[i][2]; chT = 0; render(); return bc.now; },
-    /** 冰甲剩多少（试炼模式同一个式子） @param {number} k */
-    armor: (k) => { enemies.armorMat.opacity = enemies.shellMat.opacity = 0.2 + 0.4 * k; render(); },
+    /** 甲剩多少：冰甲、火罩的透明度用试炼模式同一个式子（火罩不闪），0 是碎了（整层不画） @param {number} k */
+    armor: (k) => {
+      const m = enemies;
+      if (type === 'boss') m.armorMat.opacity = m.shells.boss.opacity = 0.2 + 0.4 * k;
+      if (type === 'flame') m.shells.flame.opacity = (m.flameMat.opacity = 0.14 + 0.26 * k) * FLAME_SHELL_K;
+      if (b?.armorMesh) b.armorMesh.visible = k > 0;
+      render();
+    },
     snap: (sw = 960, sh = 540) => { w = sw; h = sh; render(); return renderer.domElement.toDataURL('image/jpeg', 0.8); },
   };
   /** @type {any} */ (window).bc = bc;

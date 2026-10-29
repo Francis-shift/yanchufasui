@@ -1,4 +1,4 @@
-// 骨骼模型（game/actors/rig.js 读 tools/pack_rig.py 打的 RIG1）：解开小傀儡、施法者、寒甲傀儡王的正式文件，用 three.js 自己的骨骼动画跑几帧核对。
+// 骨骼模型（game/actors/rig.js 读 tools/pack_rig.py 打的 RIG1）：解开小傀儡、施法者、三个 boss 的正式文件，用 three.js 自己的骨骼动画跑几帧核对。
 // 施法者另外核对 game/actors/caster.js 的两层动作（边跑边出掌只换上半身）和朝向。
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { gunzipSync } from 'node:zlib';
 
 import * as THREE from 'three';
-import { ICE_KING } from '../game/actors/bossanim.js';
+import { BOSS_CLIPS } from '../game/actors/bossanim.js';
 import { Caster } from '../game/actors/caster.js';
 import { decodeRig, makeRig, playRig } from '../game/actors/rig.js';
 
@@ -63,25 +63,27 @@ for (const [who, { rig, clips }] of Object.entries(MODELS)) {
   });
 }
 
-test('寒甲傀儡王模型：骨架、权重同上；出招表（bossanim.js）里的每段动作都在，出手、收招、来回那一段都落在动作长度以内；走路原地、脚踩地', () => {
-  const rig = load('boss.rig.gz'), g = rig.geometry, n = g.attributes.position.count;
-  rig.bones.forEach((b, i) => assert.ok(b.parent < i, `${b.name} 的父骨排在它前面`));
-  const J = g.attributes.skinIndex.array, W = g.attributes.skinWeight.array;
-  for (let i = 0; i < n; i++) {
-    assert.equal(W[i * 4] + W[i * 4 + 1] + W[i * 4 + 2] + W[i * 4 + 3], 255);
-    for (let k = 0; k < 4; k++) assert.ok(J[i * 4 + k] < rig.bones.length);
-  }
-  for (const [name, c] of Object.entries(ICE_KING)) {
-    const d = rig.clips[name]?.duration;
-    assert.ok(d > 0, `没有 ${name} 这段动作`);
-    for (const x of [c.hit, c.end, ...(/** @type {any} */ (c).hold ?? [])]) assert.ok(x >= 0 && x <= d + 1e-6, `${name}：${x} 秒超出动作长度 ${d.toFixed(2)}`);
-  }
-  assert.ok(rig.clips.idle?.duration > 0 && rig.speeds.walk > 0);
-  for (const f of sample(rig, 'walk', rig.clips.walk.duration * 1.5)) {
-    assert.ok(f.low > -0.08 && f.low < 0.12, `walk 最低点 ${f.low.toFixed(3)}`);
-    assert.ok(f.drift < 0.2, `walk 髋骨漂了 ${f.drift.toFixed(3)}`);
-  }
-});
+for (const [who, file, type] of [['寒甲傀儡王', 'boss.rig.gz', 'boss'], ['石甲巨像', 'stone.rig.gz', 'stone'], ['火灵', 'flame.rig.gz', 'flame']]) {
+  test(`${who}模型：骨架、权重同上；出招表（bossanim.js）里的每段动作（借来的按借的那段）都在，出手、收招、来回那一段都落在动作长度以内；走路原地、脚踩地`, () => {
+    const rig = load(file), g = rig.geometry, n = g.attributes.position.count;
+    rig.bones.forEach((b, i) => assert.ok(b.parent < i, `${b.name} 的父骨排在它前面`));
+    const J = g.attributes.skinIndex.array, W = g.attributes.skinWeight.array;
+    for (let i = 0; i < n; i++) {
+      assert.equal(W[i * 4] + W[i * 4 + 1] + W[i * 4 + 2] + W[i * 4 + 3], 255);
+      for (let k = 0; k < 4; k++) assert.ok(J[i * 4 + k] < rig.bones.length);
+    }
+    for (const [name, c] of Object.entries(BOSS_CLIPS[type])) {
+      const clip = /** @type {any} */ (c).clip ?? name, d = rig.clips[clip]?.duration;
+      assert.ok(d > 0, `没有 ${clip} 这段动作`);
+      for (const x of [c.hit, c.end, ...(/** @type {any} */ (c).hold ?? [])]) assert.ok(x >= 0 && x <= d + 1e-6, `${name}：${x} 秒超出动作长度 ${d.toFixed(2)}`);
+    }
+    assert.ok(rig.clips.idle?.duration > 0 && rig.speeds.walk > 0);
+    for (const f of sample(rig, 'walk', rig.clips.walk.duration * 1.5)) {
+      assert.ok(f.low > -0.08 && f.low < 0.12, `walk 最低点 ${f.low.toFixed(3)}`);
+      assert.ok(f.drift < 0.2, `walk 髋骨漂了 ${f.drift.toFixed(3)}`);
+    }
+  });
+}
 
 /** 放这段动作 sec 秒，每 step 秒量一次：最低点（脚）多高、髋骨离静止位置水平多远、身上的点挪了多少 */
 function sample(rig, name, sec = 1.4, step = 0.1) {

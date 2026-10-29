@@ -39,10 +39,17 @@ const RIG_LOOK = {
 };
 /**
  * 换成绑骨骼模型的 boss（模型由 useBossRig 给，没到之前照旧方块）：身高（米）、染色、碎块颜色、出招身段（lean）打几折（动作自己会俯仰）。
- * 寒甲傀儡王：方块那版高约 4 米，模型取 3.8（宽是身高的 0.92 倍，双拳垂在身侧）
+ * 寒甲傀儡王：方块那版高约 4 米，模型取 3.8（宽是身高的 0.92 倍，双拳垂在身侧）；
+ * 石甲巨像：方块那版约 4.7 米，模型取 4.4（宽 0.85 倍）；火灵：方块那版约 3.7 米，模型取 3.5（宽 0.65 倍）
  * @type {Record<string, { h: number, tint: number, chip: number, lean: number }>}
  */
-const BOSS_LOOK = { boss: { h: 3.8, tint: 0xffffff, chip: 0x5a6872, lean: 0.35 } };
+const BOSS_LOOK = {
+  boss: { h: 3.8, tint: 0xffffff, chip: 0x5a6872, lean: 0.35 },
+  stone: { h: 4.4, tint: 0xffffff, chip: 0x9a8a68, lean: 0.35 },
+  flame: { h: 3.5, tint: 0xffffff, chip: 0x4a2418, lean: 0.35 },
+};
+/** 火灵模型身上那层火罩的透明度是方块那版火罩的几倍：贴着身子画，同样透明度整个人糊成一个橙色人形（10-28 检查页），淡一些身形才透出来 */
+export const FLAME_SHELL_K = 0.55;
 /** 出拳那段动作里拳头打到最远是第几秒：符箓傀儡蓄力到点（出火球）正好打出去 */
 const AIM_PUNCH = 0.875;
 
@@ -122,20 +129,29 @@ export class Enemies {
     /** boss 的冰甲：罩住上身的一层半透明冰（只有一个 boss，材质共用；透明度由试炼模式按剩多少甲调） */
     this.armorMat = new THREE.MeshStandardMaterial({ color: 0xcdeeff, roughness: 0.12, transparent: true, opacity: 0.55,
       emissive: 0x2f7fc0, emissiveIntensity: 0.5, depthWrite: false });
-    // 换成模型的寒甲傀儡王：冰甲是贴着身子的一层（同一副骨架带着动），沿法线往外鼓 0.018（模型高 1），只罩静止姿势里 0.3 以上（膝盖以上）
-    this.shellMat = this.armorMat.clone();
-    this.shellMat.onBeforeCompile = (sh) => {
-      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vRestY;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += normal * 0.018;\nvRestY = position.y;');
-      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vRestY;')
-        .replace('void main() {', 'void main() {\n  if (vRestY < 0.3) discard;');
-    };
     // 石甲巨像的石甲：胸前一整块石板、两肩各压一块大石头（棱角分明），石缝里透一点土黄的光
     this.rockMat = new THREE.MeshStandardMaterial({ color: 0x5f5548, roughness: 0.95, flatShading: true, emissive: 0x3a2408, emissiveIntensity: 0.6 });
     // 火灵的火罩：半透明、自己发光（亮过泛光阈值）；透明度由试炼模式按剩多少罩、一闪一闪地调
     // 1.6 倍发光、0.58 不透明那版整团橙色糊成一颗实心的蛋，里面只透出两只眼睛（10-28 截图），压下来让身形透出来
     this.flameMat = new THREE.MeshStandardMaterial({ color: 0xff9a4a, emissive: 0xff5a14, emissiveIntensity: 1.0, roughness: 0.6, transparent: true,
       opacity: 0.4, depthWrite: false });
+    // 换成模型的 boss 身上那层甲：同一份网格、同一副骨架再画一层（跟着动作走），沿法线往外鼓 push（模型高 1），只罩静止姿势里 minY 以上；
+    // cells 不为 0 的按这么密的格子一块有一块没有（石甲是一块块石板）。三层的着色器只差几个数，要给 three.js 各自的缓存键，不然共用头一个编出来的
+    const shell = (/** @type {THREE.MeshStandardMaterial} */ base, /** @type {number} */ push, /** @type {number} */ minY, cells = 0) => {
+      const m = base.clone();
+      let cut = `if (vRest.y < ${minY.toFixed(3)}) discard;`;
+      if (cells) cut += `\n  if (fract(sin(dot(floor(vRest * ${cells.toFixed(1)}), vec3(12.9898, 78.233, 37.719))) * 43758.5453) < 0.4) discard;`;
+      m.onBeforeCompile = (sh) => {
+        sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vRest;')
+          .replace('#include <begin_vertex>', `#include <begin_vertex>\ntransformed += normal * ${push.toFixed(3)};\nvRest = position;`);
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vRest;')
+          .replace('void main() {', `void main() {\n  ${cut}`);
+      };
+      m.customProgramCacheKey = () => `shell:${push}:${minY}:${cells}`;
+      return m;
+    };
+    /** @type {Record<string, THREE.MeshStandardMaterial>} 冰甲罩膝盖以上（透明度由试炼模式调）；石甲是腰以上一块块石板；火罩裹全身、鼓得最开（跟着方块那版的火罩一起闪，透明度乘 FLAME_SHELL_K） */
+    this.shells = { boss: shell(this.armorMat, 0.018, 0.3), stone: shell(this.rockMat, 0.02, 0.45, 9), flame: shell(this.flameMat, 0.035, 0) };
     this.barBg = new THREE.MeshBasicMaterial({ color: 0x1a1a1a, transparent: true, opacity: 0.6, depthTest: false });
     this._p = new THREE.Vector3(); this._d = new THREE.Vector3();
   }
@@ -172,8 +188,8 @@ export class Enemies {
       if (type === 'archer') prop(this.geo.rigCharm, this.charmMat, 0.86, 0.165, -0.22);   // 额头正中垂一道黄符，顺着脸往后仰
       if (type === 'charger') { prop(this.geo.rigHelmet, this.ironMat, 0.84, 0); prop(this.geo.rigRam, this.ironMat, 0.855, 0.17); }
       g.add(rig.mesh);
-      if (type === 'boss') {   // 冰甲：同一份网格、同一副骨架再画一层（shellMat 往外鼓、只罩上身），跟着动作走
-        const shell = new THREE.SkinnedMesh(src.geometry, this.shellMat);
+      if (bossLook && this.shells[type]) {   // 冰甲、石甲、火罩：同一份网格、同一副骨架再画一层（见 this.shells），跟着动作走
+        const shell = new THREE.SkinnedMesh(src.geometry, this.shells[type]);
         shell.bind(rig.mesh.skeleton, new THREE.Matrix4());
         shell.frustumCulled = false;
         rig.mesh.add(shell);

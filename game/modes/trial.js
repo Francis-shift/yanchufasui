@@ -20,7 +20,8 @@ import { waveHalfW } from '../rules/fusion.js';
 import { CASTER_POS, CORE_POS, OBSTACLES, PLAZA_R } from '../world/layout.js';
 import { rand } from '../fx/common.js';
 import { distToSegment } from '../fx/walls.js';
-import { bossPose, ICE_KING } from '../actors/bossanim.js';
+import { BOSS_CLIPS, bossPose } from '../actors/bossanim.js';
+import { FLAME_SHELL_K } from '../actors/enemies.js';
 
 /** 守关时施法者站的地方（开局就记下，试炼结束放回这里） */
 const HOME = CASTER_POS.clone();
@@ -37,8 +38,6 @@ const SWEEP_HALF = (BOSS.sweep.halfDeg * Math.PI) / 180;
 const MAX_BULLETS = 200;
 /** 第几个 boss 用哪张招式表 */
 const BOSS_CFG = [BOSS, STONE, FLAME];
-/** 换成绑骨骼模型的 boss：每段出招动作的出手时刻（actors/bossanim.js）；没写的照旧方块 */
-const BOSS_ANIM = { boss: ICE_KING };
 /** 每个 boss 现身时的提示：手机版、电脑版 @type {Record<string, [string, string]>} */
 const BOSS_HINT = {
   boss: ['躲开地上的红圈和红扇；冰甲只怕火，先用火打碎它', '躲开地上的红圈和红扇；冰甲只怕火，先用火打碎它。1、2、3 放天赋，4 召唤，空格闪避'],
@@ -129,6 +128,7 @@ export class Trial {
     /** @type {{ move: string, t: number } | null} 上一招出手（旋转弹幕是喷完）以后过了几秒：模型照常速放完收招 */
     this.tail = null;
     this.roarLen = 0;   // 这一声吼一共几秒（模型的吼按它放完）
+    this.lead = 0;      // 预警最后这几秒已算出手以后（落石：第一块落地以后后面几块还在落）
     this.robe = /** @type {THREE.MeshStandardMaterial} */ (/** @type {THREE.Mesh} */ (d.caster.children[0]).material);
     this._f = new THREE.Vector3(); this._r = new THREE.Vector3(); this._m = new THREE.Vector3();
     // 完美闪避：按闪避的时刻与位置（招落下时回头核对）；一次闪避只算一次
@@ -801,7 +801,7 @@ export class Trial {
   interrupt() {
     const b = this.boss, { hud, fx } = this.d;
     this.dropLanes();
-    this.state = 'stagger'; this.t = STONE.charge.stagger; this.left = 0; this.kick = 0.3;
+    this.state = 'stagger'; this.t = STONE.charge.stagger; this.left = 0; this.kick = 0.3; this.tail = null;
     hud.bigText('打断', '#16202b', 1100);
     fx.burst(new THREE.Vector3(b.pos.x, 1.2, b.pos.z), 'earth', 2.4, 0.6);
     this.shown = '';
@@ -870,6 +870,7 @@ export class Trial {
     const quick = !again ? 1 : this.move === 'slam' ? 0.7 : (/** @type {any} */ (cfg)[this.move].again ?? 1);
     this.t = this.teleLen = teleSec(this.move, this.phase, cfg) * quick * (this.slowTele ? RUN.runes.ning.tele : 1);
     this.slowTele = false;
+    this.lead = 0;
     const dx = this.p.x - b.pos.x, dz = this.p.z - b.pos.z, d = Math.hypot(dx, dz);
     const aim = d > 1e-3 ? { x: dx / d, z: dz / d } : { x: b.dir.x, z: b.dir.z };
     if (this.move === 'slam') {
@@ -889,6 +890,7 @@ export class Trial {
         m.g.position.set(s.x, 0.03, s.z); m.g.scale.set(R.r, 1, R.r); m.fill.scale.set(0.001, 0.001, 1); m.g.visible = true;
       });
       this.t = this.teleLen = tele + (spots.length - 1) * gap;
+      this.lead = (spots.length - 1) * gap;   // 模型的出手对第一块落地
       this.leanTo = -0.3;   // 仰头举手，把石头召下来（把火引出来）
     } else if (this.move === 'nova') {
       // 脚下亮一圈带缺口的红环：缺口朝哪，推出去的火环就在哪留缺口（连放的第二圈换到人的另一侧）
@@ -1301,7 +1303,7 @@ export class Trial {
   /** 预警到点：判定、演出 */
   resolve() {
     const b = this.boss, cfg = this.cfg, { fx, particles } = this.d;
-    this.tail = { move: this.move, t: 0 };
+    this.tail = { move: this.move, t: this.lead };
     if (this.move === 'slam') {
       const S = cfg.slam;
       this.circle.g.visible = false;
@@ -1427,6 +1429,8 @@ export class Trial {
     if (this.fighting) this.updateBlaze(dt);
     if (!this.fighting) return;   // 被冰锥、落石、火打死了
     const cfg = this.cfg;
+    /** 换成模型的：每段出招动作的出手时刻（actors/bossanim.js）；方块是 null */
+    const clips = b.rig ? /** @type {Record<string, import('../actors/bossanim.js').BossClips>} */ (BOSS_CLIPS)[cfg.type] : null;
     const held = b.frozen > 0 || b.stun > 0;
     if (b.frozen > 0) this.freezeCd = BOSS.freezeGrace; else this.freezeCd = Math.max(0, this.freezeCd - dt);
     const ph = bossPhase(b.hp, b.maxHp);
@@ -1476,7 +1480,7 @@ export class Trial {
           // 火浪：梯形红区整个由小长大（只放大一个方向会探出边框），火往举起的手上收
           for (const l of this.lanes) l.s.fill.scale.set(k, k, 1);
           turn(this.sweepDir.x, this.sweepDir.z, 8);
-          this.gather(b, 2.2, dt);
+          this.gather(b, clips?.wave?.gather ? b.vis * clips.wave.gather : 2.2, dt);
         } else if (this.move === 'charge' || this.move === 'spikes') {
           for (const l of this.lanes) l.s.fill.scale.x = k;
           turn(this.sweepDir.x, this.sweepDir.z, 8);
@@ -1499,8 +1503,9 @@ export class Trial {
           // 冰锥（火球）、旋转弹幕、火环的蓄力：寒气（火）往 boss 身上收（冰锥收到举高的手上，弹幕、火环收到腰间）；火环脚下的红环由里往外长满
           turn(dx, dz, 5);
           if (this.move === 'nova') this.novaMark.fill.scale.set(k, k, 1);
-          // 模型：举过头顶的手在身高的 1.2 倍处，腰在 0.55 倍处
-          this.gather(b, this.move === 'homing' ? (b.rig ? b.vis * 1.2 : 2.6) : b.rig ? b.vis * 0.55 : 1.0, dt);
+          // 模型：出招表写了 gather 的照写的；没写的冰锥收到身高 1.2 倍处（寒甲傀儡王举过头顶的手），别的收到腰（0.55 倍）
+          const g = clips?.[this.move]?.gather ?? (this.move === 'homing' ? 1.2 : 0.55);
+          this.gather(b, clips ? b.vis * g : this.move === 'homing' ? 2.6 : 1.0, dt);
         }
         if (this.t <= 0) this.resolve();
       } else if (this.state === 'channel') {
@@ -1541,14 +1546,13 @@ export class Trial {
     // 出招的身段：蓄力后仰、砸下去前扑一下
     this.kick = Math.max(0, this.kick - dt * 2.5);
     b.lean += (this.leanTo + this.kick - b.lean) * Math.min(1, dt * 12);
-    // 模型：这一刻摆哪段动作的第几秒（预警放到出手、出手后放完收招、吼）；方块不用
-    const clips = b.rig && /** @type {Record<string, import('../actors/bossanim.js').BossClips>} */ (BOSS_ANIM)[cfg.type];
-    b.pose = clips ? bossPose(clips, { state: this.state, move: this.move, t: this.t, len: this.state === 'roar' ? this.roarLen : this.teleLen,
-      chT: this.chT, tail: this.tail }) : null;
+    // 模型：这一刻摆哪段动作的第几秒（预警放到出手、出手后放完收招、吼、硬直）；方块不用
+    const len = this.state === 'roar' ? this.roarLen : this.state === 'stagger' ? STONE.charge.stagger : this.teleLen;
+    b.pose = clips ? bossPose(clips, { state: this.state, move: this.move, t: this.t, len, chT: this.chT, tail: this.tail, lead: this.lead }) : null;
     if (b.armorMesh) b.armorMesh.visible = this.armor > 0;
     if (cfg === BOSS) {   // 冰甲越削越透（方块的冰壳、模型身上那层一起）
       const m = this.d.enemies;
-      m.armorMat.opacity = m.shellMat.opacity = 0.2 + 0.4 * (this.armor / BOSS.armor);
+      m.armorMat.opacity = m.shells.boss.opacity = 0.2 + 0.4 * (this.armor / BOSS.armor);
     }
     if (cfg === FLAME) this.burn(b, dt);
     this.showBoss();
@@ -1561,6 +1565,7 @@ export class Trial {
   burn(b, dt) {
     const k = this.armor / FLAME.armor, m = this.d.enemies.flameMat, s = b.scale;
     m.opacity = (0.14 + 0.26 * k) * (0.85 + 0.15 * Math.sin(this.clock * 17) * Math.sin(this.clock * 5.3));
+    this.d.enemies.shells.flame.opacity = m.opacity * FLAME_SHELL_K;
     b.armorMesh?.children[0]?.scale.set(1, 0.8 + 0.35 * Math.abs(Math.sin(this.clock * 9)), 1);
     const lit = this.armor > 0;
     for (this.aura += dt * (lit ? 34 : 10); this.aura >= 1; this.aura--) {
