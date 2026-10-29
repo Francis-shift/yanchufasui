@@ -302,16 +302,18 @@ const CSS = FONT_CSS + `
   letter-spacing: 0.22em; color: #26313d; text-shadow: 0 0 10px rgba(250,246,236,0.95), 0 0 3px rgba(250,246,236,0.9); }
 .yc-cover-best { font: 14px/1.5 "STKaiti", "KaiTi", "Kaiti SC", serif; color: #26313d; text-shadow: 0 0 8px rgba(250,246,236,0.95); }
 .yc-cover-best[hidden] { display: none; }
-.yc-cover-modes { display: flex; gap: clamp(12px, 1.6vw, 20px); flex-wrap: wrap; }
-/* 水墨按钮：底下一笔浓墨（SVG），字是米白的书法字 */
+.yc-cover-modes { display: flex; gap: clamp(30px, 3.2vw, 46px); flex-wrap: wrap; }   /* 留出前一笔飞白伸出去的那截 */
+/* 水墨按钮：底下一笔浓墨（inkStroke 画好放进 --yc-brush；画不了用这里的 SVG），字是米白的书法字，压在起笔浓的那头 */
 .yc-ink { pointer-events: auto; position: relative; isolation: isolate; border: 0; background: none; cursor: pointer; font: inherit; color: #f6f1e7;
   min-width: clamp(136px, 15vw, 180px); padding: 12px 30px 14px 24px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
   text-align: left; transition: transform .15s; -webkit-tap-highlight-color: transparent; }
-.yc-ink::before { content: ""; position: absolute; inset: -6px -10px -4px -8px; z-index: -1; filter: drop-shadow(0 6px 10px rgba(10,16,24,0.35));
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 80' preserveAspectRatio='none'%3E%3Cpath fill='%231b232d' d='M9 44C13 25 41 16 84 15c43-2 92-4 130 3 18 4 23 16 17 28-6 12-31 18-71 19-44 2-96 3-126-2C16 60 6 54 9 44z'/%3E%3Cpath fill='none' stroke='%231b232d' stroke-width='2.4' stroke-linecap='round' d='M212 22l25-3M219 55l19 4M14 36l-10-4'/%3E%3Cpath fill='none' stroke='%23f6f1e7' stroke-opacity='.09' stroke-width='1.6' d='M30 30c50-4 120-6 180-2M26 54c64 4 124 3 188-4M40 42c60-2 110-2 170 0'/%3E%3C/svg%3E")
+.yc-ink::before { content: ""; position: absolute; inset: -8px -40px -6px -12px; z-index: -1; filter: drop-shadow(0 6px 10px rgba(10,16,24,0.3));
+  background: var(--yc-brush) center / 100% 100% no-repeat; }
+.yc-nobrush .yc-ink::before { inset: -6px -10px -4px -8px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 80' preserveAspectRatio='none'%3E%3Cpath fill='%231b232d' d='M9 44C13 25 41 16 84 15c43-2 92-4 130 3 18 4 23 16 17 28-6 12-31 18-71 19-44 2-96 3-126-2C16 60 6 54 9 44z'/%3E%3Cpath fill='none' stroke='%231b232d' stroke-width='2.4' stroke-linecap='round' d='M212 22l25-3M219 55l19 4M14 36l-10-4'/%3E%3Cpath fill='none' stroke='%23f6f1e7' stroke-opacity='.09' stroke-width='1.6' d='M30 30c50-4 120-6 180-2M26 54c64 4 124 3 188-4M40 42c60-2 110-2 170 0'/%3E%3C/svg%3E")
     center / 100% 100% no-repeat; }
 .yc-ink b { font: normal clamp(28px, 4.4vh, 40px)/1.05 ${BRUSH}; letter-spacing: 0.14em; }
-.yc-ink span { font-size: 12px; opacity: 0.8; white-space: nowrap; }
+.yc-ink b, .yc-ink span { text-shadow: 0 0 4px rgb(20,24,30), 0 0 2px rgb(20,24,30); }   /* 字压到飞白上也看得清 */
+.yc-ink span { font-size: 12px; opacity: 0.85; white-space: nowrap; }
 .yc-ink:hover, .yc-ink:focus-visible { transform: translateY(-2px) scale(1.03); outline: none; }
 .yc-ink:active { transform: scale(0.97); }
 .yc-ink:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
@@ -324,6 +326,7 @@ const CSS = FONT_CSS + `
 .yc-cover-step p { margin: 6px 0 0; font-size: 13.5px; line-height: 1.7; color: #3b4856; }
 .yc-cover-step .yc-btns { align-items: center; gap: 16px; margin-top: 14px; }
 .yc-cover-step .yc-ink { min-width: 132px; align-items: center; padding: 8px 28px 10px; }
+.yc-cover-step .yc-ink::before { right: -14px; }   /* 后面紧跟着"返回"，飞白别伸过去 */
 .yc-cback { font: inherit; font-size: 14px; color: #5d6b7a; background: none; border: 0; cursor: pointer; padding: 6px 8px;
   text-decoration: underline; text-underline-offset: 4px; }
 /* 手机竖屏：标题在左上，按钮并排压在最下面，中间留给画面；第二步是底部的纸面板 */
@@ -336,6 +339,7 @@ const CSS = FONT_CSS + `
 .yc-narrow .yc-cover-best { align-self: center; }
 .yc-narrow .yc-cover-modes { flex-wrap: nowrap; justify-content: center; gap: 14px; }
 .yc-narrow .yc-cover-modes .yc-ink { flex: 1 1 0; min-width: 0; max-width: 190px; padding: 12px 16px 14px 18px; }
+.yc-narrow .yc-cover-modes .yc-ink::before { right: -14px; }
 .yc-narrow .yc-cover-modes .yc-ink span { white-space: normal; font-size: 11px; line-height: 1.35; }
 .yc-narrow .yc-cover-step { left: 10px; right: 10px; top: auto; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); transform: none; width: auto; max-height: 72%; }
 /* 横过来的手机：标题、按钮都缩一号，第二步纸面板放右边、天赋钮缩小 */
@@ -350,6 +354,75 @@ const CSS = FONT_CSS + `
 .yc-short .yc-cover-step .yc-btns { margin-top: 6px; }
 `;
 
+/**
+ * 水墨按钮底下那一笔（10-30 本人给了一张笔触图让我挑，选了"左边浓墨起笔、往右飞白散开"那种，照着用代码画）：
+ * 一根根笔毛从左往右拖，每根蘸的墨不一样多，边上的少；墨少的先断、拖到后半段断断续续（飞白）；起笔那头按成圆钝的一团。
+ * 固定随机种子，谁打开都是同一笔。画不了（没有 canvas）返回空串，CSS 里退回一笔简单的 SVG。
+ * @param {number} [w] @param {number} [h]
+ */
+export function inkStroke(w = 600, h = 200) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  if (!g) return '';
+  let seed = 20261030;
+  const rnd = () => {   // mulberry32
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const N = 130, x0 = w * 0.03, x1 = w * 0.985, cy = h * 0.55, half = h * 0.33, step = 3;
+  const ph = [rnd() * 6.3, rnd() * 6.3, rnd() * 6.3, rnd() * 6.3];
+  // 笔毛成簇：相邻几根蘸的墨差不多，干到后半段就分成一缕一缕
+  const clump = (v) => 0.5 + 0.2 * Math.sin(v * 6 + ph[0]) + 0.17 * Math.sin(v * 15 + ph[1]) + 0.13 * Math.sin(v * 33 + ph[2]);
+  // 起笔的轮廓：圆钝、略斜（上沿比下沿靠右一点）
+  const head = (v) => half * 0.82 * (1 - Math.sqrt(Math.max(0, 1 - v * v))) - v * half * 0.12 + 2.5 * Math.sin(v * 4 + ph[3]);
+  // 第 v 根笔毛走到 x 时在哪个高度：往右略收、略往上挑
+  const midY = (x, v) => { const k = (x - x0) / (x1 - x0); return cy + v * half * (1 - 0.25 * k) - 16 * k * k; };
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  for (let j = 0; j < N; j++) {
+    const v = (j / (N - 1)) * 2 - 1;   // 这根笔毛在笔锋里的位置：-1 上沿，1 下沿
+    const ink = Math.max(0.04, Math.min(1, clump(v) * 0.8 + 0.35 * (rnd() - 0.3))) * (1 - 0.45 * v * v);   // 蘸了多少墨：边上的少
+    const start = x0 + head(v) + rnd() ** 2 * 14 * (0.3 + Math.abs(v));
+    const end = x0 + (x1 - x0) * Math.min(1, 0.42 + 0.66 * ink + (rnd() - 0.5) * 0.1) * (1 - 0.07 * Math.max(0, v));   // 上沿拖得最远
+    const w0 = (2 * half / N) * (2.2 + 1.4 * rnd()) * (1 - 0.3 * Math.abs(v));
+    g.strokeStyle = `rgba(20,24,30,${(0.82 + 0.18 * rnd()).toFixed(2)})`;
+    let on = true, wob = 0, n = 0, px = start, py = midY(start, v);
+    g.beginPath(); g.moveTo(px, py); g.lineWidth = w0;
+    for (let x = start + step; x <= end; x += step) {
+      const u = (x - start) / Math.max(1, end - start);   // 这根拖到哪了（0～1）
+      wob += (rnd() - 0.5) * 0.6; wob *= 0.88;
+      const y = midY(x, v) + wob;
+      const edge = Math.abs(v) > 0.78 ? 0.01 : 0;          // 上下沿毛糙
+      // 墨快干了：断开（过了四成才开始断，越往后、墨越少越容易断）；断了以后越靠前越容易接上
+      if (on && rnd() < 0.0015 + edge + 0.3 * Math.max(0, u - 0.42) ** 1.5 * (1.3 - ink)) { on = false; g.stroke(); }
+      else if (!on && rnd() < 0.05 + 0.5 * (1 - u) ** 2) { on = true; g.beginPath(); g.moveTo(px, py); }
+      if (on) {
+        g.lineTo(x, y);
+        if (++n % 5 === 0) { g.stroke(); g.beginPath(); g.moveTo(x, y); g.lineWidth = w0 * (1 - 0.7 * u ** 1.6); }   // 越往后越细
+      }
+      px = x; py = y;
+    }
+    if (on) g.stroke();
+  }
+  // 起笔处按下去的一团（轮廓跟着起笔、后沿参差），盖住笔毛的头
+  g.fillStyle = 'rgb(20,24,30)';
+  g.beginPath();
+  const M = 28;
+  for (let i = 0; i <= M; i++) {
+    const v = -0.9 + (i / M) * 1.8, x = x0 + head(v) + 6 + rnd() * 5;
+    if (i) g.lineTo(x, midY(x, v)); else g.moveTo(x, midY(x, v));
+  }
+  for (let i = M; i >= 0; i--) {
+    const v = -0.86 + (i / M) * 1.72, x = x0 + half * (1.3 + 1.6 * (1 - v * v)) + rnd() * 10;
+    g.lineTo(x, midY(x, v));
+  }
+  g.closePath();
+  g.fill();
+  return c.toDataURL('image/png');
+}
+
 /** @param {string} html */
 const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return /** @type {HTMLElement} */ (t.content.firstChild); };
 /** @param {string} s */
@@ -362,6 +435,10 @@ export class Hud {
     style.textContent = CSS;
     this.root = el(`<div class="yc-ui"></div>`);
     this.root.append(style);
+    let brush = '';
+    try { brush = inkStroke(); } catch { /* 画不了就用 CSS 里那笔简单的 */ }
+    if (brush) this.root.style.setProperty('--yc-brush', `url("${brush}")`);
+    else this.root.classList.add('yc-nobrush');
     this.top = el(`<div class="yc-top">
       <div class="yc-g"><div class="yc-label"><span data-corename>阵眼</span><b data-core>100</b></div><div class="yc-bar yc-core"><i data-corebar></i></div></div>
       <div class="yc-g"><div class="yc-label"><span data-wave>准备守关</span><span data-left></span></div></div>
