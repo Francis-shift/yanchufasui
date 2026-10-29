@@ -91,6 +91,48 @@ export function followPose(camera, p, boss, o = {}) {
 }
 
 /**
+ * 大招镜头（设计文档第 4 节"10-29 定"里那一条）：
+ * 完美闪避时镜头往人推近一下（kick：推近几成，in 秒推到、之后 out 秒退回）；
+ * 召龙时推到人的肩后、朝龙要砸的地方看，龙钻出来以后看的点往龙头那边偏 head 成，停 sec 秒或到龙砸中，再拉回俯视。
+ */
+export const SHOT = {
+  kick: { push: 0.22, in: 0.12, out: 0.8 },
+  /**
+   * 在人身后几米、往右偏几米（横屏时；电脑上技能按钮在底下正中，偏这么多人才落在按钮排左边，画面窄就按宽高比少偏些，免得出画）、
+   * 多高（齐头顶：人的上半身在按钮那一排上面）；看的点多高、最高抬到多高（龙飞得高时不跟着仰上去，不然人沉到画面底下）；
+   * 推过去、拉回来各几秒
+   */
+  back: 3.4, side: 2.0, up: 1.9, lookY: 1.5, head: 0.45, maxLookY: 2.4, sec: 2.6, in: 0.45, out: 0.9,
+};
+
+/** 完美闪避推近的量（0～1）：t 是推近开始后过了几秒 @param {number} t */
+export function kickAt(t) {
+  const { in: a, out: b } = SHOT.kick;
+  if (t < 0 || t >= a + b) return 0;
+  return t < a ? t / a : (1 - (t - a) / b) ** 2;
+}
+
+/**
+ * 召龙时肩后镜头的位置和看的点
+ * @param {{ x: number, z: number }} p 人
+ * @param {{ x: number, z: number }} target 龙要砸的地方
+ * @param {THREE.Vector3 | null} head 龙头（还没钻出来给 null）
+ * @param {THREE.Vector3} fwd 目标就在脚下时朝哪看（俯视跟随的"往前"）
+ * @param {number} [aspect] 画面宽高比
+ * @returns {{ pos: THREE.Vector3, look: THREE.Vector3 }}
+ */
+export function shoulderPose(p, target, head, fwd, aspect = 16 / 9) {
+  const f = new THREE.Vector3(target.x - p.x, 0, target.z - p.z);
+  if (f.lengthSq() < 1) f.set(fwd.x, 0, fwd.z);
+  f.normalize();
+  const side = SHOT.side * THREE.MathUtils.clamp(aspect / 1.7, 0.25, 1);
+  const pos = new THREE.Vector3(p.x - f.x * SHOT.back - f.z * side, SHOT.up, p.z - f.z * SHOT.back + f.x * side);
+  const look = new THREE.Vector3(target.x, SHOT.lookY, target.z);
+  if (head) { look.lerp(head, SHOT.head); look.y = Math.min(look.y, SHOT.maxLookY); }
+  return { pos, look };
+}
+
+/**
  * 一个点投到画面外时，边缘箭头放在哪、朝哪（画面坐标 -1～1，y 朝上）；在画面里就给 null
  * @param {THREE.Vector3} at 世界坐标 @param {THREE.Camera} camera @param {number} [edge] 箭头离边多远（投影坐标）
  * @returns {{ x: number, y: number, angle: number } | null} angle：箭头朝向（弧度，0 朝右、逆时针为正）

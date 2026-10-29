@@ -23,6 +23,8 @@ import { distToSegment } from '../fx/walls.js';
 import { BOSS_CLIPS, bossPose } from '../actors/bossanim.js';
 import { FLAME_SHELL_K } from '../actors/enemies.js';
 
+/** 走位按哪个方向算"往前"（取它的朝向，高低不管） @typedef {{ getWorldDirection(v: THREE.Vector3): THREE.Vector3 }} Steer */
+
 /** 守关时施法者站的地方（开局就记下，试炼结束放回这里） */
 const HOME = CASTER_POS.clone();
 const ARENA_R = PLAZA_R - 0.9;
@@ -700,7 +702,7 @@ export class Trial {
     return this._m.copy(this._r).multiplyScalar(ix).addScaledVector(this._f, iy);
   }
 
-  /** @param {number} dt @param {THREE.Camera} camera */
+  /** @param {number} dt @param {Steer} camera */
   movePlayer(dt, camera) {
     camera.getWorldDirection(this._f);
     this._f.setY(0).normalize();
@@ -1410,8 +1412,9 @@ export class Trial {
   }
 
   /**
-   * 每帧。dt 是游戏时间，pdt 是玩家的时间（心法刹那：全场慢下来时玩家照常快，走位、闪避冷却按 pdt 走）
-   * @param {number} dt @param {THREE.Camera} camera @param {number} [pdt]
+   * 每帧。dt 是游戏时间，pdt 是玩家的时间（心法刹那：全场慢下来时玩家照常快，走位、闪避冷却按 pdt 走）。
+   * camera 只取它的"往前"（摇杆往上、W 朝哪走）：main 给的是俯视跟随的朝向，演大招镜头时不跟着转
+   * @param {number} dt @param {Steer} camera @param {number} [pdt]
    */
   update(dt, camera, pdt = dt) {
     if (!this.on) return;

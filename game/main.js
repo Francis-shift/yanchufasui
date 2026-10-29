@@ -47,7 +47,7 @@ import { buildEnvironment } from './world/environment.js';
 import { invasionTarget, stepInvasion } from './world/invasion.js';
 import { buildBarrier } from './world/barrier.js';
 import { fitFrame } from './world/framing.js';
-import { FOLLOW, followPose, offscreenArrow } from './world/trialcam.js';
+import { FOLLOW, SHOT, followPose, kickAt, offscreenArrow, shoulderPose, viewDir } from './world/trialcam.js';
 import { loadProps } from './world/props.js';
 import { buildLayout, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS, OBSTACLES } from './world/layout.js';
 import { Hud, preloadFonts } from './ui/hud.js';
@@ -218,8 +218,15 @@ export function start(root, opts = {}) {
 
   // ---------------------------------------------------------------- 镜头：第三人称，平时固定；开口时轻推近
   const cam = { base: new THREE.Vector3(), look: new THREE.Vector3(), near: new THREE.Vector3(), nearLook: new THREE.Vector3(), focus: 0 };
-  /** 试炼的跟随镜头（world/trialcam.js）：平滑后的看的点、离多远；on 为 false 时下一帧直接跳到位 */
-  const tcam = { look: new THREE.Vector3(), dist: 0, on: false };
+  /**
+   * 试炼的跟随镜头（world/trialcam.js）：平滑后的看的点、离多远；on 为 false 时下一帧直接跳到位。
+   * perfects、kickT：上一帧数到的完美闪避次数、推近开始后几秒；shot：正在演的召龙肩后镜头（跟哪条龙、龙开飞后几秒、召了几秒），
+   * w：肩后镜头占几成（拉回时 shot 已清掉，照最后的机位退回来），pos / at：肩后机位和看的点
+   */
+  const tcam = { look: new THREE.Vector3(), dist: 0, on: false, perfects: 0, kickT: Infinity,
+    /** @type {{ f: any, t: number, wait: number } | null} */ shot: null, w: 0, pos: new THREE.Vector3(), at: new THREE.Vector3(), aimed: false };
+  /** 试炼里"往前"是哪个方向（trial.update 按它算摇杆和按键）：跟俯视跟随的朝向走，演肩后镜头时不跟着转 */
+  const steer = { dir: viewDir(FOLLOW.pitch, FOLLOW.yaw).negate(), getWorldDirection: (/** @type {THREE.Vector3} */ v) => v.copy(steer.dir) };
   function layoutCamera() {
     const w = root.clientWidth || window.innerWidth, h = root.clientHeight || window.innerHeight;
     camera.aspect = w / h;
@@ -1159,6 +1166,7 @@ export function start(root, opts = {}) {
     if (twin || guard) floatAt(new THREE.Vector3(CASTER_POS.x, 3.1, CASTER_POS.z), twin && guard ? '双龙·护身' : twin ? '双龙' : '护身', '#ffd76a');
     if (guard) { guardDragons(sm, el, twin); return; }
     flyAt(sm, el, k, res, castId);
+    if (S.mode === 'trial' && trial.on) tcam.shot = { f: dragon.flights[dragon.flights.length - 1], t: 0, wait: 0 };   // 大招镜头：推到肩后看龙飞出去
     if (!twin) return;
     const other = twinTarget(res.point ?? DEFAULT_AIM, views, { apart: RUN.dragon.twin.apart, count: 3 });
     after(RUN.dragon.twin.delay, () => { if (S.phase === 'playing') flyAt(sm, el, k, other.point ? other : res, ++castSeq); });
@@ -1705,21 +1713,56 @@ export function start(root, opts = {}) {
 
   /**
    * 试炼的跟随镜头（设计文档第 4 节"10-29 定：试炼的镜头与三档视角"）：看的点跟得快、离多远拉远快推近慢
-   * （boss 冲过来时先把它框进来，走近了再慢慢推回去）；开口时推近一点
+   * （boss 冲过来时先把它框进来，走近了再慢慢推回去）；开口时推近一点；完美闪避推近一下；召龙时推到肩后（ultShot）
    * @param {number} rdt 现实时间（慢放、顿帧时镜头照常跟）
    */
   function trialCamera(rdt) {
     const b = trial.boss;
     const safe = { ...FOLLOW.safe, top: Math.min(FOLLOW.safe.top, hud.safeTop()) };   // 矮屏幕上 boss 血条占得多，量着它来
     const pose = followPose(camera, trial.p, b ? { x: b.pos.x, z: b.pos.z, h: BOSS_H } : null, { safe });
+    steer.dir.copy(pose.dir).negate();
     if (!tcam.on) {
       tcam.on = true; tcam.look.copy(pose.look); tcam.dist = pose.dist;
-      env.aim(_v.copy(pose.dir).negate());
+      tcam.perfects = trial.perfects; tcam.kickT = Infinity; tcam.shot = null; tcam.w = 0;
+      env.aim(steer.dir);
     }
+    if (trial.perfects !== tcam.perfects) { tcam.perfects = trial.perfects; tcam.kickT = 0; }
+    tcam.kickT += rdt;
     tcam.look.lerp(pose.look, 1 - Math.exp(-rdt * 6));
     tcam.dist += (pose.dist - tcam.dist) * (1 - Math.exp(-rdt * (pose.dist > tcam.dist ? 4 : 1.2)));
     camLook.copy(tcam.look);
-    camPos.copy(tcam.look).addScaledVector(pose.dir, tcam.dist * (1 - 0.25 * cam.focus));
+    camPos.copy(tcam.look).addScaledVector(pose.dir, tcam.dist * (1 - 0.25 * cam.focus) * (1 - SHOT.kick.push * kickAt(tcam.kickT)));
+    ultShot(rdt);
+  }
+
+  /**
+   * 召龙的肩后镜头：一召就推到人的肩后、朝龙要砸的地方，龙开飞（召唤法阵亮完）后停 SHOT.sec 秒或到龙砸中，再拉回俯视。
+   * 模型还在下载时法阵先亮着等（最多 3 秒），从召的那一刻算起最多停 SHOT.sec + 1 秒——boss 照常出招，不能一直看龙。
+   * 走位方向照旧按俯视（steer 不跟着转）
+   * @param {number} rdt
+   */
+  function ultShot(rdt) {
+    const s = tcam.shot;
+    if (s) {
+      const f = s.f;
+      s.wait += rdt;
+      if (f.started) s.t += rdt;
+      if (!dragon.flights.includes(f) || f.impacted || s.t > SHOT.sec || s.wait > SHOT.sec + 1 || S.phase !== 'playing') tcam.shot = null;
+      else {
+        const sp = shoulderPose(trial.p, f.target, f.emerged ? f.headPos : null, steer.dir, camera.aspect);
+        const k = tcam.w > 0 ? 1 - Math.exp(-rdt * 5) : 1;   // 刚开始直接放到位（这时还没混进画面）
+        tcam.pos.lerp(sp.pos, k);
+        tcam.at.lerp(sp.look, k);
+      }
+    }
+    tcam.w = THREE.MathUtils.clamp(tcam.w + (tcam.shot ? rdt / SHOT.in : -rdt / SHOT.out), 0, 1);
+    const w = THREE.MathUtils.smoothstep(tcam.w, 0, 1);
+    if (w > 0) {
+      camPos.lerp(tcam.pos, w);
+      camLook.lerp(tcam.at, w);
+    }
+    if (w > 0 || tcam.aimed) env.aim(w > 0 ? _v.subVectors(camLook, camPos).normalize() : steer.dir);   // 雾取镜头朝向那段天边的颜色
+    tcam.aimed = w > 0;
   }
 
   /** boss 跑出画面时，屏幕边缘出一个箭头指着它（只在试炼打 boss 时） */
@@ -1755,7 +1798,7 @@ export function start(root, opts = {}) {
     for (let i = timers.length - 1; i >= 0; i--) { timers[i].t -= dt; if (timers[i].t <= 0) { const t = timers.splice(i, 1)[0]; t.fn(); } }
     if (S.phase === 'playing' || S.phase === 'rest') {
       S.mana = regenMana(S.mana, pdt, S.mods.manaRegen);
-      if (S.mode === 'trial') trial.update(dt, camera, pdt);   // 试炼：走位、小怪潮与 boss 轮换（三选一时停住）
+      if (S.mode === 'trial') trial.update(dt, steer, pdt);   // 试炼：走位、小怪潮与 boss 轮换（三选一时停住）
       else updateWave(dt);
     }
     world.step(1 / 60, dt, 3);
@@ -1959,6 +2002,8 @@ export function start(root, opts = {}) {
     framing: { dir: NARROW_DIR, look: NARROW_LOOK, wide: FRAME_WIDE, near: FRAME_NEAR },
     /** 试炼跟随镜头的参数（直接改，下一帧生效）；cam() 看镜头现在离多远、人和 boss 在画面上哪儿 */
     follow: FOLLOW,
+    /** 直接来一次完美闪避（看推镜、白光；要在开战后） */
+    perfect: () => { trial.perfectUsed = false; trial.perfect(); },
     cam: () => {
       const at = (/** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ z) => { const p = _v.set(x, y, z).project(camera); return [+p.x.toFixed(2), +p.y.toFixed(2)]; };
       const b = trial.boss;
