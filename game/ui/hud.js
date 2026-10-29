@@ -133,7 +133,7 @@ const CSS = FONT_CSS + `
 .yc-btn { margin-top: 12px; font: inherit; font-size: 16px; padding: 10px 26px; border-radius: 12px; border: 1px solid #4a74d9;
   background: #4a74d9; color: #fff; cursor: pointer; }
 .yc-btn:focus-visible { outline: 3px solid rgba(74,116,217,0.4); outline-offset: 2px; }
-/* 天赋：选天赋（开始与结算页上）、战斗中的按钮栏、给按钮写咒的对话框 */
+/* 天赋：选天赋（封面第二步与结算页上）、战斗中的按钮栏、给按钮写咒的对话框 */
 .yc-picker { margin: 14px 0 2px; }
 .yc-picker-title { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
 .yc-talents { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
@@ -282,6 +282,72 @@ const CSS = FONT_CSS + `
 .yc-short .yc-pick { padding: 8px 8px 10px; } .yc-short .yc-pick-name { font-size: 30px; } .yc-short .yc-pick-text { font-size: 12px; line-height: 1.45; }
 .yc-short .yc-picks-btns { margin-top: 12px; }
 .yc-narrow .yc-pick-row { gap: 8px; } .yc-narrow .yc-pick-name { font-size: 30px; }
+/* 首页封面（showCover，10-30）：不糊画面、不压白卡，山门就是背景（镜头慢慢摆、法术自己放）；左边竖排大标题加红印，
+   下面两个水墨按钮；点了按钮出第二步纸面板：这个模式的说明、选天赋（结算页上那块挪过来）、开始 */
+.yc-on-cover .yc-top, .yc-on-cover .yc-bottom, .yc-on-cover .yc-boss, .yc-on-cover .yc-card, .yc-on-cover .yc-big { visibility: hidden; }
+.yc-cover { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.yc-cover[hidden] { display: none; }
+.yc-cover::before { content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, rgba(246,241,231,0.62), rgba(246,241,231,0.3) 26%, rgba(246,241,231,0) 50%); }
+.yc-cover-main { position: absolute; left: clamp(24px, 7vw, 120px); top: 0; bottom: 0; display: flex; flex-direction: column;
+  justify-content: center; align-items: flex-start; gap: clamp(14px, 3.6vh, 36px); }
+.yc-cover-head { display: flex; flex-direction: row-reverse; align-items: flex-start; gap: clamp(10px, 1.4vw, 20px); }
+.yc-cover-tcol { display: flex; flex-direction: column; align-items: center; }
+.yc-cover-title { margin: 0; writing-mode: vertical-rl; font: normal clamp(54px, 13vh, 136px)/1.05 ${BRUSH_BIG}; letter-spacing: 0.02em;
+  color: #111821; text-shadow: 0 0 18px rgba(250,246,236,0.95), 0 0 4px rgba(250,246,236,0.9); }
+.yc-seal { margin-top: 0.35em; writing-mode: vertical-rl; font: normal clamp(16px, 2.8vh, 28px)/1 ${BRUSH}; letter-spacing: 0.06em;
+  padding: 0.24em 0.18em; color: #fbefe6; background: #b3261e; border-radius: 3px; transform: rotate(-4deg);
+  box-shadow: inset 0 0 0 2px #b3261e, inset 0 0 0 3.5px rgba(251,239,230,0.85), 0 2px 8px -3px rgba(80,10,0,0.6); }
+.yc-cover-tag { margin: 1.6em 0 0; writing-mode: vertical-rl; font: clamp(14px, 2.3vh, 20px)/1.9 "STKaiti", "KaiTi", "Kaiti SC", serif;
+  letter-spacing: 0.22em; color: #26313d; text-shadow: 0 0 10px rgba(250,246,236,0.95), 0 0 3px rgba(250,246,236,0.9); }
+.yc-cover-best { font: 14px/1.5 "STKaiti", "KaiTi", "Kaiti SC", serif; color: #26313d; text-shadow: 0 0 8px rgba(250,246,236,0.95); }
+.yc-cover-best[hidden] { display: none; }
+.yc-cover-modes { display: flex; gap: clamp(12px, 1.6vw, 20px); flex-wrap: wrap; }
+/* 水墨按钮：底下一笔浓墨（SVG），字是米白的书法字 */
+.yc-ink { pointer-events: auto; position: relative; isolation: isolate; border: 0; background: none; cursor: pointer; font: inherit; color: #f6f1e7;
+  min-width: clamp(136px, 15vw, 180px); padding: 12px 30px 14px 24px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  text-align: left; transition: transform .15s; -webkit-tap-highlight-color: transparent; }
+.yc-ink::before { content: ""; position: absolute; inset: -6px -10px -4px -8px; z-index: -1; filter: drop-shadow(0 6px 10px rgba(10,16,24,0.35));
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 80' preserveAspectRatio='none'%3E%3Cpath fill='%231b232d' d='M9 44C13 25 41 16 84 15c43-2 92-4 130 3 18 4 23 16 17 28-6 12-31 18-71 19-44 2-96 3-126-2C16 60 6 54 9 44z'/%3E%3Cpath fill='none' stroke='%231b232d' stroke-width='2.4' stroke-linecap='round' d='M212 22l25-3M219 55l19 4M14 36l-10-4'/%3E%3Cpath fill='none' stroke='%23f6f1e7' stroke-opacity='.09' stroke-width='1.6' d='M30 30c50-4 120-6 180-2M26 54c64 4 124 3 188-4M40 42c60-2 110-2 170 0'/%3E%3C/svg%3E")
+    center / 100% 100% no-repeat; }
+.yc-ink b { font: normal clamp(28px, 4.4vh, 40px)/1.05 ${BRUSH}; letter-spacing: 0.14em; }
+.yc-ink span { font-size: 12px; opacity: 0.8; white-space: nowrap; }
+.yc-ink:hover, .yc-ink:focus-visible { transform: translateY(-2px) scale(1.03); outline: none; }
+.yc-ink:active { transform: scale(0.97); }
+.yc-ink:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.yc-cover.step2 .yc-cover-modes, .yc-cover.step2 .yc-cover-best { display: none; }
+.yc-cover-step { position: absolute; right: clamp(16px, 6vw, 110px); top: 50%; transform: translateY(-50%); width: min(400px, calc(100% - 32px));
+  max-height: calc(100% - 24px); overflow-y: auto; padding: 18px 22px 16px; text-align: center; pointer-events: auto;
+  background: rgba(247,243,234,0.94); border-radius: 4px; box-shadow: 0 20px 50px -22px rgba(16,22,30,0.7), inset 0 0 0 1px rgba(70,50,30,0.14); }
+.yc-cover-step[hidden] { display: none; }
+.yc-cover-step h2 { margin: 0; font: normal 38px/1.15 ${BRUSH}; letter-spacing: 0.3em; text-indent: 0.3em; color: #16202b; }
+.yc-cover-step p { margin: 6px 0 0; font-size: 13.5px; line-height: 1.7; color: #3b4856; }
+.yc-cover-step .yc-btns { align-items: center; gap: 16px; margin-top: 14px; }
+.yc-cover-step .yc-ink { min-width: 132px; align-items: center; padding: 8px 28px 10px; }
+.yc-cback { font: inherit; font-size: 14px; color: #5d6b7a; background: none; border: 0; cursor: pointer; padding: 6px 8px;
+  text-decoration: underline; text-underline-offset: 4px; }
+/* 手机竖屏：标题在左上，按钮并排压在最下面，中间留给画面；第二步是底部的纸面板 */
+.yc-narrow .yc-cover::before { background: linear-gradient(180deg, rgba(246,241,231,0.55), rgba(246,241,231,0.18) 38%, rgba(246,241,231,0) 55%,
+  rgba(246,241,231,0) 72%, rgba(246,241,231,0.4)); }
+.yc-narrow .yc-cover-main { left: 0; right: 0; top: calc(18px + env(safe-area-inset-top, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  padding: 0 16px; justify-content: flex-start; align-items: stretch; gap: 12px; }
+.yc-narrow .yc-cover-head { align-self: flex-start; margin-bottom: auto; padding-left: 6px; }
+.yc-narrow .yc-cover-title { font-size: clamp(48px, 9.4vh, 84px); }
+.yc-narrow .yc-cover-best { align-self: center; }
+.yc-narrow .yc-cover-modes { flex-wrap: nowrap; justify-content: center; gap: 14px; }
+.yc-narrow .yc-cover-modes .yc-ink { flex: 1 1 0; min-width: 0; max-width: 190px; padding: 12px 16px 14px 18px; }
+.yc-narrow .yc-cover-modes .yc-ink span { white-space: normal; font-size: 11px; line-height: 1.35; }
+.yc-narrow .yc-cover-step { left: 10px; right: 10px; top: auto; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); transform: none; width: auto; max-height: 72%; }
+/* 横过来的手机：标题、按钮都缩一号，第二步纸面板放右边、天赋钮缩小 */
+.yc-short .yc-cover-main { gap: 10px; }
+.yc-short .yc-cover-title { font-size: clamp(40px, 12vh, 64px); }
+.yc-short .yc-cover-tag { font-size: 13px; }
+.yc-short .yc-ink b { font-size: 26px; } .yc-short .yc-cover-modes .yc-ink { padding: 8px 24px 10px 20px; }
+.yc-short .yc-cover-step { width: min(440px, 58%); padding: 10px 16px 10px; }
+.yc-short .yc-cover-step h2 { font-size: 26px; } .yc-short .yc-cover-step p { font-size: 12px; line-height: 1.5; margin-top: 2px; }
+.yc-short .yc-cover-step .yc-picker-title { display: none; } .yc-short .yc-cover-step .yc-picker { margin: 8px 0 0; }
+.yc-short .yc-cover-step .yc-tal { width: 42px; height: 42px; font-size: 22px; } .yc-short .yc-cover-step .yc-syn { margin-top: 12px; }
+.yc-short .yc-cover-step .yc-btns { margin-top: 6px; }
 `;
 
 /** @param {string} html */
@@ -315,8 +381,28 @@ export class Hud {
       <p data-lead></p><div class="yc-stats" hidden></div><p data-tip hidden></p><div class="yc-best" hidden></div>
       <div class="yc-picker"><div class="yc-picker-title">选天赋（最多 3 个）</div><div class="yc-talents"></div><div class="yc-syn"></div></div>
       <div class="yc-btns"><button class="yc-btn" data-trial>开始试炼</button><button class="yc-btn ghost" data-start>守关模式</button>
-        <button class="yc-btn ghost" data-report style="order:2" hidden>看战报</button></div>
+        <button class="yc-btn ghost" data-report style="order:2" hidden>看战报</button><button class="yc-btn ghost" data-home style="order:3">回首页</button></div>
       <p class="yc-note" data-note hidden></p></div></div>`);
+    // 首页封面（showCover）：第二步选天赋用的就是上面结算页那块（picker 在两处之间挪）
+    this.cover = el(`<div class="yc-cover" hidden><div class="yc-cover-main">
+      <div class="yc-cover-head"><div class="yc-cover-tcol"><h1 class="yc-cover-title">言出法随</h1><i class="yc-seal">敕令</i></div>
+        <p class="yc-cover-tag">打一句中文，法术就是什么<br>说得越有画面感，气势越足</p></div>
+      <div class="yc-cover-best" hidden></div>
+      <div class="yc-cover-modes"><button class="yc-ink" data-mode="trial"></button><button class="yc-ink" data-mode="defense"></button></div></div>
+      <div class="yc-cover-step" hidden><h2></h2><p></p>
+        <div class="yc-btns"><button class="yc-ink" data-cgo><b>开始</b></button><button class="yc-cback" data-back>返回</button></div></div></div>`);
+    this.picker = /** @type {HTMLElement} */ (this.overlay.querySelector('.yc-picker'));
+    /** 封面上点了哪个模式（第二步"开始"就开这个） @type {'trial' | 'defense'} */
+    this.coverMode = 'trial';
+    /** @type {Record<string, { name: string, sub: string, desc: string }>} */
+    this.coverModes = {};
+    /** @type {((mode: 'trial' | 'defense') => void) | null} */
+    this.coverGo = null;
+    for (const b of this.cover.querySelectorAll('[data-mode]')) {
+      b.addEventListener('click', () => this.coverStep(/** @type {'trial' | 'defense'} */ (/** @type {HTMLElement} */ (b).dataset.mode)));
+    }
+    /** @type {HTMLElement} */ (this.cover.querySelector('[data-back]')).addEventListener('click', () => this.coverStep(null));
+    /** @type {HTMLElement} */ (this.cover.querySelector('[data-cgo]')).addEventListener('click', () => this.coverGo?.(this.coverMode));
     this.write = el(`<div class="yc-write" hidden><div class="yc-box">
       <div class="yc-write-title"></div>
       <input class="yc-input" maxlength="${INPUT_MAX_CHARS}" enterkeyhint="done" autocomplete="off" aria-label="给按钮写的咒" placeholder="写一句咒……（例：三颗火球从天而降）">
@@ -353,7 +439,7 @@ export class Hud {
     this.arrow = el(`<div class="yc-arrow" hidden><i></i></div>`);
     /** boss 血条下沿（界面坐标，没有血条为 0），placeBoss 量 */
     this.bossEdge = 0;
-    this.root.append(this.floats, this.stick, this.arrow, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay, this.report, this.mute);
+    this.root.append(this.floats, this.stick, this.arrow, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay, this.cover, this.report, this.mute);
     root.append(this.root);
     this.input = /** @type {HTMLInputElement} */ (this.bottom.querySelector('input'));
     this.go = /** @type {HTMLButtonElement} */ (this.bottom.querySelector('[data-go]'));
@@ -404,7 +490,7 @@ export class Hud {
     this.q('.yc-syn').innerHTML = syn.length
       ? '羁绊　' + syn.map((s) => `<span style="white-space:nowrap">先${esc(nm(s.a))}后${esc(nm(s.b))}：<b>${esc(s.name)}</b></span>`).join('　')
       : (list.some((t) => t.on) ? '再选一个，看看它们之间的羁绊' : '至少选一个天赋');
-    for (const b of this.overlay.querySelectorAll('[data-start],[data-trial]')) /** @type {HTMLButtonElement} */ (b).disabled = !list.some((t) => t.on);
+    for (const b of this.root.querySelectorAll('[data-start],[data-trial],[data-cgo]')) /** @type {HTMLButtonElement} */ (b).disabled = !list.some((t) => t.on);
   }
 
   /**
@@ -760,9 +846,48 @@ export class Hud {
       const b = /** @type {HTMLElement} */ (box.querySelector(sel));
       b.textContent = text; b.classList.toggle('ghost', !first); b.style.order = first ? '0' : '1';
     }
+    /** @type {HTMLElement} */ (box.querySelector('.yc-btns')).before(this.picker);   // 选天赋可能还在封面上
+    this.hideCover();
     box.hidden = false;
   }
-  hideOverlay() { this.overlay.hidden = true; this.closeReport(); }
+  hideOverlay() { this.overlay.hidden = true; this.closeReport(); this.hideCover(); }
+
+  /**
+   * 首页封面：竖排大标题、红印、两个水墨按钮（模式名 + 一行小字）、本机最佳。点模式按钮进第二步：模式名、说明、选天赋、开始 / 返回。
+   * 封面开着时战斗界面（顶上的面板、输入框、按钮栏）藏起来（只是看不见，量尺寸照常）。
+   * @param {{ best: string, modes: Record<'trial' | 'defense', { name: string, sub: string, desc: string }> }} o
+   * @param {(mode: 'trial' | 'defense') => void} go 第二步点"开始"
+   */
+  showCover(o, go) {
+    this.coverGo = go;
+    this.coverModes = o.modes;
+    for (const b of this.cover.querySelectorAll('[data-mode]')) {
+      const m = o.modes[/** @type {'trial' | 'defense'} */ (/** @type {HTMLElement} */ (b).dataset.mode)];
+      b.innerHTML = `<b>${esc(m.name)}</b><span>${esc(m.sub)}</span>`;
+    }
+    const best = /** @type {HTMLElement} */ (this.cover.querySelector('.yc-cover-best'));
+    best.textContent = o.best; best.hidden = !o.best;
+    this.overlay.hidden = true;
+    this.closeReport();
+    this.cover.hidden = false;
+    this.root.classList.add('yc-on-cover');
+    this.coverStep(null);
+  }
+  /** 封面第一步（null：两个模式按钮）/ 第二步（点了哪个模式：说明、选天赋、开始） @param {'trial' | 'defense' | null} mode */
+  coverStep(mode) {
+    const step = /** @type {HTMLElement} */ (this.cover.querySelector('.yc-cover-step'));
+    this.cover.classList.toggle('step2', !!mode);
+    step.hidden = !mode;
+    if (!mode) return;
+    this.coverMode = mode;
+    const m = this.coverModes[mode];
+    /** @type {HTMLElement} */ (step.querySelector('h2')).textContent = m.name;
+    /** @type {HTMLElement} */ (step.querySelector('p')).textContent = m.desc;
+    /** @type {HTMLElement} */ (step.querySelector('.yc-btns')).before(this.picker);
+  }
+  hideCover() { this.cover.hidden = true; this.root.classList.remove('yc-on-cover'); }
+  /** 封面开着没有 */
+  get onCover() { return !this.cover.hidden; }
 
   /**
    * 看战报：先写"正在生成"，画好换成图片。保存在电脑上是下载；手机浏览器多半不认下载，长按图片保存（微信里也行）；

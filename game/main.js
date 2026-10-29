@@ -183,6 +183,7 @@ export function start(root, opts = {}) {
   const enemies = new Enemies(scene, world, particles, {
     onCoreHit: (dmg) => hitCore(dmg),
     onGone: (e, how) => {
+      if (S.phase === 'title') return;   // 首页的活背景：碎了不出声
       if (how === 'kill') sound.play('shatter'); else if (how === 'fall') sound.play('fall');
       trial.onGone(e, how);   // 试炼：boss 碎了就赢
     },
@@ -356,9 +357,8 @@ export function start(root, opts = {}) {
     }
   }
 
-  /** @param {'defense' | 'trial'} [mode] */
-  function startGame(mode = 'defense') {
-    preloadFonts(true);   // 开局后把其余一级字也下好，免得冷门字第一次出现时先闪成别的字体
+  /** 清场：敌人、墙、融合、龙、火种与旋风、战报的账、排着的延时、没放出去的按键、对话框（开局、回首页都要） */
+  function clearField() {
     enemies.clear();
     if (walls.clear()) enemies.setObstacles([]);
     fusions.clear();
@@ -371,6 +371,12 @@ export function start(root, opts = {}) {
     buttonChant = false; frozen = false;
     hud.closeWrite();
     hud.closePicks();
+  }
+
+  /** @param {'defense' | 'trial'} [mode] */
+  function startGame(mode = 'defense') {
+    preloadFonts(true);   // 开局后把其余一级字也下好，免得冷门字第一次出现时先闪成别的字体
+    clearField();
     Object.assign(S, { mode, phase: 'playing', mana: MANA_MAX, core: CORE_HP, gauge: 0, lastCombo: null, seen: [], said: new Set(),
       wave: 0, queue: [], busy: false, restT: 0, inv: 0, run: newRun(), slowT: 0, counterT: 0, afterT: 0 });   // 新的一局天先放晴，再随第一波慢慢压上来
     S.mods = runMods(S.run);
@@ -425,16 +431,29 @@ export function start(root, opts = {}) {
     return had;
   }
 
-  /** 首页：试炼主推，守关留着 */
+  /** 首页：活的封面（hud.showCover；背后的画面见主循环前的 coverLife）；点了模式再选天赋、开始。试炼主推，排前面 */
   function showTitle() {
-    hud.showOverlay('言出法随', {
-      lead: '打一句中文，法术就是什么；说得越有画面感，气势越足。',
-      tip: `试炼：小怪潮与 ${BOSS_COUNT} 个 boss 轮番上阵。开局只会本命招，每过一段三选一学新字，看你能走到哪。`,
-      best: best ? recordText(best) : '', main: 'trial', trial: '开始试炼', defense: '守关模式',
-      note: '守关模式：傀儡大军沿石阶和索桥攻上山门，打字施法，守住身后的护山大阵。',
-    });
+    hud.showCover({ best: best ? `本机最佳　${recordText(best)}` : '', modes: {
+      trial: { name: '试炼', sub: `${BOSS_COUNT} 个 boss 轮番上阵`,
+        desc: `小怪潮与 ${BOSS_COUNT} 个 boss 轮番上阵。开局只会本命招，每过一段三选一学新字，看你能走到哪。（试玩版）` },
+      defense: { name: '守关', sub: '五波傀儡攻上山门',
+        desc: '傀儡大军沿石阶和索桥攻上山门。打字施法，守住身后的护山大阵。' },
+    } }, (mode) => startGame(mode));
   }
   showTitle();
+
+  /** 结算页"回首页"：清场、回到封面（镜头接着摆，法术接着自己放） */
+  function backToTitle() {
+    clearField();
+    trial.stop();
+    landscape(false);
+    Object.assign(S, { mode: 'defense', phase: 'title', mana: MANA_MAX, core: CORE_HP, gauge: 0, wave: 0, queue: [], busy: false, restT: 0 });
+    barrier.reset();
+    hud.setCore(S.core, CORE_HP);
+    setGauge(0);
+    showTitle();
+    onResize();
+  }
 
   /** 试炼结算页（won：打通了） @param {boolean} won */
   function trialResult(won) {
@@ -608,7 +627,7 @@ export function start(root, opts = {}) {
     setGauge(Math.min(S.gauge, S.mods.ult));
   }
 
-  // ---------------------------------------------------------------- 选天赋（开始与结算页上）
+  // ---------------------------------------------------------------- 选天赋（封面第二步与结算页上）
   function renderPicker() {
     hud.renderPicker(TALENTS.map((el) => ({ el, name: elName(el), open: talentOpen(el), on: S.talents.includes(el) })),
       synergies(S.talents), (el) => { S.talents = toggleTalent(S.talents, el); renderPicker(); });
@@ -703,6 +722,7 @@ export function start(root, opts = {}) {
   const startBtn = /** @type {HTMLButtonElement} */ (hud.overlay.querySelector('[data-start]'));
   startBtn.addEventListener('click', () => startGame());
   /** @type {HTMLButtonElement} */ (hud.overlay.querySelector('[data-trial]')).addEventListener('click', () => startGame('trial'));
+  /** @type {HTMLButtonElement} */ (hud.overlay.querySelector('[data-home]')).addEventListener('click', backToTitle);
   hud.go.addEventListener('click', () => trial.engage());
   warmUp(opts.parseUrl);   // 玩家看标题的这几秒，把连接先建好
 
@@ -1712,6 +1732,85 @@ export function start(root, opts = {}) {
   const BOSS_H = 3.2;
 
   /**
+   * 首页的活背景（设计文档第 4 节"首页"）：小傀儡沿石阶、索桥上来，施法者隔几秒自己放一招（五种元素轮着来）把走在最前的打碎，
+   * 冰龙模型下好以后隔一阵飞下来砸一次。只演画面：不扣法力、不攒气势、不出咒语卡；法术、碎裂不出声（首页只放背景乐）。
+   * 点开始时 startGame 清场（敌人、龙、排着的延时一起清掉）。
+   */
+  const COVER = { first: 1.6, every: 3.2, foeEvery: 2.4, foes: 4, dragonFirst: 13, dragonEvery: 30 };
+  const COVER_ELS = ['fire', 'ice', 'wind', 'thunder', 'earth'];
+  const cover = { spell: COVER.first, foe: 0.4, dragon: COVER.dragonFirst, i: 0, n: 0, t: 0 };
+  /** 走在最前的那只（离阵眼最近） */
+  const coverLead = () => enemies.list.reduce((a, e) => (!a || e.pos.distanceTo(CORE_POS) < a.pos.distanceTo(CORE_POS) ? e : a), /** @type {any} */ (null));
+  /** 落点 p 周围 R 米内的小傀儡打碎（封面上的那几只） @param {THREE.Vector3} p @param {number} R */
+  const coverHit = (p, R) => {
+    if (S.phase !== 'title') return;   // 飞在半路时已经开局了：别打到新一局的敌人
+    for (const e of [...enemies.list]) if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) <= R) enemies.kill(e, origin);
+  };
+  /** @param {number} dt */
+  function coverLife(dt) {
+    cover.t += dt;
+    if ((cover.foe -= dt) <= 0) {
+      cover.foe = COVER.foeEvery;
+      if (enemies.alive < COVER.foes) enemies.spawn('grunt', cover.n++ % 2);
+    }
+    if (cover.t > 5) dragon.preload('ice');
+    if ((cover.dragon -= dt) <= 0 && dragon.lookFor('ice') && !dragon.flights.length) {
+      cover.dragon = COVER.dragonEvery;
+      const e = coverLead();
+      dragon.summon(e ? atGround(e.pos.x, e.pos.z) : atGround(DEFAULT_AIM.x, DEFAULT_AIM.z), 'ice', { impact: (p) => coverHit(p, 4.5) });
+      cover.spell = Math.max(cover.spell, 6);   // 龙在飞，先别放别的
+      return;
+    }
+    if ((cover.spell -= dt) > 0 || dragon.flights.length) return;
+    cover.spell = COVER.every + Math.random() * 1.2;
+    const el = COVER_ELS[cover.i++ % COVER_ELS.length];
+    fx.beginChant(el);   // 不走 beginChant：那里出咏唱声
+    layout.plaza.flow();
+    caster.charge();
+    after(0.7, () => {
+      if (S.phase !== 'title') return;
+      fx.endChant();
+      const foe = coverLead(), id = foe?.id ?? null;
+      const last = foe ? enemies.aimPoint(foe) : atGround(DEFAULT_AIM.x + (Math.random() - 0.5) * 6, DEFAULT_AIM.z - Math.random() * 3);
+      const target = () => { const e = id ? enemies.get(id) : null; if (e) enemies.aimPoint(e, last); return last; };
+      fx.launchBurst(el);
+      caster.cast(last);
+      if (el === 'thunder') {   // 雷：从天上劈下来
+        const end = target().clone();
+        fx.arc(end.clone().add(new THREE.Vector3((Math.random() - 0.5) * 3, 15, 1.5)), end);
+        fx.burst(end, el, 1.8, 0.9);
+        coverHit(end, 1.8);
+      } else if (el === 'ice') {   // 冰：一阵冰雨落在它周围
+        for (let k = 0; k < 5; k++) {
+          const ox = (Math.random() - 0.5) * 3, oz = (Math.random() - 0.5) * 3;
+          fx.bolt({ el, path: 'sky', delay: k * 0.18, target: () => (k ? atGround(last.x + ox, last.z + oz) : target()),
+            onHit: (p) => { fx.burst(p, el, 1.4, 0.45); coverHit(p, 1.4); } });
+        }
+      } else {
+        fx.bolt({ el, path: 'straight', big: true, target, onHit: (p) => { fx.burst(p, el, 2.2, 1); coverHit(p, 2.2); } });
+      }
+    });
+  }
+  /**
+   * 首页的镜头：照平时的机位，绕着看的点左右慢慢摆（不转到背面去，背面是没修的山体）；
+   * 横屏时看的点往左挪一点，画面主体让到标题右边；竖屏标题在上面，看的点往上挪，主体落到下半截
+   * @param {number} rdt
+   */
+  function coverCamera(rdt) {
+    coverT += rdt;
+    const a = Math.sin((coverT / 64) * Math.PI * 2) * 0.42;
+    const off = _v.subVectors(cam.base, cam.look).applyAxisAngle(UP, a);
+    camPos.copy(cam.look).add(off);
+    camPos.y += Math.sin(coverT * 0.23) * 0.35;
+    const wide = camera.aspect >= 1.2;
+    _side.crossVectors(off, UP).normalize();   // 镜头的左手方向
+    camLook.copy(cam.look).addScaledVector(_side, wide ? 3.2 : 0);
+    camLook.y += wide ? 0 : 2.2;
+  }
+  let coverT = 0;
+  const UP = new THREE.Vector3(0, 1, 0), _side = new THREE.Vector3();
+
+  /**
    * 试炼的跟随镜头（设计文档第 4 节"10-29 定：试炼的镜头与三档视角"）：看的点跟得快、离多远拉远快推近慢
    * （boss 冲过来时先把它框进来，走近了再慢慢推回去）；开口时推近一点；完美闪避推近一下；召龙时推到肩后（ultShot）
    * @param {number} rdt 现实时间（慢放、顿帧时镜头照常跟）
@@ -1801,6 +1900,8 @@ export function start(root, opts = {}) {
       if (S.mode === 'trial') trial.update(dt, steer, pdt);   // 试炼：走位、小怪潮与 boss 轮换（三选一时停住）
       else updateWave(dt);
     }
+    fx.sound = S.phase === 'title' ? null : sound;   // 首页的法术不出声
+    if (S.phase === 'title') coverLife(dt);
     world.step(1 / 60, dt, 3);
     updateCubes(dt);
     if (walls.update(dt)) enemies.setObstacles(walls.obstacles());   // 土墙沉下去了，流场重算
@@ -1855,6 +1956,7 @@ export function start(root, opts = {}) {
     const focusT = (fx.chanting > 0 && !buttonChant) || (slowSince > 0 && S.phase === 'playing') ? 0.35 : 0;
     cam.focus += (focusT - cam.focus) * Math.min(1, realDt * 3);
     if (S.mode === 'trial' && trial.on) trialCamera(realDt);
+    else if (S.phase === 'title') coverCamera(realDt);
     else {
       tcam.on = false;
       camPos.copy(cam.base).lerp(cam.near, cam.focus);
@@ -1889,6 +1991,9 @@ export function start(root, opts = {}) {
   // ---------------------------------------------------------------- 调试接口（面板里用：地址参数不可用）
   const demo = {
     start: () => startGame(),
+    /** 回首页（封面）；coverState() 看封面的活背景排到哪了 */
+    home: () => backToTitle(),
+    coverState: () => ({ phase: S.phase, onCover: hud.onCover, foes: enemies.alive, flights: dragon.flights.length, ...cover }),
     /** 试炼：trial() 进战前准备，engage() 开战；walk(x, z) 把玩家挪过去；bossHp(n) 改 boss 的血（看换阶段） */
     trial: () => startGame('trial'),
     engage: () => trial.engage(),
