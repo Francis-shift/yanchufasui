@@ -107,6 +107,19 @@ export async function inspireRemote(url, req, timeoutMs) {
 }
 
 /**
+ * 语音识别：一段录音（16 kHz 单声道 WAV 的 base64，见 voice.js）→ 一句文字。线路与解析共用（服务器那头按 asr 字段分开处理）。
+ * @param {string | string[] | undefined} url
+ * @param {string} audio
+ * @param {number} timeoutMs
+ * @returns {Promise<{ text: string, ms: number } | { fail: string, ms?: number }>} ms 是服务器上识别花的毫秒数
+ */
+export async function asrRemote(url, audio, timeoutMs) {
+  const r = await ask(url, { asr: audio }, timeoutMs);
+  if (!('data' in r)) return r;
+  return typeof r.data.text === 'string' && r.data.text ? { text: r.data.text, ms: r.data.ms } : { fail: 'silence' };
+}
+
+/**
  * 预热：标题画面一出来就发一个极小的请求，先把浏览器到服务器、服务器到模型的连接建好，
  * 北京的函数没人用时会睡着，这一下也把它叫醒。只预热第一条线路；结果不用，失败也不管。
  * @param {string | string[] | undefined} url

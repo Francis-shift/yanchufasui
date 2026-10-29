@@ -50,7 +50,8 @@ import { fitFrame } from './world/framing.js';
 import { loadProps } from './world/props.js';
 import { buildLayout, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS, OBSTACLES } from './world/layout.js';
 import { Hud, preloadFonts } from './ui/hud.js';
-import { inspireRemote, parseRemote, warmUp } from './net.js';
+import { asrRemote, inspireRemote, parseRemote, warmUp } from './net.js';
+import { ASR_TIMEOUT_MS, MAX_SEC, Recorder } from './voice.js';
 import { pickQuality } from './quality.js';
 import { mountLab } from './ui/lab.js';
 
@@ -94,6 +95,14 @@ const FAIL_TEXT = {
   timeout: '超时', model_error: '模型出错', network: '网络不通', no_key: '服务器未配置密钥', rate: '说得太快', daily: '今日额度已满',
   too_long: '太长', empty: '空', bad_request: '请求有误', warm_failed: '预热失败',
 };
+/** 语音没识别成的原因，写在提示行（说一次没成，玩家要知道是再说一次还是改打字） */
+const ASR_FAIL = {
+  silence: '没听清，靠近一点再说一次', timeout: '听写超时了，再说一次，或者直接打字', no_key: '语音识别还没开通，先打字或按按钮',
+  rate: '说得太快了，歇一下再说', daily: '今天的语音次数用完了，先打字或按按钮', network: '连不上听写服务，先打字或按按钮',
+  offline: '连不上听写服务，先打字或按按钮', asr_error: '听写出错了，再说一次，或者直接打字', bad_request: '这段太长了，说短一点',
+};
+/** 试炼开战后开口召龙：时间几乎停住（守关照常是 SLOWMO_SCALE） */
+const TRIAL_VOICE_SLOW = 0.1;
 
 /**
  * @param {HTMLElement} root
@@ -681,6 +690,70 @@ export function start(root, opts = {}) {
   hud.go.addEventListener('click', () => trial.engage());
   warmUp(opts.parseUrl);   // 玩家看标题的这几秒，把连接先建好
 
+  // ---------------------------------------------------------------- 语音施法：按住说话，松开后识别成文字，再照打字那样施法
+  /** 录音与听写；预览页没有麦克风，demo.voice.fake 换成假的 @type {Pick<Recorder, 'start' | 'stop' | 'dispose'> | null} */
+  let recorder = Recorder.supported() ? new Recorder() : null;
+  /** @param {string} b64 */
+  let listen = (b64) => asrRemote(opts.parseUrl, b64, ASR_TIMEOUT_MS);
+  /** idle 没在录；wait 等麦克风打开（第一次要授权）；on 按住在录；tap 点一下开始的、再点一下结束；busy 在听写 */
+  let mic = /** @type {'idle' | 'wait' | 'on' | 'tap' | 'busy'} */ ('idle'), micPress = 0, micUpEarly = false, micTimer = 0;
+  /** 现在能不能开口：守关随时；试炼战前随时，开战后只在气势满了的时候（战中只能开口召龙） */
+  const micAllowed = () => !!recorder && S.phase === 'playing' && (S.mode !== 'trial' || !trial.fighting || S.gauge >= S.mods.ult);
+  function micReset() {
+    clearTimeout(micTimer);
+    mic = 'idle';
+    hud.setMicState('idle');
+    sound.duck(false);
+    slowSince = 0;
+    fx.setListening(!!input.value.trim());
+  }
+  /** 大字只用字表里有的（charset.js BIG_CHARS），原因写在提示行 @param {string} why */
+  function micFailed(why) { micReset(); hud.bigText('未能成咒', '#5d6b7a', 900); hud.setHint(why); }
+  async function micDown() {
+    if (mic === 'tap') { micFinish(); return; }
+    if (!recorder || mic !== 'idle' || !micAllowed() || S.busy || pend || !hud.write.hidden || hud.pickOn) return;
+    mic = 'wait'; micUpEarly = false; micPress = performance.now();
+    hud.setMicState('wait');
+    slowSince = micPress; slowSpent = false;   // 开口就慢放
+    sound.duck(true);                          // 游戏声压低，免得录进爆炸声
+    fx.setListening(true);
+    try {
+      await recorder.start();
+    } catch (e) {
+      const name = /** @type {{ name?: string }} */ (e)?.name;
+      micFailed(name === 'NotAllowedError' || name === 'SecurityError' ? '没有麦克风权限：在浏览器设置里允许本站用麦克风，或者直接打字'
+        : name === 'NotFoundError' ? '没找到麦克风，先打字或按按钮' : '麦克风打不开，先打字或按按钮');
+      return;
+    }
+    if (mic !== 'wait' || S.phase !== 'playing') { recorder.stop(); if (mic === 'wait') micReset(); return; }
+    // 等了很久才打开：多半是第一次弹了授权框，手指早松开去点"允许"了，这一段不算
+    if (micUpEarly && performance.now() - micPress > 800) { recorder.stop(); micReset(); hud.setHint('麦克风已打开，再按住说一次'); return; }
+    mic = micUpEarly ? 'tap' : 'on';
+    hud.setMicState(mic);
+    micTimer = window.setTimeout(micFinish, MAX_SEC * 1000);   // 最长录这么久，到了自动收
+  }
+  function micUp() {
+    if (mic === 'wait') { micUpEarly = true; return; }
+    if (mic !== 'on') return;
+    if (performance.now() - micPress < 300) { mic = 'tap'; hud.setMicState('tap'); return; }   // 只点了一下：改成再点一下结束
+    micFinish();
+  }
+  async function micFinish() {
+    if (!recorder || (mic !== 'on' && mic !== 'tap')) return;
+    clearTimeout(micTimer);
+    mic = 'busy';
+    hud.setMicState('busy');
+    sound.duck(false);
+    const clip = recorder.stop();
+    if (!clip) { micFailed('按住麦克风说一句咒，说完再松开（太短或太小声的不算）'); return; }
+    const r = await listen(clip.b64);
+    if (mic !== 'busy') return;   // 等的时候这一局结束了
+    if ('fail' in r) { micFailed(ASR_FAIL[r.fail] || `听写没成（${r.fail}），再说一次，或者直接打字`); return; }
+    micReset();
+    submit(r.text, { ms: r.ms });
+  }
+  if (recorder) hud.setMic({ down: micDown, up: micUp });
+
   // ---------------------------------------------------------------- 施法
   const groundPt = (pt) => new THREE.Vector3(pt.x, (groundHeightAt(pt.x, pt.z) ?? 0) + 0.4, pt.z);
   let castSeq = 0;
@@ -708,8 +781,8 @@ export function start(root, opts = {}) {
     return { resolved, marks };
   }
 
-  /** @param {string} text */
-  async function submit(text) {
+  /** @param {string} text @param {{ ms: number }} [voice] 说出来的（识别成的文字）：ms 是服务器上听写花的毫秒数 */
+  async function submit(text, voice) {
     text = [...text.trim()].slice(0, INPUT_MAX_CHARS).join('');
     if (!text || S.busy || S.phase !== 'playing') return;
     text = maskText(text).text;   // 敏感词换成＊：咒语卡上看不到，模型也收不到，其余照常施法
@@ -742,7 +815,8 @@ export function start(root, opts = {}) {
       const k = sanitizeIntent(kwRaw, text);
       if (k.steps.length) { intent = { ...k, unknown: intent.unknown, overreach: intent.overreach || k.overreach }; source += '＋关键词'; }
     }
-    perform(intent, { text, source, ms, raw, castId });
+    if (voice) source = `语音${voice.ms ? `（听写 ${voice.ms} 毫秒）` : ''} → ${source}`;
+    perform(intent, { text, source, ms, raw, castId, voice: !!voice });
   }
 
   /** 天赋按键放出的法术：每一步的命中记在这里，按打法加气势槽（talents.js buttonGaugeGain） */
@@ -752,11 +826,18 @@ export function start(root, opts = {}) {
   /**
    * 意图 → 裁决 → 咒语卡 → 放出。打字和天赋按键都走这里。
    * @param {import('./rules/intent.js').Intent} intent
-   * @param {{ text: string, source: string, ms: number, raw: any, castId: number, button?: boolean }} c
+   * @param {{ text: string, source: string, ms: number, raw: any, castId: number, button?: boolean, voice?: boolean }} c voice：说出来的
    */
   function perform(intent, c) {
     const { text, source, ms, raw, castId } = c;
     if (S.phase !== 'playing') { fx.endChant(); caster.endCharge(); buttonChant = false; locks.clear(castId); S.busy = false; return; }
+    if (c.voice && trial.fighting && !intent.summon) {   // 试炼开战后只能开口召龙（设计文档第 2 节"试炼模式"）
+      fx.endChant(); caster.endCharge(); locks.clear(castId); S.busy = false;
+      hud.bigText('未能成咒', '#5d6b7a', 1000);
+      hud.setHint(`听到的是「${text}」：开战后开口只能召龙，说一句召龙的话；别的招用按钮放`);
+      sound.play('fail');
+      return;
+    }
     const firstEl = intent.summon && intent.summon !== 'thunder' ? intent.summon : intent.steps[0]?.el;
     if (firstEl) fx.retint(firstEl);
     let plan = planCast(intent, { mana: S.mana, lastCombo: S.lastCombo, seen: S.seen, said: S.said, text: c.button ? '' : text,
@@ -780,7 +861,8 @@ export function start(root, opts = {}) {
     const fused = plan.steps.find((s) => s.fusion);
     const autoNamed = !intent.name || intent.name === defaultName(intent.steps);
     const name = fused && autoNamed ? /** @type {string} */ (fused.fusionName) : intent.name || (plan.ok ? defaultName(plan.steps) : '');
-    if (!(trial.fighting && c.button)) hud.showCard({ name, text, plan, intent, source, ms });   // 试炼开战后不出咒语卡：顶上是 boss 血条，眼睛要看地上
+    // 试炼开战后不出咒语卡：顶上是 boss 血条，眼睛要看地上（开口召的龙另有"××现世"的大字）
+    if (!(trial.fighting && (c.button || c.voice))) hud.showCard({ name, text, plan, intent, source, ms });
     if (plan.backlash) { fx.backlash(); hud.bigText('天道不允', '#b3261e', 1300); }
     fx.endChant();
     buttonChant = false;
@@ -1550,7 +1632,10 @@ export function start(root, opts = {}) {
     // 开口就慢放：输入中（单次最多 8 秒）与咏唱中都是 0.3 倍
     if (slowSince && now - slowSince > SLOWMO_MAX_SEC * 1000) { slowSince = 0; slowSpent = true; }
     const slow = (slowSince > 0 || (fx.chanting > 0 && !buttonChant)) && S.phase === 'playing';
-    timeScale += ((slow ? SLOWMO_SCALE : 1) - timeScale) * Math.min(1, realDt * 10);
+    timeScale += ((slow ? (trial.fighting ? TRIAL_VOICE_SLOW : SLOWMO_SCALE) : 1) - timeScale) * Math.min(1, realDt * 10);
+    // 麦克风：录着、听写着的时候这一局结束了就收掉；按钮按能不能开口显示（试炼开战后气势满了才出来）
+    if (mic !== 'idle' && S.phase !== 'playing') { if (mic === 'on' || mic === 'tap') recorder?.stop(); micReset(); }
+    hud.setMicShown(micAllowed() || mic !== 'idle');
     let dt = frozen ? 0 : realDt * timeScale * lab.speed;   // 写咒对话框开着：游戏停住，画面照画；试验场可放慢、定格
     // 施法者自己的钟：开口慢放时世界慢、人照常（不然 0.8 秒的咏唱里手还没抬起来）；顿帧照样顿
     let cdt = frozen ? 0 : realDt * lab.speed;
@@ -1728,6 +1813,18 @@ export function start(root, opts = {}) {
     flash: () => env.flash(),
     /** 声音：play(名字, 参数) 放一个音效（名字见 fx/sound.js 的 RECIPES）；measure(名字或 calm / battle / boss) 离线渲染量峰值与响多久 */
     sound: { play: (/** @type {string} */ n, o = {}) => sound.play(n, o), measure: (/** @type {string} */ n, o = {}, sec = 5) => Sound.measure(n, o, sec), obj: sound },
+    /**
+     * 语音：fake(听写结果) 换上假的麦克风与听写（预览页没有麦克风、也没有服务器），之后照常按住、松开麦克风按钮；
+     * 结果给 { fail: 原因 } 就当听写没成，给 null 就当录到的太短太小声。state() 看麦克风在哪一步
+     */
+    voice: {
+      fake(/** @type {string | { fail: string } | null} */ result) {
+        recorder = { start: async () => {}, stop: () => (result === null ? null : { b64: 'A'.repeat(200), sec: 1, rms: 0.1 }), dispose() {} };
+        listen = async () => { await new Promise((r) => setTimeout(r, 400)); return typeof result === 'string' ? { text: result, ms: 400 } : result ?? { fail: 'silence' }; };
+        hud.setMic({ down: micDown, up: micUp });
+      },
+      state: () => mic,
+    },
     talents: (list) => { if (list) { S.talents = list; renderPicker(); } return [...S.talents]; },
     binds: () => Object.fromEntries(Object.entries(S.binds).map(([k, v]) => [k, { name: v.name, text: v.text }])),
     // 面板太小时看不清：按 w×h 横屏重画当前这一帧（先 pause 定格），返回 JPEG 的 data URL。
@@ -1779,6 +1876,8 @@ export function start(root, opts = {}) {
     window.removeEventListener('keyup', onGlobalKeyUp);
     window.removeEventListener('blur', onBlur);
     for (const ev of UNLOCK_ON) window.removeEventListener(ev, unlock, { capture: true });
+    clearTimeout(micTimer);
+    recorder?.dispose();
     sound.dispose();
     trial.dispose();
     enemies.clear();

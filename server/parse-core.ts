@@ -5,9 +5,11 @@
  * POST { text } → { ok, raw, ms, model } 或 { ok: false, reason, fallback: true }
  *      { inspire: { el, talents, foes } } → { ok, lines, ms }（求灵感，见 inspire）
  *      { warm: true } → 预热
+ *      { asr: 录音的 base64 } → { ok, text, ms }（语音识别，见 asr.ts；不用解析模型的密钥）
  * 密钥只在服务器上（环境变量 ARK_API_KEY），前端拿不到。失败一律让前端改用关键词解析，不让玩家干等。
  * 模型返回的 JSON 只做"是不是对象"的检查；字段清洗与数值裁决在 game/rules/ 里由程序完成。
  */
+import { asr } from './asr';
 import { checkLimits } from './limits';
 import { INSPIRE_PROMPT, SYSTEM_PROMPT, inspireMessage, userMessage } from './prompt';
 import { ENEMIES, INPUT_MAX_CHARS, TALENT_MAX } from '../game/rules/numbers.js';
@@ -157,15 +159,16 @@ async function parse(text: string, ip: string): Promise<Reply> {
   }
 }
 
-/** POST：请求体原文 → 解析 / 求灵感 / 预热 */
+/** POST：请求体原文 → 语音识别 / 解析 / 求灵感 / 预热 */
 export async function handlePost(bodyText: string, ip: string): Promise<Reply> {
-  if (!hasKey()) return fail('no_key');
-  let body: { warm?: unknown; inspire?: unknown; text?: unknown } | null;
+  let body: { warm?: unknown; inspire?: unknown; text?: unknown; asr?: unknown } | null;
   try {
     body = JSON.parse(bodyText);
   } catch {
-    return fail('bad_request', 400);
+    return hasKey() ? fail('bad_request', 400) : fail('no_key');
   }
+  if (body && typeof body === 'object' && 'asr' in body) return asr(body.asr, ip);
+  if (!hasKey()) return fail('no_key');
   if (body?.warm === true) {
     const limit = checkLimits(ip);
     return limit.ok ? warm() : fail(limit.reason, 429);

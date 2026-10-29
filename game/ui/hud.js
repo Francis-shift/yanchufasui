@@ -61,6 +61,19 @@ const CSS = FONT_CSS + `
   background: rgba(255,255,255,0.9); color: var(--ink); outline: none; box-shadow: 0 6px 24px -10px rgba(20,40,80,0.4); }
 .yc-input:focus { border-color: #5b8cff; box-shadow: 0 0 0 3px rgba(91,140,255,0.25), 0 6px 24px -10px rgba(20,40,80,0.4); }
 .yc-input:disabled { opacity: 0.6; }
+/* 输入框右边的麦克风：按住说话；输入框藏起来（试炼）时单独一个、带字 */
+.yc-say { display: flex; gap: 8px; align-items: center; justify-content: center; }
+.yc-say .yc-input { flex: 1; min-width: 0; }
+.yc-mic { flex: none; height: 46px; min-width: 46px; padding: 0 12px; border-radius: 23px; border: 1px solid var(--line); background: rgba(255,255,255,0.9);
+  color: #3b4856; font: inherit; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 4px; cursor: pointer;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; box-shadow: 0 6px 24px -10px rgba(20,40,80,0.4); }
+.yc-mic svg { width: 22px; height: 22px; flex: none; }
+.yc-mic[hidden] { display: none; }
+.yc-mic span { white-space: nowrap; }
+.yc-say .yc-input:not([hidden]) + .yc-mic { padding: 0; } .yc-say .yc-input:not([hidden]) + .yc-mic span { display: none; }
+.yc-mic.rec { background: #d9412b; border-color: #d9412b; color: #fff; animation: yc-rec 1s ease-in-out infinite; }
+.yc-mic.busy { opacity: 0.6; cursor: progress; }
+@keyframes yc-rec { 50% { box-shadow: 0 0 0 8px rgba(217,65,43,0.25); } }
 .yc-hint { font-size: 12px; color: var(--muted); text-align: center; text-shadow: 0 1px 0 rgba(255,255,255,0.6); }
 .yc-card { position: absolute; left: 50%; top: calc(14px + env(safe-area-inset-top, 0px)); transform: translate(-50%, -8px);
   width: min(560px, calc(100% - 32px)); padding: 12px 18px 14px; background: var(--panel); border: 1px solid var(--line);
@@ -185,6 +198,7 @@ const CSS = FONT_CSS + `
 .yc-narrow .yc-label { gap: 6px; }
 .yc-narrow .yc-card { width: calc(100% - 20px); }
 .yc-narrow .yc-mute { right: 10px; top: calc(60px + env(safe-area-inset-top, 0px)); }   /* 顶上一行占满了宽，挪到它下面 */
+.yc-narrow .yc-boss { left: 10px; right: 56px; width: auto; transform: none; }   /* boss 血条也在那一行下面：右边让出声音开关 */
 /* 矮（手机键盘弹起来了）：咒语卡只留名字、原话、一行结果，提示语不显示 */
 .yc-short .yc-hint, .yc-short .yc-tags { display: none; }
 .yc-short .yc-card { padding: 6px 12px 8px; }
@@ -271,7 +285,8 @@ export class Hud {
       <div class="yc-g yc-g-gauge"><div class="yc-label"><span>气势</span><b data-gauge>0 / 8</b></div><div class="yc-bar yc-gauge" data-gaugebar></div></div></div>`);
     this.bottom = el(`<div class="yc-bottom"><div class="yc-skills" hidden></div>
       <div class="yc-label"><span>法力</span><b data-mana>100</b></div><div class="yc-bar yc-mana"><i data-manabar></i></div>
-      <input class="yc-input" maxlength="${INPUT_MAX_CHARS}" enterkeyhint="send" autocomplete="off" aria-label="咒语" placeholder="说出你的咒语……（回车施法）">
+      <div class="yc-say"><input class="yc-input" maxlength="${INPUT_MAX_CHARS}" enterkeyhint="send" autocomplete="off" aria-label="咒语" placeholder="说出你的咒语……（回车施法）">
+        <button class="yc-mic" type="button" hidden></button></div>
       <button class="yc-btn yc-go" data-go hidden>开战</button>
       <div class="yc-hint" data-hint>开口就慢放，想好再说。例：先冻住最前面那只，再用风把它们吹下悬崖</div></div>`);
     this.boss = el(`<div class="yc-boss" hidden><div class="yc-label"><span data-bossname></span><b data-bossphase></b></div>
@@ -312,6 +327,18 @@ export class Hud {
     root.append(this.root);
     this.input = /** @type {HTMLInputElement} */ (this.bottom.querySelector('input'));
     this.go = /** @type {HTMLButtonElement} */ (this.bottom.querySelector('[data-go]'));
+    // 麦克风：按下就开始（不等松手），抓住这根手指，滑出按钮再松开也算松开；不抢输入框的焦点、长按不弹菜单
+    this.mic = /** @type {HTMLButtonElement} */ (this.bottom.querySelector('.yc-mic'));
+    /** @type {{ down: () => void, up: () => void } | null} */
+    this.micOn = null;
+    this.mic.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      try { this.mic.setPointerCapture(e.pointerId); } catch { /* 有的浏览器不让抓，照样能用 */ }
+      this.micOn?.down();
+    });
+    for (const ev of ['pointerup', 'pointercancel']) this.mic.addEventListener(ev, () => this.micOn?.up());
+    this.mic.addEventListener('contextmenu', (e) => e.preventDefault());
+    this.setMicState('idle');
     this.q = (sel) => /** @type {HTMLElement} */ (this.root.querySelector(sel));
     this.cardTimer = 0; this.bigTimer = 0;
     // 写咒对话框的按钮只绑一次，回调在 openWrite 时换成当前这个天赋的
@@ -445,6 +472,24 @@ export class Hud {
     this.go.hidden = !on || fighting;
     this.root.classList.toggle('yc-nopen', on && fighting);
     if (!on) this.setBoss(null);
+  }
+  /** 接上麦克风按钮（浏览器录不了音就不接，按钮一直藏着） @param {{ down: () => void, up: () => void }} on */
+  setMic(on) { this.micOn = on; }
+  /** 麦克风按钮显不显示（试炼开战后只在气势满了时出现） @param {boolean} on */
+  setMicShown(on) { if (this.mic.hidden === on) this.mic.hidden = !on; }
+  /**
+   * 麦克风按钮的样子：idle 待命；wait 等麦克风打开；on 在录（松开施法）；tap 在录（点一下开始的，再点一下施法）；busy 识别中
+   * @param {'idle' | 'wait' | 'on' | 'tap' | 'busy'} state
+   */
+  setMicState(state) {
+    const label = { idle: '按住说话', wait: '正在打开麦克风', on: '松开施法', tap: '再点一下施法', busy: '正在听写' }[state];
+    this.mic.classList.toggle('rec', state === 'on' || state === 'tap');
+    this.mic.classList.toggle('busy', state === 'busy' || state === 'wait');
+    this.mic.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/>'
+      + '<path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+      + `<span>${label}</span>`;
+    this.mic.title = label;
+    this.mic.setAttribute('aria-label', label);
   }
   /** 试炼 · 手机布局：左手摇杆、右手一簇按钮 @param {boolean} on */
   setPad(on) { this.root.classList.toggle('yc-pad', on); this.showStick(null); }

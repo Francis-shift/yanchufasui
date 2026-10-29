@@ -2,7 +2,7 @@
 
 - 库（three、cannon-es、后期处理）取 jsdelivr 的压缩版，缓存在 preview/vendor-min/；
 - game/ 下的本地模块逐个收进来，相对引用改写成内部名字；
-- 全部模块合成一份、gzip + base64 内联，页面启动时用浏览器自带的 DecompressionStream 解开，动态写 importmap 再启动。
+- 全部模块合成一份、gzip + base85 内联，页面启动时用浏览器自带的 DecompressionStream 解开，动态写 importmap 再启动。
 预览页没有服务器，解析只走关键词（等同断网模式）。
 用法：python tools/build_preview.py          → preview/index.html（游戏）
       python tools/build_preview.py check    → preview/check.html（手机检查页）
@@ -89,15 +89,35 @@ def collect_local(rel: str, out: dict):
     out[rel] = REL_IMPORT.sub(rewrite, src)
 
 
-def gz_b64(s: str) -> str:
-    return base64.b64encode(gzip.compress(s.encode("utf-8"), 9)).decode()
+# 模块包用 base85（4 字节编 5 个字，base64 是 3 字节编 4 个）：同样的内容小 6%，10-29 加语音时超了 512 KB。
+# Python 的 base85 字母表里有 < > &，换成表里没有的 . , :，页面里就不会被当成标签或注释。BOOT 里的 B85 与此对应
+B85_SWAP = str.maketrans("<>&", ".,:")
+
+
+def gz_b85(s: str) -> str:
+    out = base64.b85encode(gzip.compress(s.encode("utf-8"), 9)).decode().translate(B85_SWAP)
+    assert "<" not in out
+    return out
 
 
 BOOT = """<script>
 (async () => {
   try {
-    const unzip = async (b64) => {
-      const bin = Uint8Array.from(atob(b64.trim()), c => c.charCodeAt(0));
+    const B85 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%%:()*+-;.=,?@^_`{|}~';
+    const T = new Uint8Array(128);
+    for (let i = 0; i < 85; i++) T[B85.charCodeAt(i)] = i;
+    const unb85 = (s) => {   // 末尾不满 5 个字的一组用最大的字补齐，只取前几个字节（同 Python 的 b85decode）
+      const n = s.length, out = new Uint8Array(Math.floor(n / 5) * 4 + (n %% 5 ? n %% 5 - 1 : 0));
+      for (let i = 0, o = 0; i < n; i += 5) {
+        let acc = 0;
+        for (let j = 0; j < 5; j++) acc = acc * 85 + (i + j < n ? T[s.charCodeAt(i + j)] : 84);
+        const b = [acc / 16777216 & 255, acc / 65536 & 255, acc / 256 & 255, acc & 255];
+        for (let j = 0; j < 4 && o < out.length; j++) out[o++] = b[j];
+      }
+      return out;
+    };
+    const unzip = async (txt) => {
+      const bin = unb85(txt.trim());
       return new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
     };
     const urls = {};
@@ -197,7 +217,7 @@ def main():
             collect_pkg(p, pkgs)
     # 所有模块压成一个 gzip 流（模块之间重复的写法能互相引用，比逐个压小几十 KB；10-27 逐个压时超了 512 KB）
     mods = {f"@pkg/{p}": c for p, c in pkgs.items()} | {f"@local/{p}": c for p, c in locs.items()}
-    blocks = [f'<script type="application/octet-stream" data-bundle>{gz_b64(json.dumps(mods, ensure_ascii=False))}</script>']
+    blocks = [f'<script type="application/octet-stream" data-bundle>{gz_b85(json.dumps(mods, ensure_ascii=False))}</script>']
     if dragon:   # 模型数据 gzip 后内联，游戏里按开头两个字节自己判断要不要解压
         blocks.append(f'<script type="application/octet-stream" id="asset-dragon">{base64.b64encode(gzip.compress(dragon, 9)).decode()}</script>')
     blocks += [f'<script type="application/octet-stream" data-asset="{a.name}">{base64.b64encode(a.read_bytes()).decode()}</script>' for a in assets]
