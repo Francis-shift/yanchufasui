@@ -1,11 +1,13 @@
-// 语音施法：录音编成 16 kHz WAV（voice.js）；服务器听写（server/asr.ts，经北京函数的打包结果调，假的网络请求，不连网）。
+// 语音施法：录音编成 16 kHz WAV（voice.js）；服务器听写（server/asr.ts，经北京函数的打包结果调；识别服务是内存里一对管道扮的，不连网）。
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { duplexPair } from 'node:stream';
 import { pathToFileURL } from 'node:url';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { build } from '../tools/build-cn-func.mjs';
 import { base64, downsample, encode, MAX_SEC, RATE, wav } from '../game/voice.js';
 import { INPUT_MAX_CHARS } from '../game/rules/numbers.js';
@@ -87,18 +89,85 @@ const call = async (body) => {
   const r = await fn.handler({ httpMethod: 'POST', headers: { Origin: SITE }, body: JSON.stringify(body) });
   return { status: r.statusCode, body: JSON.parse(r.body) };
 };
-/** 配上听写密钥、换上假的听写服务（code 放在响应头 X-Api-Status-Code），跑完复原 */
-async function withAsr(reply, f) {
+
+// 识别服务那一侧的包：服务器发的 WebSocket 帧不加掩码；它自己的包头见 server/asr.ts
+const srvFrame = (payload, op = 2, fin = true) => {
+  const n = payload.length;
+  const h = n < 126 ? Buffer.from([(fin ? 0x80 : 0) | op, n]) : Buffer.from([(fin ? 0x80 : 0) | op, 126, n >> 8, n & 255]);
+  return Buffer.concat([h, payload]);
+};
+const u32 = (v, signed = false) => { const b = Buffer.alloc(4); signed ? b.writeInt32BE(v) : b.writeUInt32BE(v); return b; };
+/** 正常回包；flags 0b0011 = 最后一包（带负序号），0b0001 = 中间的（带正序号） */
+const resp = (obj, flags = 0b0011, seq = -2) => {
+  const z = gzipSync(Buffer.from(JSON.stringify(obj)));
+  return Buffer.concat([Buffer.from([0x11, 0x90 | flags, 0x11, 0]), flags & 1 ? u32(seq, true) : Buffer.alloc(0), u32(z.length), z]);
+};
+const errPkt = (code, msg) => Buffer.concat([Buffer.from([0x11, 0xf0, 0x10, 0]), u32(code), u32(Buffer.byteLength(msg)), Buffer.from(msg)]);
+/** 拆客户端发来的包（都不带序号） */
+const readPkt = (b) => ({ type: b[1] >> 4, flags: b[1] & 15, json: b[2] >> 4 === 1, body: gunzipSync(b.subarray(8, 8 + b.readUInt32BE(4))) });
+/** 最后一包音频到了就回整句 */
+const sayOnLast = (obj) => (p, send) => { if (p.type === 2 && p.flags === 2) send(srvFrame(resp(obj))); };
+
+/** 配上听写密钥、换上假的识别服务：serve(收到的包, 回一段字节, 这次连接的记录)；跑完复原 */
+async function withAsr(serve, f) {
   process.env.ASR_API_KEY = 'test-asr-key';
-  const calls = [];
-  globalThis.fetch = async (url, init) => {
-    calls.push({ url, init });
-    if (reply === 'hang') return new Promise((_, rej) => init.signal.addEventListener('abort', () => rej(new DOMException('timeout', 'TimeoutError'))));
-    return new Response(JSON.stringify(reply.json ?? {}), { status: 200, headers: { 'X-Api-Status-Code': reply.code } });
+  const opens = [], realOpen = asrMod.deps.open;
+  asrMod.deps.open = async (url, headers, ms) => {
+    if (typeof serve === 'object') throw Object.assign(new Error('refused'), serve);
+    const [client, server] = duplexPair();
+    const got = { url, headers, ms, pkts: [], ops: [] };
+    opens.push(got);
+    const reader = new asrMod.WsReader();
+    server.on('data', (chunk) => {
+      for (const fr of reader.push(chunk)) {
+        got.ops.push(fr.op);
+        if (fr.op !== 2) continue;
+        const p = readPkt(fr.data);
+        got.pkts.push(p);
+        serve(p, (buf) => server.write(buf), got);
+      }
+    });
+    server.on('error', () => {});
+    return client;
   };
-  try { return await f(calls); } finally { delete process.env.ASR_API_KEY; globalThis.fetch = realFetch; }
+  try { return await f(opens); } finally { delete process.env.ASR_API_KEY; asrMod.deps.open = realOpen; }
 }
 const CLIP = /** @type {{ b64: string }} */ (encode(tone(1, 0.5), 48000)).b64;
+const PCM = Buffer.from(CLIP, 'base64').subarray(44);
+
+test('WebSocket 帧：照标准（RFC 6455 第 5.7 节）的例子拆——不加掩码、加掩码、分两片、心跳、两字节长度；半截的等下一段', () => {
+  const r = new asrMod.WsReader();
+  const hello = (b) => r.push(Buffer.from(b)).map((f) => [f.op, f.data.toString()]);
+  assert.deepEqual(hello([0x81, 0x05, 0x48, 0x65, 0x6c, 0x6c, 0x6f]), [[1, 'Hello']]);
+  assert.deepEqual(hello([0x81, 0x85, 0x37, 0xfa, 0x21, 0x3d, 0x7f, 0x9f, 0x4d, 0x51, 0x58]), [[1, 'Hello']]);
+  assert.deepEqual(hello([0x01, 0x03, 0x48, 0x65, 0x6c]), []);
+  assert.deepEqual(hello([0x89, 0x05, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x80, 0x02, 0x6c, 0x6f]), [[9, 'Hello'], [1, 'Hello']]);
+  const big = Buffer.alloc(256, 7), whole = Buffer.concat([Buffer.from([0x82, 0x7e, 0x01, 0x00]), big]);
+  assert.deepEqual(r.push(whole.subarray(0, 3)), []);
+  assert.deepEqual(r.push(whole.subarray(3, 100)), []);
+  const [f] = r.push(whole.subarray(100));
+  assert.deepEqual([f.op, f.data.equals(big)], [2, true]);
+});
+
+test('发出去的帧：加了掩码，按掩码解回来是原样；长度分 7 位、16 位、64 位三档', () => {
+  for (const n of [5, 300, 70000]) {
+    const p = Buffer.alloc(n).map((_, i) => i * 31), fr = asrMod.wsFrame(p);
+    assert.equal(fr[0], 0x82);
+    assert.ok(fr[1] & 0x80, '客户端必须加掩码');
+    const o = n < 126 ? 2 : n < 65536 ? 4 : 10;
+    assert.equal(n < 126 ? fr[1] & 0x7f : n < 65536 ? fr.readUInt16BE(2) : Number(fr.readBigUInt64BE(2)), n);
+    const mask = fr.subarray(o, o + 4), body = fr.subarray(o + 4).map((x, i) => x ^ mask[i & 3]);
+    assert.ok(body.equals(p));
+  }
+});
+
+test('WAV 拆样本：浏览器编的格式取出 data 段；不是 16 kHz、不是单声道、不是 WAV 都不认', () => {
+  const b = Buffer.from(CLIP, 'base64');
+  assert.ok(asrMod.wavPcm(b).equals(PCM));
+  const rate = Buffer.from(b); rate.writeUInt32LE(48000, 24);
+  const stereo = Buffer.from(b); stereo.writeUInt16LE(2, 22);
+  for (const bad of [rate, stereo, Buffer.from('RIFF0000WAVX'), b.subarray(0, 30)]) assert.equal(asrMod.wavPcm(bad), null);
+});
 
 test('录满一次最长的时长，base64 后也在服务器收的上限以内', () => {
   const longest = encode(tone(MAX_SEC, 0.5, 16000), 16000);
@@ -110,9 +179,9 @@ test('请求头：新版 API Key、旧版 APP ID + Access Token 都认；都没�
   assert.equal(asrMod.asrHeaders({ ASR_APP_ID: 'a' }), null);
   const k = asrMod.asrHeaders({ ASR_API_KEY: 'k' });
   assert.equal(k['X-Api-Key'], 'k');
-  assert.equal(k['X-Api-Resource-Id'], 'volc.bigasr.auc_turbo');
-  assert.equal(k['X-Api-Sequence'], '-1');
+  assert.equal(k['X-Api-Resource-Id'], 'volc.seedasr.sauc.duration', '流式 2.0、按时长计费');
   assert.match(k['X-Api-Request-Id'], /^[0-9a-f-]{36}$/);
+  assert.equal(k['X-Api-Connect-Id'], k['X-Api-Request-Id']);
   assert.notEqual(k['X-Api-Request-Id'], asrMod.asrHeaders({ ASR_API_KEY: 'k' })['X-Api-Request-Id'], '每次一个新的请求号');
   const old = asrMod.asrHeaders({ ASR_APP_ID: 'a', ASR_ACCESS_TOKEN: 't', ASR_RESOURCE_ID: 'r' });
   assert.deepEqual([old['X-Api-App-Key'], old['X-Api-Access-Key'], old['X-Api-Resource-Id'], old['X-Api-Key']], ['a', 't', 'r', undefined]);
@@ -126,43 +195,75 @@ test('取文字：对象或数组都认，去掉句末标点，截到咒语长�
   assert.equal([...asrMod.pickText({ result: { text: '火'.repeat(200) } })].length, INPUT_MAX_CHARS);
 });
 
-test('没配听写密钥：答 no_key（前端换下一条线路），也不去调听写', async () => {
-  const calls = [];
-  globalThis.fetch = async (...a) => { calls.push(a); throw new Error('不该调'); };
+test('没配听写密钥：答 no_key（前端换下一条线路），也不去连识别服务', async () => {
+  const realOpen = asrMod.deps.open;
+  let opened = 0;
+  asrMod.deps.open = async () => { opened++; throw new Error('不该连'); };
   try {
     const r = await call({ asr: CLIP });
     assert.equal(r.body.reason, 'no_key');
-    assert.equal(calls.length, 0);
-  } finally { globalThis.fetch = realFetch; }
+    assert.equal(opened, 0);
+  } finally { asrMod.deps.open = realOpen; }
 });
 
-test('听写成功：没配解析模型的密钥也能用；带着录音和密钥调极速版', async () => {
-  await withAsr({ code: '20000000', json: { result: { text: '冰龙出来。' } } }, async (calls) => {
+test('听写成功：没配解析模型的密钥也能用；先发参数，录音 200 毫秒一包发完、最后一包打标志，收到最后的回包取整句', async () => {
+  const serve = (p, send) => {
+    if (p.type === 1) send(srvFrame(resp({ result: { text: '' } }, 0b0001, 1)));   // 中间回包：还没字
+    else sayOnLast({ result: { text: '冰龙出来。' }, audio_info: { duration: 1000 } })(p, send);
+  };
+  await withAsr(serve, async (opens) => {
     const r = await call({ asr: CLIP });
     assert.equal(r.status, 200);
     assert.equal(r.body.ok, true);
     assert.equal(r.body.text, '冰龙出来');
     assert.equal(typeof r.body.ms, 'number');
-    assert.equal(calls.length, 1);
-    assert.match(String(calls[0].url), /\/api\/v3\/auc\/bigmodel\/recognize\/flash$/);
-    assert.equal(calls[0].init.headers['X-Api-Key'], 'test-asr-key');
-    const sent = JSON.parse(calls[0].init.body);
-    assert.equal(sent.audio.data, CLIP);
-    assert.equal(sent.request.model_name, 'bigmodel');
+    assert.equal(opens.length, 1);
+    const { url, headers, pkts } = opens[0];
+    assert.match(url, /^wss:\/\/openspeech\.bytedance\.com\/api\/v3\/sauc\/bigmodel_nostream$/);
+    assert.equal(headers['X-Api-Key'], 'test-asr-key');
+    const [first, ...audio] = pkts;
+    assert.deepEqual([first.type, first.flags, first.json], [1, 0, true]);
+    const req = JSON.parse(first.body.toString());
+    assert.deepEqual(req.audio, { format: 'pcm', codec: 'raw', rate: 16000, bits: 16, channel: 1 });
+    assert.equal(req.request.model_name, 'bigmodel');
+    assert.equal(audio.length, Math.ceil(PCM.length / asrMod.PACKET_BYTES));
+    assert.ok(audio.every((p) => p.type === 2 && !p.json && p.body.length <= asrMod.PACKET_BYTES));
+    assert.deepEqual(audio.map((p) => p.flags), [...audio.slice(1).map(() => 0), 2], '只有最后一包打标志');
+    assert.ok(Buffer.concat(audio.map((p) => p.body)).equals(PCM), '拼回来就是原录音去掉文件头');
   });
 });
 
-test('听写的几种"不行"：静音、空结果、出错、超时', async () => {
-  await withAsr({ code: '20000003' }, async () => assert.equal((await call({ asr: CLIP })).body.reason, 'silence'));
-  await withAsr({ code: '20000000', json: { result: { text: '。' } } }, async () => assert.equal((await call({ asr: CLIP })).body.reason, 'silence'));
-  await withAsr({ code: '45000001' }, async () => {
+test('对方的回包拆成几段到、心跳要回；最后没打标志就关了连接，用最近一次的结果', async () => {
+  await withAsr((p, send) => {
+    if (p.type === 1) send(srvFrame(Buffer.from('hi'), 9));
+    if (p.flags !== 2) return;
+    const fr = srvFrame(resp({ result: { text: '火球' } }));
+    send(fr.subarray(0, 5)); setTimeout(() => send(fr.subarray(5)), 5);
+  }, async (opens) => {
+    assert.equal((await call({ asr: CLIP })).body.text, '火球');
+    assert.ok(opens[0].ops.includes(10), '回了心跳');
+  });
+  await withAsr((p, send, got) => {
+    if (p.type !== 1) return;
+    send(srvFrame(resp({ result: { text: '雷' } }, 0b0001, 1)));
+    setTimeout(() => send(srvFrame(Buffer.from([0x03, 0xe8]), 8)), 5);
+  }, async () => assert.equal((await call({ asr: CLIP })).body.text, '雷'));
+});
+
+test('听写的几种"不行"：没字、录音为空、出错包、握手被拒、超时', async () => {
+  await withAsr(sayOnLast({ result: { text: '。' } }), async () => assert.equal((await call({ asr: CLIP })).body.reason, 'silence'));
+  await withAsr((p, send) => p.flags === 2 && send(srvFrame(errPkt(45000002, 'empty audio'))), async () => assert.equal((await call({ asr: CLIP })).body.reason, 'silence'));
+  await withAsr((p, send) => p.type === 1 && send(srvFrame(errPkt(45000001, 'bad params'))), async () => {
     const r = await call({ asr: CLIP });
-    assert.equal(r.body.reason, 'asr_error');
-    assert.equal(r.body.code, '45000001');
+    assert.deepEqual([r.body.reason, r.body.code], ['asr_error', '45000001']);
+  });
+  await withAsr({ status: 401, code: '45000010' }, async () => {
+    const r = await call({ asr: CLIP });
+    assert.deepEqual([r.body.reason, r.body.code], ['asr_error', '45000010']);
   });
   process.env.ASR_TIMEOUT_MS = '50';
   try {
-    await withAsr('hang', async () => assert.equal((await call({ asr: CLIP })).body.reason, 'timeout'));
+    await withAsr(() => {}, async () => assert.equal((await call({ asr: CLIP })).body.reason, 'timeout'));
   } finally { delete process.env.ASR_TIMEOUT_MS; }
 });
 
@@ -183,13 +284,15 @@ test('前端：听写结果走和解析同一套线路；北京没开通听写�
   } finally { globalThis.fetch = realFetch; resetRoutes(); }
 });
 
-test('坏录音：太短、不是 base64、太长、不是字符串，都在调听写之前拒', async () => {
-  await withAsr({ code: '20000000', json: { result: { text: '火' } } }, async (calls) => {
-    for (const bad of ['AAAA', '这不是base64'.repeat(20), 'A'.repeat(asrMod.AUDIO_B64_MAX + 4), 123, null]) {
+test('坏录音：太短、不是 base64、太长、不是字符串、不是 16 kHz 的 WAV，都在连识别服务之前拒', async () => {
+  const b = Buffer.from(CLIP, 'base64');
+  b.writeUInt32LE(48000, 24);
+  await withAsr(sayOnLast({ result: { text: '火' } }), async (opens) => {
+    for (const bad of ['AAAA', '这不是base64'.repeat(20), 'A'.repeat(asrMod.AUDIO_B64_MAX + 4), 123, null, 'A'.repeat(200), b.toString('base64')]) {
       const r = await call({ asr: bad });
       assert.equal(r.status, 400, String(bad).slice(0, 10));
       assert.equal(r.body.reason, 'bad_request');
     }
-    assert.equal(calls.length, 0);
+    assert.equal(opens.length, 0);
   });
 });
