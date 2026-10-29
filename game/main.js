@@ -50,6 +50,7 @@ import { fitFrame } from './world/framing.js';
 import { loadProps } from './world/props.js';
 import { buildLayout, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS, OBSTACLES } from './world/layout.js';
 import { Hud, preloadFonts } from './ui/hud.js';
+import { makeReport, topNames } from './ui/report.js';
 import { asrRemote, inspireRemote, parseRemote, warmUp } from './net.js';
 import { ASR_TIMEOUT_MS, MAX_SEC, Recorder } from './voice.js';
 import { pickQuality } from './quality.js';
@@ -339,7 +340,8 @@ export function start(root, opts = {}) {
       S.phase = 'lost';
       barrier.shatter();
       sound.play('lose');
-      hud.showOverlay('阵眼破碎', { lead: '傀儡冲破了护山大阵。换个说法再来一次？', main: 'defense', defense: '重新守关', trial: '去试炼' });
+      hud.showOverlay('阵眼破碎', { lead: '傀儡冲破了护山大阵。换个说法再来一次？', main: 'defense', defense: '重新守关', trial: '去试炼',
+        report: reportOf('阵眼破碎', false, `守到第 ${S.wave + 1} 波`) });
     }
   }
 
@@ -352,6 +354,7 @@ export function start(root, opts = {}) {
     dragon.clear();
     embers.length = 0;
     gales.length = 0;
+    resetTallies();
     timers.length = 0;   // 上一局没跑完的延时（第二步法术、收锁定标记）不能带进新的一局
     if (pend) { clearTimeout(pend.t); pend = null; }
     buttonChant = false; frozen = false;
@@ -427,11 +430,12 @@ export function start(root, opts = {}) {
     const cur = { stage: won ? RUN_STAGES.length : trial.stage, sec: Math.round(trial.runT) };
     const fresh = record(cur);
     const fell = won ? null : trial.fell();
+    const line = `${won ? `${BOSS_COUNT} 个 boss 尽数击碎` : recordText(cur)} · 用时 ${clock(cur.sec)} · 完美闪避 ${trial.perfects} 次`;
     hud.showOverlay(won ? '试炼通过' : '败下阵来', {
       lead: fell ? fell.where : `${BOSS_COUNT} 个 boss 尽数击碎，气血还剩 ${Math.ceil(trial.hp)}。`,
       stats: [{ k: '用时', v: clock(cur.sec) }, { k: '完美闪避', v: `${trial.perfects} 次` }, { k: '发现法术', v: `${S.seen.length} 种` }],
       tip: fell ? `${fell.tip}。` : '', best: best ? recordText(best) : '', fresh,
-      main: 'trial', trial: '再战试炼', defense: '去守关',
+      main: 'trial', trial: '再战试炼', defense: '去守关', report: reportOf(won ? '试炼通过' : '败下阵来', won, line),
     });
   }
   /** 试炼打通了：最后一个 boss 碎掉，过一会儿出结算页（可以再战或回去守关） */
@@ -636,7 +640,8 @@ export function start(root, opts = {}) {
         S.phase = 'won';
         sound.play('win');
         hud.showOverlay('护山大阵守住了', { lead: `五波傀儡尽数退去，阵眼还剩 ${Math.ceil(S.core)} 点。换个说法，再守一次？`,
-          main: 'defense', defense: '再守一次', trial: '去试炼' });
+          main: 'defense', defense: '再守一次', trial: '去试炼',
+          report: reportOf('护山大阵守住了', true, `守住 ${WAVES.length} 波 · 阵眼还剩 ${Math.ceil(S.core)}`) });
       }
     }
   }
@@ -758,6 +763,54 @@ export function start(root, opts = {}) {
   const groundPt = (pt) => new THREE.Vector3(pt.x, (groundHeightAt(pt.x, pt.z) ?? 0) + 0.4, pt.z);
   let castSeq = 0;
 
+  // ---------------------------------------------------------------- 战报卡的账（ui/report.js）
+  // 放出去的每一招（打字、语音、按键、召龙）记一本账：名字、打出了多少伤害。哪一招的账超过了最佳，就在它打中后
+  // SHOT_DELAY 秒（游戏时间，等爆炸开到最大）截一张画面，结算时画进战报卡
+  /** @typedef {{ name: string, dmg: number }} Tally */
+  /** 步骤、召唤 → 这一招的账（召龙、火海、旋风打中时用的是临时的步骤，直接带 tally 字段） @type {WeakMap<object, Tally>} */
+  const tallyOf = new WeakMap();
+  /** @type {Tally[]} */
+  let tallies = [];
+  let bestTally = /** @type {Tally | null} */ (null), shotDue = -1, shotTaken = false;
+  /** 上一次为哪一招、在它累计多少伤害时排的截图 */
+  let shotOf = /** @type {Tally | null} */ (null), shotDmg = 0;
+  const SHOT_DELAY = 0.15, SHOT_GROW = 1.5, shotCanvas = document.createElement('canvas');
+  /** @param {string} name */
+  const newTally = (name) => { const t = { name, dmg: 0 }; tallies.push(t); return t; };
+  /** 开新的一局：账清零，旧截图作废 */
+  function resetTallies() {
+    tallies = []; bestTally = shotOf = null; shotDmg = 0; shotDue = -1; shotTaken = false;
+  }
+  /** @param {Tally} t @param {number} dmg */
+  function addDamage(t, dmg) {
+    if (!(dmg > 0) || S.phase !== 'playing') return;
+    t.dmg += dmg;
+    if (bestTally && t !== bestTally && t.dmg <= bestTally.dmg) return;
+    bestTally = t;
+    // 同一招接着打（旋风、火海每零点几秒一下）：累计伤害又涨了一半才重截，不然下下都要截一张
+    if (t === shotOf && t.dmg < shotDmg * SHOT_GROW) return;
+    shotOf = t; shotDmg = t.dmg; shotDue = idleT + SHOT_DELAY;
+  }
+  /** 刚画完这一帧时调（WebGL 画布只在这一刻还留着画面）：缩到长边 720 存下来 */
+  function captureShot() {
+    const src = renderer.domElement, w = src.width, h = src.height;
+    if (!w || !h) return;
+    const k = Math.min(1, 720 / Math.max(w, h));
+    shotCanvas.width = Math.round(w * k); shotCanvas.height = Math.round(h * k);
+    shotCanvas.getContext('2d')?.drawImage(src, 0, 0, shotCanvas.width, shotCanvas.height);
+    shotTaken = true;
+  }
+  /**
+   * 结算页"看战报"要画的那张 @param {string} sub 胜负那行大字 @param {boolean} won @param {string} stats
+   * @returns {() => Promise<Blob | null>}
+   */
+  function reportOf(sub, won, stats) {
+    const best = bestTally && bestTally.dmg > 0 ? { ...bestTally } : null, names = topNames(tallies);
+    if (!shotTaken) shotDue = idleT;   // 一招也没打中：截下一帧（结算这一刻）的画面
+    // 点了才画：结算页开着时不会再截（addDamage 只认 playing），开新的一局会先关掉结算页
+    return () => makeReport({ title: '言出法随', sub, won, best, shot: shotTaken ? shotCanvas : null, names, stats });
+  }
+
   /** 墙有几段：升过级的（「墙·二」）按范围倍数加长 @param {{ wide?: number }} s */
   const wallSegments = (s) => Math.round(FORMS.wall.segments * (s.wide ?? 1));
 
@@ -873,6 +926,9 @@ export function start(root, opts = {}) {
       S.busy = false;
       return;
     }
+    const tally = newTally(name || plan.summon?.name || '无名');   // 战报卡的账：之后这一招每打中一下都记上
+    for (const s of plan.steps) tallyOf.set(s, tally);
+    if (plan.summon) tallyOf.set(plan.summon, tally);
     const m = plan.momentum;
     if (!c.button) { if (m >= 3) sound.play('surge'); else sound.play('card'); }   // 开口念成的咒"叮"一声；气势如虹换成锣鼓
     if (plan.summon?.cast) {
@@ -916,7 +972,11 @@ export function start(root, opts = {}) {
   function castAgain(steps, m) {
     if (S.phase !== 'playing') return;
     const half = boostPlan({ steps }, RUN.runes.lian.mult).steps;
-    half.forEach((s, i) => { const st = stepStats.get(steps[i]); if (st) stepStats.set(s, st); });
+    half.forEach((s, i) => {
+      const st = stepStats.get(steps[i]), t = tallyOf.get(steps[i]);
+      if (st) stepStats.set(s, st);
+      if (t) tallyOf.set(s, t);   // 再放的这一下记在原来那一招的账上
+    });
     const castId = ++castSeq;
     const { resolved, marks } = lockSteps(half, m);
     locks.show(castId, marks);
@@ -1119,22 +1179,23 @@ export function start(root, opts = {}) {
     };
     const T = atGround(pt.x, pt.z);
     locks.show(castId, [{ el, ids, ring: ids.length ? null : { x: pt.x, y: T.y, z: pt.z, r: sm.radius } }]);
+    const tally = tallyOf.get(sm);   // 战报卡的账：砸中、火海、旋风、劈雷都记在这一招上
     const impact = (/** @type {THREE.Vector3} */ p) => {
       locks.clear(castId);
       if (S.phase !== 'playing') return;
-      if (el === 'wind') gale(p, sm.radius, k);
+      if (el === 'wind') gale(p, sm.radius, k, tally);
       else if (el !== 'thunder') {
         for (const e of [...enemies.list]) {
           if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) > sm.radius) continue;
-          hitEnemy(e, { el }, sm.dmg, p, { fromAbove: true });
+          hitEnemy(e, { el, tally }, sm.dmg, p, { fromAbove: true });
           if (el === 'earth') enemies.fling(e, (Math.random() - 0.5) * 2, 7, (Math.random() - 0.5) * 2);   // 顶飞，落回圈里
         }
-        if (el === 'fire') fireSea(p, sm.radius * 0.8, k);
+        if (el === 'fire') fireSea(p, sm.radius * 0.8, k, tally);
         if (el === 'earth') earthRing(p);
       }
       dragonLanded();
     };
-    const strike = (/** @type {THREE.Vector3} */ from, /** @type {number} */ i) => dragonStrike(from, i, ids, follow() ?? T, SUMMONS.thunder.strike * k);
+    const strike = (/** @type {THREE.Vector3} */ from, /** @type {number} */ i) => dragonStrike(from, i, ids, follow() ?? T, SUMMONS.thunder.strike * k, tally);
     dragon.summon(T, el, { impact, strike: el === 'thunder' ? strike : undefined }, ids.length ? follow : undefined);
   }
 
@@ -1152,7 +1213,7 @@ export function start(root, opts = {}) {
    * @param {import('./rules/arbiter.js').SummonPlan} sm @param {keyof typeof SUMMONS} el @param {boolean} twin 两条：外圈那条反着转
    */
   function guardDragons(sm, el, twin) {
-    const G = RUN.dragon.guard;
+    const G = RUN.dragon.guard, tally = tallyOf.get(sm);
     const me = () => atGround(trial.p.x, trial.p.z);
     /** @type {Map<string, number>} 敌人 → 到几秒（clock）才能再挨 */
     const next = new Map();
@@ -1171,7 +1232,7 @@ export function start(root, opts = {}) {
           for (const e of [...enemies.list]) {
             if ((next.get(e.id) ?? 0) > clock || distToSegment(e.pos, a, b) > G.reach + trial.bodyR(e)) continue;
             next.set(e.id, clock + G.every);
-            hitEnemy(e, { el }, sm.dmg * G.touch, a.clone().setY(e.pos.y), {});
+            hitEnemy(e, { el, tally }, sm.dmg * G.touch, a.clone().setY(e.pos.y), {});
           }
         }
       };
@@ -1179,10 +1240,13 @@ export function start(root, opts = {}) {
     });
   }
 
-  /** 火龙落下的火海：和字诀「燎」的地火一样每 tick 秒烧一下，只是大、烧得久 @param {THREE.Vector3} p @param {number} r @param {number} k */
-  function fireSea(p, r, k) {
+  /**
+   * 火龙落下的火海：和字诀「燎」的地火一样每 tick 秒烧一下，只是大、烧得久
+   * @param {THREE.Vector3} p @param {number} r @param {number} k @param {Tally} [tally] 烧的伤害记在哪一招的账上
+   */
+  function fireSea(p, r, k, tally) {
     const { sec, dps } = SUMMONS.fire.sea, tick = RUN.runes.liao.tick;
-    embers.push({ p: p.clone(), r, t: sec, tick, dmg: dps * tick * k });
+    embers.push({ p: p.clone(), r, t: sec, tick, dmg: dps * tick * k, src: { el: 'fire', tally } });
     fx.groundFire(p, r, sec);
   }
 
@@ -1203,13 +1267,16 @@ export function start(root, opts = {}) {
     enemies.setObstacles(walls.obstacles());
   }
 
-  /** 风龙卷起的旋风：中心、半径、还剩几秒、离下一下还有几秒、每下多疼 @type {{ p: THREE.Vector3, r: number, t: number, tick: number, dmg: number }[]} */
+  /**
+   * 风龙卷起的旋风：中心、半径、还剩几秒、离下一下还有几秒、每下多疼、打中时当哪一步（带着战报卡的账）
+   * @type {{ p: THREE.Vector3, r: number, t: number, tick: number, dmg: number, src: { el: string, tally?: Tally } }[]}
+   */
   const gales = [];
-  const GALE_TICK = 0.25, WIND = { el: 'wind' };
-  /** @param {THREE.Vector3} p @param {number} r @param {number} k */
-  function gale(p, r, k) {
+  const GALE_TICK = 0.25;
+  /** @param {THREE.Vector3} p @param {number} r @param {number} k @param {Tally} [tally] */
+  function gale(p, r, k, tally) {
     const { sec, total } = SUMMONS.wind;
-    gales.push({ p: p.clone(), r, t: sec, tick: 0, dmg: (total * k * GALE_TICK) / sec });
+    gales.push({ p: p.clone(), r, t: sec, tick: 0, dmg: (total * k * GALE_TICK) / sec, src: { el: 'wind', tally } });
     fusions.gale(p, r, sec);
     if (S.mode === 'trial') {   // 风一起，boss 射出来的冰锥全吹散
       const n = trial.shatter(p, p, 999);
@@ -1226,7 +1293,7 @@ export function start(root, opts = {}) {
         for (const e of [...enemies.list]) {
           const dx = g.p.x - e.pos.x, dz = g.p.z - e.pos.z, d = Math.hypot(dx, dz);
           if (d > g.r + (e.mode === 'boss' ? 1 : 0)) continue;
-          hitEnemy(e, WIND, g.dmg, g.p, {});
+          hitEnemy(e, g.src, g.dmg, g.p, {});
           const ux = dx / (d || 1), uz = dz / (d || 1), pull = Math.min(d, 2.5) * 1.6;
           enemies.fling(e, ux * pull - uz * 4, 2.5, uz * pull + ux * 4);
         }
@@ -1239,9 +1306,9 @@ export function start(root, opts = {}) {
   /**
    * 雷龙劈的第 i 道雷：轮着劈锁定的那几只（死了的跳过），都没了就劈离目标最近的（10 米外的不劈，打在地上）；
    * 从龙嘴劈下去，从天而降、盾挡不住，连锁一共跳 SUMMONS.thunder.jumps 下（平常是 ELEMENTS.thunder.chain.jumps），劈过的地方冰锥全碎。
-   * @param {THREE.Vector3} from @param {number} i @param {string[]} ids @param {THREE.Vector3} T @param {number} dmg
+   * @param {THREE.Vector3} from @param {number} i @param {string[]} ids @param {THREE.Vector3} T @param {number} dmg @param {Tally} [tally]
    */
-  function dragonStrike(from, i, ids, T, dmg) {
+  function dragonStrike(from, i, ids, T, dmg, tally) {
     if (S.phase !== 'playing') return;
     const live = ids.map((id) => enemies.get(id)).filter(Boolean);
     let e = live.length ? live[i % live.length] : nearest(T);
@@ -1251,7 +1318,7 @@ export function start(root, opts = {}) {
     fx.burst(to, 'thunder', 1.4, 0.6);
     fx.shake = Math.max(fx.shake, 0.2);
     zapShards(from, to, SUMMONS.thunder.clear);   // 和字诀「引」一样，劈过的地方冰锥全碎，只是宽得多
-    if (e) hitEnemy(e, { el: 'thunder', extraJumps: SUMMONS.thunder.jumps - ELEMENTS.thunder.chain.jumps }, dmg, from, { fromAbove: true });
+    if (e) hitEnemy(e, { el: 'thunder', extraJumps: SUMMONS.thunder.jumps - ELEMENTS.thunder.chain.jumps, tally }, dmg, from, { fromAbove: true });
   }
 
   /**
@@ -1301,15 +1368,17 @@ export function start(root, opts = {}) {
     };
   }
 
-  /** 字诀「燎」落地留的火：地面上的点、半径、还剩几秒、离下一次烧还有几秒、每次烧多疼 @type {{ p: THREE.Vector3, r: number, t: number, tick: number, dmg: number }[]} */
+  /**
+   * 字诀「燎」落地留的火：地面上的点、半径、还剩几秒、离下一次烧还有几秒、每次烧多疼、烧到时当哪一步（带着战报卡的账）
+   * @type {{ p: THREE.Vector3, r: number, t: number, tick: number, dmg: number, src: { el: string, tally?: Tally } }[]}
+   */
   const embers = [];
-  const FIRE = { el: 'fire' };
-  /** @param {THREE.Vector3} p @param {number} r @param {number} dmg */
-  function leaveFire(p, r, dmg) {
+  /** @param {THREE.Vector3} p @param {number} r @param {number} dmg @param {Tally} [tally] */
+  function leaveFire(p, r, dmg, tally) {
     const L = RUN.runes.liao;
     if (embers.length >= L.max) return;   // 一场火雨就是六片，再多不留
     const at = new THREE.Vector3(p.x, groundHeightAt(p.x, p.z) ?? 0, p.z);
-    embers.push({ p: at, r, t: L.sec, tick: L.tick, dmg });
+    embers.push({ p: at, r, t: L.sec, tick: L.tick, dmg, src: { el: 'fire', tally } });
     fx.groundFire(at, r, L.sec);
   }
   /** 每帧：地火里的敌人每 tick 秒烧一下（boss 身子大，碰到火边就算；火照样削冰甲） @param {number} dt */
@@ -1321,7 +1390,7 @@ export function start(root, opts = {}) {
       if (f.tick <= 0) {
         f.tick += L.tick;
         for (const e of [...enemies.list]) {
-          if (Math.hypot(e.pos.x - f.p.x, e.pos.z - f.p.z) <= f.r + (e.mode === 'boss' ? 1 : 0)) hitEnemy(e, FIRE, f.dmg, f.p, {});
+          if (Math.hypot(e.pos.x - f.p.x, e.pos.z - f.p.z) <= f.r + (e.mode === 'boss' ? 1 : 0)) hitEnemy(e, f.src, f.dmg, f.p, {});
         }
       }
       if (f.t <= 0) embers.splice(i, 1);
@@ -1355,7 +1424,7 @@ export function start(root, opts = {}) {
     const dir = { fromAbove: step.path === 'sky', fromBehind: step.path === 'behind' };
     // 试炼里写进按钮的字诀（run.js applyRunes）：随——追着打；引——闪电劈碎冰锥；燎——落地留火；回——风飞回手上再打一下
     const rs = step.runes ?? [], sui = rs.includes('sui'), shatter = rs.includes('yin'), hui = rs.includes('hui');
-    const burn = (/** @type {THREE.Vector3} */ p, /** @type {number} */ r) => { if (rs.includes('liao')) leaveFire(p, r, step.dmgEach * RUN.runes.liao.k); };
+    const burn = (/** @type {THREE.Vector3} */ p, /** @type {number} */ r) => { if (rs.includes('liao')) leaveFire(p, r, step.dmgEach * RUN.runes.liao.k, tallyOf.get(step)); };
     if (step.form === 'bolt') {
       for (let i = 0; i < step.count; i++) {
         let id = res.ids.length ? res.ids[i % res.ids.length] : null;
@@ -1511,8 +1580,9 @@ export function start(root, opts = {}) {
       r = trial.hitBoss(e, step.el, r, rs.includes('po'));   // 试炼的 boss：冰甲只怕火（字诀「破」什么元素都削甲）
       if (r.freezeSec > 0 && rs.includes('ning')) trial.chill();   // 「凝」冻住了 boss：下一招预警变慢
     }
-    const at = e.pos.clone();
+    const at = e.pos.clone(), t = step.tally ?? tallyOf.get(step);   // 这一下记在哪一招的账上（战报卡）
     enemies.applyHit(e, r, from, step.el);
+    if (t) addDamage(t, r.dmg);
     if (step.el === 'thunder' && !dir.chain) chain(e, at, wasFrozen, step, dmg);
     const st = stepStats.get(step);   // 天赋按键放的：记命中与反应，按打法加气势
     if (st) { st.hits.add(e.id); if (r.reaction) st.combo = true; awardButton(st); }
@@ -1522,7 +1592,9 @@ export function start(root, opts = {}) {
       for (const o of [...enemies.list]) {
         if (o === e || Math.hypot(o.pos.x - at.x, o.pos.z - at.z) > 3) continue;
         const hit = { dmg: r.aoeBonus, freezeSec: 0, burnSec: 0, unfreeze: true, push: 0, reaction: '蒸汽爆', stunSec: 0 };
-        enemies.applyHit(o, o.mode === 'boss' ? trial.hitBoss(o, 'fire', hit) : hit, at, 'fire');
+        const h = o.mode === 'boss' ? trial.hitBoss(o, 'fire', hit) : hit;
+        enemies.applyHit(o, h, at, 'fire');
+        if (t) addDamage(t, h.dmg);
       }
     }
   }
@@ -1718,6 +1790,7 @@ export function start(root, opts = {}) {
     grade.tick(realDt, _v.z < 1 ? fx.impactK : 0, impactUv, camera.aspect);
     renderer.info.reset();
     composer.render();
+    if (shotDue >= 0 && idleT >= shotDue) { shotDue = -1; captureShot(); }   // 战报卡的最佳一击：紧跟在画完之后截
 
     fpsAcc += realDt; fpsN++;
     if (fpsAcc > 0.5) { fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }

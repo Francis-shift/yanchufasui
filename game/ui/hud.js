@@ -12,8 +12,8 @@ import { PATH_NAMES, TARGET_NAMES } from '../rules/intent.js';
  *   - 大字（屏幕中央闪的字、标题）用志莽行，只有固定的几十个字，一份很小。
  * 没下好或下载失败时，退回系统自带的行楷、楷体。
  */
-const BRUSH = '"YC Brush", "YC Brush Rest", "STXingkai", "STKaiti", "KaiTi", "Kaiti SC", serif';
-const BRUSH_BIG = `"YC Brush Big", ${BRUSH}`;
+export const BRUSH = '"YC Brush", "YC Brush Rest", "STXingkai", "STKaiti", "KaiTi", "Kaiti SC", serif';
+export const BRUSH_BIG = `"YC Brush Big", ${BRUSH}`;
 const FONT_CSS = `
 @font-face { font-family: "YC Brush"; src: url("/fonts/brush-core.woff") format("woff"); font-display: swap; }
 @font-face { font-family: "YC Brush Rest"; src: url("/fonts/brush-rest.woff") format("woff"); font-display: swap; }
@@ -30,7 +30,7 @@ export function preloadFonts(rest = false) {
 }
 
 /** 两款字体都没有间隔号"·"，名字显示时换成字体里有的"•" */
-const showName = (s) => s.replace(/·/g, '•');
+export const showName = (/** @type {string} */ s) => s.replace(/·/g, '•');
 
 const CSS = FONT_CSS + `
 .yc-ui { position: absolute; inset: 0; pointer-events: none; font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
@@ -113,6 +113,16 @@ const CSS = FONT_CSS + `
 .yc-best.hot { color: #7a4a00; background: rgba(240,178,74,0.28); font-weight: 600; }
 .yc-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 12px; }
 .yc-btns .yc-btn { margin-top: 0; }
+.yc-btns [hidden] { display: none; }
+/* 战报卡：压在结算页上面看大图，下面保存、分享、关闭 */
+.yc-report { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  padding: 12px; background: rgba(20, 28, 38, 0.72); backdrop-filter: blur(3px); pointer-events: auto; }
+.yc-report[hidden], .yc-report [hidden] { display: none; }
+.yc-report img { max-width: min(400px, 92%); max-height: calc(100% - 100px); border-radius: 10px; background: #f6f1e7;
+  box-shadow: 0 10px 40px -10px rgba(0,0,0,0.6); -webkit-touch-callout: default; }
+.yc-report-msg { margin: 0; color: #e8edf3; font-size: 13px; text-align: center; }
+.yc-report-btns { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.yc-report-btns .yc-btn { margin-top: 0; padding: 8px 18px; font-size: 14px; text-decoration: none; }
 .yc-box .yc-note { margin: 10px 0 0; font-size: 12px; line-height: 1.6; }
 .yc-btn { margin-top: 12px; font: inherit; font-size: 16px; padding: 10px 26px; border-radius: 12px; border: 1px solid #4a74d9;
   background: #4a74d9; color: #fff; cursor: pointer; }
@@ -297,7 +307,8 @@ export class Hud {
     this.overlay = el(`<div class="yc-overlay"><div class="yc-box"><h1>言出法随</h1>
       <p data-lead></p><div class="yc-stats" hidden></div><p data-tip hidden></p><div class="yc-best" hidden></div>
       <div class="yc-picker"><div class="yc-picker-title">选天赋（最多 3 个）</div><div class="yc-talents"></div><div class="yc-syn"></div></div>
-      <div class="yc-btns"><button class="yc-btn" data-trial>开始试炼</button><button class="yc-btn ghost" data-start>守关模式</button></div>
+      <div class="yc-btns"><button class="yc-btn" data-trial>开始试炼</button><button class="yc-btn ghost" data-start>守关模式</button>
+        <button class="yc-btn ghost" data-report style="order:2" hidden>看战报</button></div>
       <p class="yc-note" data-note hidden></p></div></div>`);
     this.write = el(`<div class="yc-write" hidden><div class="yc-box">
       <div class="yc-write-title"></div>
@@ -323,7 +334,15 @@ export class Hud {
     /** @type {(() => void) | null} */
     this.onMute = null;
     this.mute.addEventListener('click', () => { this.mute.blur(); this.onMute?.(); });
-    this.root.append(this.floats, this.stick, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay, this.mute);
+    this.report = el(`<div class="yc-report" hidden><img alt="战报卡"><p class="yc-report-msg"></p>
+      <div class="yc-report-btns"><a class="yc-btn" data-save download="言出法随-战报.png">保存图片</a>
+        <button class="yc-btn ghost" data-share>分享</button><button class="yc-btn ghost" data-close>关闭</button></div></div>`);
+    /** 结算页上"看战报"要生成的那张（showOverlay 换） @type {(() => Promise<Blob | null>) | null} */
+    this.reportMake = null;
+    this.reportUrl = ''; this.reportSeq = 0;
+    /** @type {HTMLElement} */ (this.overlay.querySelector('[data-report]')).addEventListener('click', () => { if (this.reportMake) this.openReport(this.reportMake); });
+    /** @type {HTMLElement} */ (this.report.querySelector('[data-close]')).addEventListener('click', () => this.closeReport());
+    this.root.append(this.floats, this.stick, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay, this.report, this.mute);
     root.append(this.root);
     this.input = /** @type {HTMLInputElement} */ (this.bottom.querySelector('input'));
     this.go = /** @type {HTMLButtonElement} */ (this.bottom.querySelector('[data-go]'));
@@ -683,10 +702,13 @@ export class Hud {
    * 首页 / 结算页：标题（大字）、一行说明、几格数字（结算用）、一行提示、本机最佳（fresh：这局刚破的）、
    * 两个模式的按钮（main 那个是主按钮、排前面）、按钮下一行小字。
    * @param {string} title
+   * report：结算页给了就出"看战报"按钮，点了才画（report.js makeReport）
    * @param {{ lead: string, stats?: { k: string, v: string }[], tip?: string, best?: string, fresh?: boolean,
-   *           main: 'trial' | 'defense', trial: string, defense: string, note?: string }} o
+   *           main: 'trial' | 'defense', trial: string, defense: string, note?: string, report?: () => Promise<Blob | null> }} o
    */
   showOverlay(title, o) {
+    this.reportMake = o.report ?? null;
+    /** @type {HTMLElement} */ (this.overlay.querySelector('[data-report]')).hidden = !o.report;
     const box = this.overlay;
     const set = (/** @type {string} */ sel, /** @type {string | undefined} */ text) => {
       const n = /** @type {HTMLElement} */ (box.querySelector(sel));
@@ -706,7 +728,38 @@ export class Hud {
     }
     box.hidden = false;
   }
-  hideOverlay() { this.overlay.hidden = true; }
+  hideOverlay() { this.overlay.hidden = true; this.closeReport(); }
+
+  /**
+   * 看战报：先写"正在生成"，画好换成图片。保存在电脑上是下载；手机浏览器多半不认下载，长按图片保存（微信里也行）；
+   * 能分享文件的浏览器另给"分享"
+   * @param {() => Promise<Blob | null>} make
+   */
+  async openReport(make) {
+    const box = this.report, img = /** @type {HTMLImageElement} */ (box.querySelector('img')), msg = /** @type {HTMLElement} */ (box.querySelector('.yc-report-msg'));
+    const save = /** @type {HTMLAnchorElement} */ (box.querySelector('[data-save]')), share = /** @type {HTMLButtonElement} */ (box.querySelector('[data-share]'));
+    this.closeReport();
+    const seq = ++this.reportSeq;
+    box.hidden = false; img.hidden = true; save.hidden = true; share.hidden = true;
+    msg.textContent = '正在生成战报……';
+    const blob = await make().catch(() => null);
+    if (seq !== this.reportSeq || box.hidden) return;
+    if (!blob) { msg.textContent = '战报没生成出来，关掉再点一次'; return; }
+    this.reportUrl = URL.createObjectURL(blob);
+    img.src = this.reportUrl; img.hidden = false;
+    save.href = this.reportUrl; save.hidden = false;
+    msg.textContent = '手机上长按图片，可以保存或发给朋友';
+    const file = new File([blob], '言出法随-战报.png', { type: 'image/png' });
+    if (navigator.canShare?.({ files: [file] })) {
+      share.hidden = false;
+      share.onclick = () => { navigator.share({ files: [file], title: '言出法随' }).catch(() => {}); };
+    }
+  }
+  closeReport() {
+    this.reportSeq++;
+    this.report.hidden = true;
+    if (this.reportUrl) { URL.revokeObjectURL(this.reportUrl); this.reportUrl = ''; }
+  }
 
   /** 声音开关画成开着还是关着；toggle 给了就换成点它时调的 @param {boolean} muted @param {() => void} [toggle] */
   setMuted(muted, toggle) {

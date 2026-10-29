@@ -25,11 +25,15 @@ test('字表：界面固定大字、所有默认名、融合名与成语都在�
   assert.deepEqual(bad, [], `这些字不在先加载的字表里：${bad.join('、')}`);
 });
 
-test('字表：main.js、modes/trial.js 里所有大字与结算标题的写法，每个字都在大字那份字体里', () => {
+test('字表：main.js、modes/trial.js 里所有大字、结算标题与战报卡胜负行的写法，每个字都在大字那份字体里', () => {
   const src = ['../game/main.js', '../game/modes/trial.js'].map((f) => fs.readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
-  // 只取第一个参数：大字后面跟颜色（'#…'）、结算页标题后面跟一个对象（{ lead: … }，那些字用的是普通字体）
-  const calls = [...src.matchAll(/(?:bigText|showOverlay)\(([^;]*?)(?:,\s*'#|,\s*`|,\s*'[^']*',\s*'|,\s*\{|\);)/g)].map((m) => m[1]);
+  // 只取第一个参数：大字后面跟颜色（'#…'）、结算页标题后面跟一个对象（{ lead: … }，那些字用的是普通字体）、
+  // 战报卡的胜负行后面跟胜负与一行数字（数字那行用普通字体）
+  const found = [...src.matchAll(/(bigText|showOverlay|reportOf)\(([^;]*?)(?:,\s*'#|,\s*`|,\s*'[^']*',\s*'|,\s*\{|,\s*(?:won|true|false),|\);)/g)];
+  const calls = found.map((m) => m[2]);
   assert.ok(calls.length >= 6, `只找到 ${calls.length} 处大字，正则可能失效`);
+  const reports = found.filter((m) => m[1] === 'reportOf' && /'[^']+'/.test(m[2]));
+  assert.ok(reports.length >= 3, `战报卡的胜负行只扫到 ${reports.length} 处，正则可能失效`);
   const big = new Set(BIG_CHARS);
   const lits = calls.flatMap((c) => [...c.matchAll(/'([^']*)'|`([^`]*)`/g)].map((m) => (m[1] ?? m[2]).replace(/\$\{[^}]*\}/g, '')));
   const bad = lits.join('').split('').filter((ch) => !big.has(ch));
