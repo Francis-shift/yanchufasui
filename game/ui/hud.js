@@ -38,6 +38,10 @@ const CSS = FONT_CSS + `
 .yc-ui * { box-sizing: border-box; }
 .yc-top { position: absolute; left: 16px; top: calc(14px + env(safe-area-inset-top, 0px)); display: flex; flex-direction: column; gap: 6px;
   padding: 10px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(6px); min-width: 180px; }
+.yc-mute { position: absolute; right: 12px; top: calc(12px + env(safe-area-inset-top, 0px)); width: 36px; height: 36px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer;
+  pointer-events: auto; backdrop-filter: blur(6px); }
+.yc-mute svg { width: 20px; height: 20px; } .yc-mute.off { color: var(--muted); }
 .yc-g { display: flex; flex-direction: column; gap: 6px; }
 .yc-g + .yc-g { margin-top: 4px; }
 .yc-label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 12px; white-space: nowrap; }
@@ -180,6 +184,7 @@ const CSS = FONT_CSS + `
 .yc-narrow .yc-g-gauge { flex: 1.35; }
 .yc-narrow .yc-label { gap: 6px; }
 .yc-narrow .yc-card { width: calc(100% - 20px); }
+.yc-narrow .yc-mute { right: 10px; top: calc(60px + env(safe-area-inset-top, 0px)); }   /* 顶上一行占满了宽，挪到它下面 */
 /* 矮（手机键盘弹起来了）：咒语卡只留名字、原话、一行结果，提示语不显示 */
 .yc-short .yc-hint, .yc-short .yc-tags { display: none; }
 .yc-short .yc-card { padding: 6px 12px 8px; }
@@ -218,7 +223,7 @@ const CSS = FONT_CSS + `
 .yc-pad .yc-skill:nth-of-type(3) { right: 11px; bottom: 111px; }
 .yc-pad .yc-summon { position: absolute; left: 0; top: 0; height: 50px; }
 /* boss 血条紧挨左上面板右边放（横屏手机只有 600～900 宽，居中会和面板撞上、被挤到画面中间） */
-.yc-pad .yc-boss { left: 212px; right: 14px; width: auto; max-width: 440px; transform: none; }
+.yc-pad .yc-boss { left: 212px; right: 60px; width: auto; max-width: 440px; transform: none; }   /* 右边留出声音开关 */
 /* 法力条挪到下方正中（摇杆和按钮之间空着），不然右边一列太高，顶到 boss 血条 */
 .yc-pad .yc-bottom > .yc-label, .yc-pad .yc-bottom > .yc-mana { position: absolute; right: 250px; width: 240px; }
 .yc-pad .yc-bottom > .yc-label { bottom: 16px; }
@@ -298,7 +303,12 @@ export class Hud {
     this.stamina = { v: 0, max: 0, locked: false };
     /** @type {HTMLElement} */ (this.picks.querySelector('[data-reroll]')).addEventListener('click', () => this.pickOn?.reroll());
     /** @type {HTMLElement} */ (this.picks.querySelector('[data-skip]')).addEventListener('click', () => this.pickOn?.skip());
-    this.root.append(this.floats, this.stick, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay);
+    // 声音开关压在最上面（首页、结算页上也点得到）；点完把焦点还回去，免得试炼里按空格闪避时又点了它一下
+    this.mute = el(`<button class="yc-mute" type="button"></button>`);
+    /** @type {(() => void) | null} */
+    this.onMute = null;
+    this.mute.addEventListener('click', () => { this.mute.blur(); this.onMute?.(); });
+    this.root.append(this.floats, this.stick, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay, this.mute);
     root.append(this.root);
     this.input = /** @type {HTMLInputElement} */ (this.bottom.querySelector('input'));
     this.go = /** @type {HTMLButtonElement} */ (this.bottom.querySelector('[data-go]'));
@@ -652,6 +662,17 @@ export class Hud {
     box.hidden = false;
   }
   hideOverlay() { this.overlay.hidden = true; }
+
+  /** 声音开关画成开着还是关着；toggle 给了就换成点它时调的 @param {boolean} muted @param {() => void} [toggle] */
+  setMuted(muted, toggle) {
+    if (toggle) this.onMute = toggle;
+    const waves = muted ? 'M16 9l5 6M21 9l-5 6' : 'M16 8.5a4.5 4.5 0 0 1 0 7M18.5 6a8 8 0 0 1 0 12';
+    this.mute.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/>`
+      + `<path d="${waves}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+    this.mute.classList.toggle('off', muted);
+    this.mute.title = muted ? '打开声音' : '关掉声音';
+    this.mute.setAttribute('aria-label', this.mute.title);
+  }
 
   dispose() { clearTimeout(this.cardTimer); clearTimeout(this.bigTimer); this.root.remove(); }
 }

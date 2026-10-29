@@ -44,6 +44,7 @@ export class FusionFx {
   gale(at, r, sec) {
     this.gales.push({ pos: at.clone(), r, sec, t: 0, acc: 0 });
     this.fx.shake = Math.max(this.fx.shake, 0.25);
+    this.fx.sound?.play('gale');
   }
 
   /** @param {{ pos: THREE.Vector3, r: number, t: number, acc: number }} g @param {number} dt @param {number} fade */
@@ -81,6 +82,7 @@ export class FusionFx {
     const tw = { pos: at.clone(), dir: dir.clone(), t: 0, hit: new Set(), step, acc: 0 };
     this.tornadoes.push(tw);
     this.fx.shake = Math.max(this.fx.shake, 0.3);
+    this.fx.sound?.play('tornado');
     this.fx.pulseDim(0.6, 2.4);   // 融合是招牌：火卷风卷着走的这几秒压暗
     return tw;
   }
@@ -96,6 +98,7 @@ export class FusionFx {
       t: 0, hit: new Set(), step, done: 0, scorched: 0 };
     this.waves.push(wv);
     this.fx.shake = Math.max(this.fx.shake, step ? 0.55 : 0.4);
+    this.fx.sound?.play('beam');
     if (step) {
       this.fx.hitStop = Math.max(this.fx.hitStop, 0.06);
       this.fx.pulseDim(0.65, 1.6);

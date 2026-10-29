@@ -63,6 +63,7 @@ export class Walls {
   add(el, pts, yaw, sec, payload) {
     /** @type {Wall} */
     const w = { el, pts, t: 0, sec, hit: new Set(), meshes: [], bodies: [], yaw, payload };
+    this.fx?.sound?.play('wall', { el });
     if (el === 'earth') {
       w.mat = rockMat({ heat: 1.4, veinK: 2.6, veinW: 0.03 });   // 升起时熔纹亮着，一两秒冷下去，留一点余温
       for (const p of pts) {

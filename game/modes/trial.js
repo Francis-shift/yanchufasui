@@ -332,6 +332,7 @@ export class Trial {
     this.spawnT = W.first; this.state = 'wave'; this.pending.length = 0;
     const { hud } = this.d;
     hud.bigText(`第 ${this.round} 波`, '#16202b', 1400);
+    this.d.fx.sound?.play('drums');
     hud.setHint(WAVE_HINT[Math.min(this.round, WAVE_HINT.length) - 1][this.d.mobile ? 0 : 1]);
     this.showWave();
   }
@@ -550,6 +551,7 @@ export class Trial {
       }
     }
     hud.bigText(this.bossName(), BOSS_INK[cfg.type][0], 1600);
+    fx.sound?.play('roar', { type: cfg.type, phase: 1 });
     hud.setWave(`试炼 ${n}/${BOSS_COUNT}`, PHASE_NAME[1]);
     hud.setHint(BOSS_HINT[cfg.type][this.d.mobile ? 0 : 1]);
     this.shown = '';
@@ -573,6 +575,7 @@ export class Trial {
     for (const o of [...this.d.enemies.list]) if (o.chase) this.d.enemies.kill(o, o.pos);
     this.d.hud.setBoss(null);
     this.d.fx.burst(new THREE.Vector3(e.pos.x, 1.2, e.pos.z), this.cfg.el, 3.2, 0.9);
+    this.d.fx.sound?.play('bossdown');
     if (this.stage + 1 >= RUN_STAGES.length) { this.end(true); return; }
     this.d.hud.bigText(`${this.bossName()}碎了`, '#16202b', 1400);
     this.state = 'rest'; this.t = RUN.rest;
@@ -641,6 +644,7 @@ export class Trial {
     this.dashAt = this.clock; this.dashFrom.copy(this.p); this.perfectUsed = false;
     this.showStamina();
     this.d.dodge?.();
+    this.d.fx.sound?.play('dash');
     if (this.mods.canying && this.fighting) {   // 残影留在闪避起点，摆着按闪避那一刻的姿势
       const g = this.d.ghost?.(this.ghostMat);
       if (g && g !== this.ghost) { this.scene.remove(this.ghost); this.ghost = g; this.scene.add(g); }
@@ -665,6 +669,7 @@ export class Trial {
     const { fx, particles, hud } = this.d, P = TRIAL.perfect, p = this.p;
     fx.hitStop = Math.max(fx.hitStop, P.stop);
     fx.pulseDim(0.3, 0.3);
+    fx.sound?.play('perfect');
     for (let i = 0; i < 90; i++) {   // 一圈往外散
       const a = rand(0, Math.PI * 2), s = rand(2.5, 6);
       particles.emit(p.x + Math.cos(a) * 0.4, rand(0.1, 1.7), p.z + Math.sin(a) * 0.4, Math.cos(a) * s, rand(-0.5, 1.5), Math.sin(a) * s,
@@ -766,6 +771,7 @@ export class Trial {
     this.hp = Math.max(0, this.hp - dmg);
     this.hurtT = TRIAL.hurtGrace; this.flash = 1;
     this.d.fx.shake = Math.max(this.d.fx.shake, 0.45);
+    this.d.fx.sound?.play('hurt');
     this.d.floatText(at, `-${dmg}`, '#ff6b5a');
     this.d.hud.setCore(this.hp, TRIAL.hp);
     if (this.hp <= 0) this.end(false);
@@ -791,6 +797,7 @@ export class Trial {
     if (h.broke) {
       this.d.hud.bigText(`${cfg.armorName}碎了`, BOSS_INK[cfg.type][1], 1100);
       this.d.fx.burst(new THREE.Vector3(e.pos.x, 2, e.pos.z), cfg.el, 2.6, 0.9);
+      this.d.fx.sound?.play('armor', { el: cfg.el });
     }
     if (this.state === 'stagger') h.r.dmg *= STONE.charge.staggerMult;
     else if (this.state === 'tele' && this.move === 'charge' && (this.chargeDmg += h.r.dmg) >= STONE.charge.breakDmg) this.interrupt();
@@ -804,6 +811,7 @@ export class Trial {
     this.state = 'stagger'; this.t = STONE.charge.stagger; this.left = 0; this.kick = 0.3; this.tail = null;
     hud.bigText('打断', '#16202b', 1100);
     fx.burst(new THREE.Vector3(b.pos.x, 1.2, b.pos.z), 'earth', 2.4, 0.6);
+    fx.sound?.play('clang');
     this.shown = '';
   }
 
@@ -836,6 +844,7 @@ export class Trial {
     else this.d.hud.bigText('狂暴', '#b3261e', 1300);
     this.d.hud.setWave(`试炼 ${this.round}/${BOSS_COUNT}`, PHASE_NAME[ph]);
     this.d.fx.burst(new THREE.Vector3(b.pos.x, 1.2, b.pos.z), cfg.el, 3.2, 0.9);
+    this.d.fx.sound?.play('roar', { type: cfg.type, phase: ph });
   }
 
   /**
@@ -871,6 +880,7 @@ export class Trial {
     this.t = this.teleLen = teleSec(this.move, this.phase, cfg) * quick * (this.slowTele ? RUN.runes.ning.tele : 1);
     this.slowTele = false;
     this.lead = 0;
+    this.d.fx.sound?.play('warn');
     const dx = this.p.x - b.pos.x, dz = this.p.z - b.pos.z, d = Math.hypot(dx, dz);
     const aim = d > 1e-3 ? { x: dx / d, z: dz / d } : { x: b.dir.x, z: b.dir.z };
     if (this.move === 'slam') {
@@ -1351,6 +1361,7 @@ export class Trial {
       if (!inStrip(this.p, l.from, l.dir, l.len + BOSS_BODY, C.w, BODY)) this.checkPerfect((q) => inStrip(q, l.from, l.dir, l.len + BOSS_BODY, C.w, BODY));
       this.state = 'rush'; this.ran = 0; this.struck = false; this.kick = 0.3;
       fx.shake = Math.max(fx.shake, 0.3);
+      fx.sound?.play('rush');
       this.shown = '';
     } else if (this.move === 'spikes') {
       this.state = 'spikes'; this.front = 0; this.struck = false; this.kick = 0.55;
@@ -1378,6 +1389,7 @@ export class Trial {
           { life: H.life, dmg: H.dmg, r: H.r, homing: true, flame, turn: H.turn });
       }
       fx.burst(new THREE.Vector3(b.pos.x, 2.6, b.pos.z), cfg.el, 1.2, 0.4);
+      fx.sound?.play('volley', { flame });
       this.kick = 0.35;
       this.recover();
     } else if (this.move === 'spiral') {
@@ -1514,6 +1526,7 @@ export class Trial {
         this.chT += dt; this.emitT -= dt;
         while (this.emitT <= 0 && this.t > 0) {
           this.emitT += S.every;
+          this.d.fx.sound?.play('spit');
           for (const a of spiralAngles(this.chT, arms, this.a0)) {
             this.fire(b.pos.x + Math.cos(a) * 1.3, 1.0, b.pos.z + Math.sin(a) * 1.3, Math.cos(a) * S.speed, Math.sin(a) * S.speed,
               { life: (PLAZA_R * 2) / S.speed, dmg: S.dmg, r: S.r });

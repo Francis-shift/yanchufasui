@@ -42,6 +42,7 @@ import { FusionFx } from './fx/fusions.js';
 import { GradePass } from './fx/grade.js';
 import { Particles } from './fx/particles.js';
 import { SpellFx } from './fx/spells.js';
+import { Sound } from './fx/sound.js';
 import { buildEnvironment } from './world/environment.js';
 import { invasionTarget, stepInvasion } from './world/invasion.js';
 import { buildBarrier } from './world/barrier.js';
@@ -141,6 +142,12 @@ export function start(root, opts = {}) {
   const origin = CASTER_POS.clone().setY(1.5);
   const fx = new SpellFx(scene, particles, origin, { ink, quality });
   fx.groundAt = groundHeightAt;   // 焦痕只落在平地上
+  // 声音（fx/sound.js，现场合成）：法术、boss、试炼的声音经 fx.sound 出；浏览器要等第一次点击或按键才肯出声，之后每次点按顺手叫醒一下（苹果切走再回来会睡着）
+  const sound = new Sound();
+  fx.sound = sound;
+  const unlock = () => sound.unlock();
+  const UNLOCK_ON = /** @type {const} */ (['pointerdown', 'touchend', 'click', 'keydown']);
+  for (const ev of UNLOCK_ON) window.addEventListener(ev, unlock, { capture: true, passive: true });
   const locks = new Locks(scene);
 
   const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -18, 0) });
@@ -152,6 +159,7 @@ export function start(root, opts = {}) {
   const fusions = new FusionFx(fx, particles, quality.name === 'cinema' ? 1 : 0.55);   // 手机上火云团数打折
   const dragon = new DragonFx(fx, particles, opts.dragon);
   const hud = new Hud(root);
+  hud.setMuted(sound.muted, () => { sound.setMuted(!sound.muted); hud.setMuted(sound.muted); sound.play('tick'); });
   preloadFonts();   // 标题画面期间先下书法字的常用那份
   const _v = new THREE.Vector3();
   /** 场景里某点上方飘一个字 @param {THREE.Vector3} p @param {string} text @param {string} color */
@@ -163,7 +171,10 @@ export function start(root, opts = {}) {
   };
   const enemies = new Enemies(scene, world, particles, {
     onCoreHit: (dmg) => hitCore(dmg),
-    onGone: (e, how) => trial.onGone(e, how),   // 试炼：boss 碎了就赢
+    onGone: (e, how) => {
+      if (how === 'kill') sound.play('shatter'); else if (how === 'fall') sound.play('fall');
+      trial.onGone(e, how);   // 试炼：boss 碎了就赢
+    },
     pushed: (e) => fx.windTrail(e.group),   // 被风吹飞的身后拖两道笔触，推下悬崖那一下看得清
     emerge: () => env.spawnPuff(),          // 索桥那一路从邻峰的黑雾里出来：雾鼓一下
     touch: (e) => trial.touch(e),           // 试炼：小傀儡贴身自爆
@@ -294,6 +305,7 @@ export function start(root, opts = {}) {
   /** 咏唱开始（四种施法入口都走这里）：法阵起光，台面阵纹里一道金光扫向阵眼，施法者蓄力 @param {string} el */
   function beginChant(el) {
     fx.beginChant(el);
+    sound.play('chant', { el, short: buttonChant });
     layout.plaza.flow();
     caster.charge();
   }
@@ -313,9 +325,11 @@ export function start(root, opts = {}) {
     barrier.setDamage(1 - S.core / CORE_HP);
     fx.shake = Math.max(fx.shake, 0.35);
     layout.crystal.material.emissiveIntensity = 3;
+    sound.play('core');
     if (S.core <= 0) {
       S.phase = 'lost';
       barrier.shatter();
+      sound.play('lose');
       hud.showOverlay('阵眼破碎', { lead: '傀儡冲破了护山大阵。换个说法再来一次？', main: 'defense', defense: '重新守关', trial: '去试炼' });
     }
   }
@@ -415,12 +429,14 @@ export function start(root, opts = {}) {
   function trialWon() {
     S.phase = 'won';
     hud.bigText('试炼通过', '#16202b', 1600);
+    sound.play('win');
     after(1.6, () => { if (S.phase === 'won' && S.mode === 'trial') trialResult(true); });
   }
   /** 试炼输了 */
   function trialLost() {
     S.phase = 'lost';
     hud.bigText('败下阵来', '#b3261e', 1400);
+    sound.play('lose');
     after(1.4, () => { if (S.phase === 'lost' && S.mode === 'trial') trialResult(false); });
   }
 
@@ -450,6 +466,7 @@ export function start(root, opts = {}) {
     const ctx = { els: S.talents, insight };
     let cards = offer(S.run, ctx, Math.random);
     S.phase = 'pick'; frozen = true;
+    sound.play('pick');
     const show = () => hud.showPicks(cards.map((c) => ({ kind: KIND_NAMES[c.kind], name: c.name + upLabel(S.run, c), text: c.text, el: c.el,
       insight: c.kind === 'insight' })), {
       sub: !cards.length ? '这回没有能学的，回满气血与法力再上'
@@ -458,6 +475,7 @@ export function start(root, opts = {}) {
       pick: (i) => {
         const c = cards[i];
         if (!c) return;
+        sound.play('take');
         if (c.kind === 'move') { chooseButton(c); return; }
         S.run = takeCard(S.run, c);
         applyMods();
@@ -470,6 +488,7 @@ export function start(root, opts = {}) {
         const r = rerollCards(S.run, ctx, Math.random, cards);
         if (!r) return;
         S.run = r.run; cards = r.cards;
+        sound.play('tick');
         show();
       },
       skip: () => {
@@ -577,6 +596,7 @@ export function start(root, opts = {}) {
     S.queue = waveQueue(WAVES[i].mix);
     S.spawnT = 1.2; S.spawned = 0;
     hud.bigText(`第 ${i + 1} 波`, '#16202b', 1400);
+    sound.play('drums');
     hud.setHint(WAVES[i].tip);
   }
 
@@ -601,9 +621,11 @@ export function start(root, opts = {}) {
       if (S.wave + 1 < WAVES.length) {
         S.phase = 'rest'; S.restT = REST_SEC;
         hud.bigText('守住了这一波', '#16202b', 1400);
+        sound.play('clear');
         hud.setHint(`喘口气，${REST_SEC} 秒后下一波：${WAVES[S.wave + 1].tip}`);
       } else {
         S.phase = 'won';
+        sound.play('win');
         hud.showOverlay('护山大阵守住了', { lead: `五波傀儡尽数退去，阵眼还剩 ${Math.ceil(S.core)} 点。换个说法，再守一次？`,
           main: 'defense', defense: '再守一次', trial: '去试炼' });
       }
@@ -765,11 +787,12 @@ export function start(root, opts = {}) {
     if (!plan.ok) {
       locks.clear(castId);
       caster.endCharge();
-      if (!plan.backlash) hud.bigText(intent.steps.length ? '法力不足' : '未能成咒', '#5d6b7a', 1000);
+      if (!plan.backlash) { hud.bigText(intent.steps.length ? '法力不足' : '未能成咒', '#5d6b7a', 1000); sound.play('fail'); }
       S.busy = false;
       return;
     }
     const m = plan.momentum;
+    if (!c.button) { if (m >= 3) sound.play('surge'); else sound.play('card'); }   // 开口念成的咒"叮"一声；气势如虹换成锣鼓
     if (plan.summon?.cast) {
       caster.cast(null);
       runSummon(plan.summon, castId);
@@ -797,6 +820,7 @@ export function start(root, opts = {}) {
     if (plan.summon?.ghost) {
       // 差一口气：龙影升起、散开，再落雨
       hud.bigText('差一口气', '#2f5d8a', 1200);
+      sound.play('ghost');
       dragon.ghost(plan.summon.el, go);
     } else go();
     if (m >= 3 && !c.button) hud.bigText('气势如虹', '#16202b', 900);
@@ -985,6 +1009,7 @@ export function start(root, opts = {}) {
     const twin = S.mods.twin, guard = S.mods.guard && S.mode === 'trial';
     hud.bigText(`${sm.name}现世`, SUMMON_INK[el] ?? SUMMON_INK.ice, 1400);
     fx.launchBurst(el);
+    sound.play('dragon', { el });
     if (twin || guard) floatAt(new THREE.Vector3(CASTER_POS.x, 3.1, CASTER_POS.z), twin && guard ? '双龙·护身' : twin ? '双龙' : '护身', '#ffd76a');
     if (guard) { guardDragons(sm, el, twin); return; }
     flyAt(sm, el, k, res, castId);
@@ -1575,6 +1600,10 @@ export function start(root, opts = {}) {
     layout.coreSigil.rotation.z += dt * 0.2;
     layout.crystal.rotation.y += dt * 0.8;
     layout.crystal.position.y = 1.7 + Math.sin(idleT * 1.6) * 0.12;
+    // 背景乐：首页、战前、喘口气、三选一是静的；小怪潮是战的；boss 与守关后两波是 boss 的；结算时停（胜负的那一段已经放了）
+    sound.mood(S.phase === 'title' ? 'calm' : S.phase === 'won' || S.phase === 'lost' ? null
+      : S.mode === 'trial' ? (!trial.fighting ? 'calm' : trial.boss ? 'boss' : trial.state === 'wave' ? 'battle' : 'calm')
+      : S.phase === 'rest' ? 'calm' : S.wave >= 3 ? 'boss' : 'battle');
     const cm = layout.crystal.material;
     cm.emissiveIntensity += (0.8 - cm.emissiveIntensity) * Math.min(1, dt * 3);
     hud.setMana(S.mana, MANA_MAX);
@@ -1697,6 +1726,8 @@ export function start(root, opts = {}) {
     /** 光罩裂到几成（0～1），不给就回到跟着阵眼血量走 */
     shield: (d = -1) => { lab.shield = d; if (d < 0) barrier.setDamage(1 - S.core / CORE_HP); },
     flash: () => env.flash(),
+    /** 声音：play(名字, 参数) 放一个音效（名字见 fx/sound.js 的 RECIPES）；measure(名字或 calm / battle / boss) 离线渲染量峰值与响多久 */
+    sound: { play: (/** @type {string} */ n, o = {}) => sound.play(n, o), measure: (/** @type {string} */ n, o = {}, sec = 5) => Sound.measure(n, o, sec), obj: sound },
     talents: (list) => { if (list) { S.talents = list; renderPicker(); } return [...S.talents]; },
     binds: () => Object.fromEntries(Object.entries(S.binds).map(([k, v]) => [k, { name: v.name, text: v.text }])),
     // 面板太小时看不清：按 w×h 横屏重画当前这一帧（先 pause 定格），返回 JPEG 的 data URL。
@@ -1747,6 +1778,8 @@ export function start(root, opts = {}) {
     window.removeEventListener('keydown', onGlobalKey);
     window.removeEventListener('keyup', onGlobalKeyUp);
     window.removeEventListener('blur', onBlur);
+    for (const ev of UNLOCK_ON) window.removeEventListener(ev, unlock, { capture: true });
+    sound.dispose();
     trial.dispose();
     enemies.clear();
     for (const c of stressList) world.removeBody(c.body);

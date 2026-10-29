@@ -65,6 +65,8 @@ export class SpellFx {
     this.chanting = 0;       // 0～1，咏唱时升高
     this.listening = 0;      // 0～1，玩家在输入时升高
     this.idleT = 0;
+    /** 音效（主循环接上；检查页之类没有就不出声）：放出、飞、炸、劈、裂地、反噬在这里出声 @type {import('./sound.js').Sound | null} */
+    this.sound = null;
   }
 
   /** 回车瞬间：按关键词猜的元素先上色（猜不出用法阵本色：我方的金） @param {string} el */
@@ -193,13 +195,14 @@ export class SpellFx {
     const end = o.target().clone();
     const dist = start.distanceTo(end);
     const fly = THREE.MathUtils.clamp(dist / 24, 0.35, 0.95) * (o.path === 'behind' ? 1.5 : 1);
-    let t = -(o.delay || 0), prev = start.clone(), done = false;
+    let t = -(o.delay || 0), prev = start.clone(), done = false, flew = false;
     const pos = new THREE.Vector3();
     const side = Math.random() < 0.5 ? -1 : 1;
     this.fx.push({
       update: (dt) => {
         t += dt;
         if (t < 0) return true;
+        if (!flew) { flew = true; this.sound?.play('fly'); }
         orb.visible = true;
         const k = Math.min(t / fly, 1);
         end.lerp(o.target(), 0.25);        // 跟着目标走
@@ -354,6 +357,7 @@ export class SpellFx {
         scaleArr(pal.core, 4), scaleArr(pal.secondary, 1.5), { drag: 3 });
     }
     this.shake = Math.max(this.shake, 0.06);
+    this.sound?.play('cast', { el });
   }
 
   /**
@@ -366,6 +370,7 @@ export class SpellFx {
     // 地上的冲击环、法印：冰蓝在 2.5 倍时和白石头叠成一块白热的圆盘（实测），冰压到六成；风、土的主角是笔触和石块，也压下去
     const ringK = ice ? 0.6 : wind ? 0.35 : earth ? 0.5 : 1, P = col(pal.primary, 2.5 * ringK), S = col(pal.secondary, 2.2 * ringK);
     const R = radius;
+    this.sound?.play('boom', { el, scale });
     this.blastLight.position.set(p.x, p.y + 0.6, p.z);
     this.blastLight.color.copy(col(pal.primary));
     // 冰蓝的灯光照在白石头上整片发蓝（实测），冰的落点灯光压到四成；风的青光同理
@@ -549,6 +554,7 @@ export class SpellFx {
    */
   arc(a, b, o = {}) {
     const pal = PALETTE.thunder;
+    this.sound?.play('zap');
     const len = a.distanceTo(b), n = Math.max(6, Math.round(len * 2.2));
     const jitter = o.jitter ?? Math.min(0.9, 0.12 + len * 0.05);
     const forks = o.forks ?? (len > 3 ? 1 + Math.floor(Math.random() * 2) : 0);
@@ -908,6 +914,7 @@ export class SpellFx {
   crack(p, r) {
     const gy = this.groundAt(p.x, p.z);
     if (gy === null || Math.abs(gy) > 0.05 || p.y - gy > 2 || this.crackCount >= 14) return;
+    this.sound?.play('crack');
     const tex = crackTextures();
     const flat = { transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 };
     const darkMat = new THREE.MeshBasicMaterial({ ...flat, map: tex.dark, opacity: 0 });
@@ -930,6 +937,7 @@ export class SpellFx {
   backlash() {
     const red = [1.6, 0.15, 0.1];
     const o = this.origin;
+    this.sound?.play('backlash');
     for (let i = 0; i < 260; i++) {
       const a = Math.random() * Math.PI * 2, r = rand(0.2, 2.1);
       this.p.emit(o.x + Math.cos(a) * r, 0.1, o.z + Math.sin(a) * r, Math.cos(a) * rand(1, 5), rand(2, 6), Math.sin(a) * rand(1, 5),
