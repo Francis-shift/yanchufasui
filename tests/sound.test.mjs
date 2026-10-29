@@ -5,7 +5,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { Kit, MOODS, RECIPES, beat, nextDegree, pentaHz } from '../game/fx/sound.js';
+import { Kit, MOODS, RECIPES, SAMPLES, beat, nextDegree, pentaHz } from '../game/fx/sound.js';
 
 /** 假的音频环境：只记账、查数 */
 function fakeCtx() {
@@ -23,7 +23,7 @@ function fakeCtx() {
     nodes++;
     let t0 = -1;
     return {
-      gain: param(), frequency: param(), detune: param(), Q: param(), type: '', buffer: null, loop: false,
+      gain: param(), frequency: param(), detune: param(), Q: param(), delayTime: param(), type: '', buffer: null, loop: false, curve: null, oversample: 'none',
       connect: (n) => n, setPeriodicWave() {},
       start(t, off = 0) { ok(t, off, 'start'); t0 = t; },
       stop(t) { ok(t, 0, 'stop'); if (t < t0) bad.push(`stop ${t} 早于 start ${t0}`); },
@@ -31,7 +31,7 @@ function fakeCtx() {
   };
   const ctx = {
     sampleRate: 8000, currentTime: 0,
-    createGain: node, createOscillator: node, createBiquadFilter: node, createBufferSource: node,
+    createGain: node, createOscillator: node, createBiquadFilter: node, createBufferSource: node, createDelay: node, createWaveShaper: node,
     createBuffer: (ch, n) => ({ duration: n / 8000, getChannelData: () => new Float32Array(n) }),
     createPeriodicWave: () => ({}),
   };
@@ -74,6 +74,24 @@ test('每个配方：时间、数值都合法，响完的时刻在 6 秒内，�
       assert.ok(f.count() - base <= 160, `${name} 建了 ${f.count() - base} 个节点`);
     }
   }
+});
+
+test('龙吟：录音加载好了就放录音（不变调、放完才算响完），没加载好用合成的；每种元素都补一层', () => {
+  for (const el of ['fire', 'ice', 'wind', 'thunder', 'earth']) {
+    const f = fakeCtx(), k = new Kit(/** @type {any} */ (f.ctx), /** @type {any} */ ({}));
+    const synth = RECIPES.dragon(k, 1, { el }), synthNodes = f.count();
+    assert.deepEqual(f.bad, []);
+    const g = fakeCtx(), k2 = new Kit(/** @type {any} */ (g.ctx), /** @type {any} */ ({})), base = g.count();
+    k2.samples.dragon = /** @type {any} */ ({ duration: 4.4 });
+    k2.p = 1.04;
+    const end = RECIPES.dragon(k2, 1, { el });
+    assert.deepEqual(g.bad, []);
+    assert.ok(end >= 5.4 && end < 7, `${el} 录音版响到 ${end}`);
+    assert.ok(g.count() - base < synthNodes - 20, `${el} 录音版不该再建合成那一大套节点（${g.count() - base}）`);
+    assert.ok(synth > 1 && synth < 7);
+  }
+  assert.equal(SAMPLES.dragon, '/sfx/dragon-roar.mp3');
+  assert.ok(statSync(join('public', SAMPLES.dragon)).size > 10_000, '录音文件在 public/ 下');
 });
 
 test('背景乐：三种各排 8 小节，数值合法；鼓谱落在一小节的 16 格里', () => {

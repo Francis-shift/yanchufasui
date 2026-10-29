@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * 声音：全部在浏览器里现场合成（Web Audio），不下载音频文件。
+ * 声音：在浏览器里现场合成（Web Audio）；只有召龙的龙吟是一段现成录音（SAMPLES，第一次出声后才下载，没到之前用合成的顶上）。
  *   - 音效 play(名字, 参数)：配方在 RECIPES；同名的太密就丢掉（GAP），同时最多响 MAX_VOICES 个；
  *   - 背景乐 mood('calm' | 'battle' | 'boss' | null)：五声音阶现场生成——拨弦（像古筝）、笛子长音、低音铺底、堂鼓、梆子、锣；
  *   - duck(on)：玩家说话（录音）时把游戏声压低；setMuted(on)：静音，记在本机。
@@ -67,6 +67,19 @@ export class Kit {
     // 拨弦的音色：泛音按 1/n 往下掉、单数略强；亮不亮由每次的低通包络管
     const amp = [0, 1, 0.6, 0.38, 0.28, 0.16, 0.12, 0.06, 0.05, 0.03];
     this.wave = ctx.createPeriodicWave(new Float32Array(amp.length), Float32Array.from(amp));
+    /** 下载、解码好的现成录音（名字见 SAMPLES） @type {Record<string, AudioBuffer>} */
+    this.samples = {};
+  }
+
+  /** 现成录音：在 t 时刻原样放一遍（不随机变调），返回放完的时刻；还没加载好返回 0 @param {string} name @param {number} t @param {number} gain @param {AudioNode} [dest] */
+  sample(name, t, gain, dest = this.out) {
+    const b = this.samples[name];
+    if (!b) return 0;
+    const s = this.ctx.createBufferSource(), g = this.ctx.createGain();
+    s.buffer = b; g.gain.value = gain;
+    s.connect(g).connect(dest);
+    s.start(t);
+    return t + b.duration;
   }
 
   /** 振荡器：f 滑到 to（glide 秒），a 秒起音后指数衰减 dur 秒；lp 给了就过一道低通 @param {number} t @param {ToneOpts} o @param {AudioNode} [dest] */
@@ -204,16 +217,28 @@ const BOOM = {
 /** 咏唱起来时那声"叮"按元素用哪一级 @type {Record<string, number>} */
 const CHANT_DEG = { fire: 10, ice: 12, wind: 11, thunder: 13, earth: 8, arcane: 10 };
 
-/** 召龙：一声往上挑再落下的长吟（带揉音），压着低吼、风声和锣，再按元素补一层 @param {Kit} k @param {number} t @param {string} el */
+/**
+ * 现成录音：名字 → 地址（放在 public/ 下）。龙吟是 Freesound 上 Dreeme 的 "Dragon Roar"（编号 546391，CC0 公有领域），
+ * 10-29 本人从网上找来的十条里挑的；剪了开头那一声（原 0.3～4.7 秒，末尾 0.6 秒淡出），峰值压到 -1 dB。
+ */
+export const SAMPLES = { dragon: '/sfx/dragon-roar.mp3' };
+/** 龙吟录音放多响：离线量过，和 boss 倒地那声差不多响 */
+const ROAR_GAIN = 0.75;
+
+/**
+ * 录音没到时顶上的合成龙吼（10-29 本人说原来那声"太难听了，应该是龙吟"：原来是一支锯齿波从 330 滑到 820 Hz，听着像警笛；
+ * 改成这个后又从网上挑了录音）。f0：起音的基频；up：挑上去几倍；hold：拖多长；T：整声多长；growl：沙哑有多重（开头 / 拖长时）；
+ * formants：三个共鸣峰（起、张到最大、收）；ring：第三个共鸣峰；sub：低八度喉音；echo：山谷回声
+ */
+const ROAR = { f0: 82, up: 1.9, hold: 1.2, T: 2.4, growl: [0.7, 0.35], rough: 31, formants: [[480, 760, 420], [900, 1200, 760], [2300, 2600, 2200]], ring: 0.25, sub: 0.45, echo: 0.3, vib: 18 };
+
+/** 软削波的曲线（给声音加毛边） */
+let shapeCurve = /** @type {Float32Array<ArrayBuffer> | null} */ (null);
+const softClip = () => shapeCurve ??= new Float32Array(Array.from({ length: 1025 }, (_, i) => Math.tanh(2.6 * (i / 512 - 1)) / Math.tanh(2.6)));
+
+/** 召龙：放龙吟录音（没加载好就用合成的），再按元素补一层 @param {Kit} k @param {number} t @param {string} el */
 function dragonRoar(k, t, el) {
-  const c = k.ctx, o = c.createOscillator(), lp = c.createBiquadFilter(), g = c.createGain(), lfo = c.createOscillator(), lg = c.createGain();
-  o.type = 'sawtooth';
-  o.frequency.setValueAtTime(330, t); o.frequency.exponentialRampToValueAtTime(820, t + 0.5); o.frequency.exponentialRampToValueAtTime(520, t + 1.7);
-  lfo.frequency.value = 6; lg.gain.value = 22; lfo.connect(lg).connect(o.frequency);
-  lp.type = 'lowpass'; lp.frequency.setValueAtTime(1200, t); lp.frequency.linearRampToValueAtTime(2800, t + 0.5); lp.frequency.exponentialRampToValueAtTime(700, t + 1.8);
-  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.16, t + 0.25); g.gain.setValueAtTime(0.16, t + 1.1); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.9);
-  o.connect(lp).connect(g).connect(k.out);
-  for (const x of [o, lfo]) { x.start(t); x.stop(t + 2); }
+  const voice = k.sample('dragon', t, ROAR_GAIN) || synthRoar(k, t);
   const extra = {
     fire: () => k.hiss(t + 0.3, { filter: 'lowpass', f: 1500, to: 300, dur: 1.4, peak: 0.3 }),
     ice: () => k.ticks(t + 0.3, 8, 1, 3000, 7000, 0.1, 8),
@@ -221,8 +246,67 @@ function dragonRoar(k, t, el) {
     thunder: () => BOOM.thunder(k, t + 0.4, 1, 1),
     earth: () => k.tone(t + 0.2, { f: 50, to: 32, dur: 1.4, peak: 0.45 }),
   }[el];
-  return Math.max(t + 1.9, k.tone(t, { type: 'sawtooth', f: 70, to: 50, dur: 1.5, peak: 0.22, a: 0.15, lp: 500 }),
-    k.hiss(t, { f: 500, to: 900, q: 0.8, dur: 1.5, peak: 0.26, a: 0.2 }), k.gong(t + 0.05, 73, 3, 0.3), extra ? extra() : t);
+  return Math.max(voice, extra ? extra() : t);
+}
+
+/**
+ * 合成的龙吼，压着低频、锣：
+ *   声源：三支微微走音的锯齿波（体量大）加低八度一支（喉音），音高从低处挑上去、拖长、揉一揉、再落下；
+ *   沙哑：三十几赫兹的振幅抖动，开头重、拖长时轻，再过一道软削波；
+ *   口腔：并联三个带通（共鸣峰"嗷——呜"：先张开、再收拢），气息噪声也走这组共鸣峰；
+ *   回荡：一道 0.3 秒的山谷回声，越回越闷。
+ * @param {Kit} k @param {number} t
+ */
+function synthRoar(k, t) {
+  const c = k.ctx, S = ROAR, T = S.T, f0 = S.f0 * k.p;
+  const top = t + 0.42, hold = t + 0.42 + S.hold;
+  // 共鸣峰组：输入 → 三个带通 → 总包络 → 出去（另分一路进回声）
+  const bank = c.createGain(), env = c.createGain(), L = 0.55;   // L：整声响度（离线量过，和 boss 倒地那声差不多响）
+  env.gain.setValueAtTime(0.0001, t); env.gain.linearRampToValueAtTime(0.8 * L, t + 0.16); env.gain.linearRampToValueAtTime(L, top);
+  env.gain.setValueAtTime(L, hold); env.gain.exponentialRampToValueAtTime(0.0001, t + T);
+  S.formants.forEach(([a, b, z], i) => {
+    const f = c.createBiquadFilter(), g = c.createGain();
+    f.type = 'bandpass'; f.Q.value = [4.5, 7, 9][i];
+    f.frequency.setValueAtTime(a, t); f.frequency.linearRampToValueAtTime(b, top); f.frequency.setValueAtTime(b * 0.97, hold); f.frequency.exponentialRampToValueAtTime(z, t + T);
+    g.gain.value = [1.7, 1.2, S.ring * 2.2][i];
+    bank.connect(f).connect(g).connect(env);
+  });
+  const chest = c.createBiquadFilter(), cg = c.createGain();   // 胸腔：低频不过共鸣峰，直接垫底
+  chest.type = 'lowpass'; chest.frequency.value = 320; cg.gain.value = 0.55;
+  bank.connect(chest).connect(cg).connect(env);
+  env.connect(k.out);
+  if (S.echo > 0) {
+    const d = c.createDelay(1), fb = c.createGain(), lp = c.createBiquadFilter(), wet = c.createGain();
+    d.delayTime.value = 0.31; fb.gain.value = 0.38; lp.type = 'lowpass'; lp.frequency.value = 1600; wet.gain.value = S.echo;
+    env.connect(d); d.connect(lp).connect(fb).connect(d); lp.connect(wet).connect(k.out);
+  }
+  // 声源：削波 → 沙哑（振幅抖动） → 共鸣峰组
+  const shaper = c.createWaveShaper(), am = c.createGain(), rough = c.createOscillator(), depth = c.createGain();
+  shaper.curve = softClip(); shaper.oversample = '2x';
+  rough.type = 'triangle'; rough.frequency.setValueAtTime(S.rough, t); rough.frequency.linearRampToValueAtTime(S.rough * 0.8, t + T);
+  depth.gain.setValueAtTime(S.growl[0], t); depth.gain.linearRampToValueAtTime(S.growl[1], hold);
+  am.gain.value = 1 - S.growl[0] / 2;
+  rough.connect(depth).connect(am.gain);
+  shaper.connect(am).connect(bank);
+  const vib = c.createOscillator(), vib2 = c.createOscillator(), vg = c.createGain(), vg2 = c.createGain();   // 揉音：两个不成倍数的慢颤，不像机器
+  vib.frequency.value = 4.6; vib2.frequency.value = 7.1;
+  vg.gain.setValueAtTime(0, t); vg.gain.linearRampToValueAtTime(S.vib, hold); vg2.gain.value = S.vib * 0.4;
+  vib.connect(vg); vib2.connect(vg2);
+  const voices = [[-9, 0.32], [0, 0.36], [11, 0.3], [-1200, S.sub]];   // 走音（音分）、响度；最后一支低八度
+  const srcs = [rough, vib, vib2];
+  for (const [det, amp] of voices) {
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = 'sawtooth'; o.detune.value = det;
+    o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f0 * S.up, top);
+    o.frequency.linearRampToValueAtTime(f0 * S.up * 0.92, hold); o.frequency.exponentialRampToValueAtTime(f0 * 1.1, t + T);
+    vg.connect(o.detune); vg2.connect(o.detune);
+    g.gain.value = amp;
+    o.connect(g).connect(shaper);
+    srcs.push(o);
+  }
+  for (const x of srcs) { x.start(t); x.stop(t + T + 0.05); }
+  k.hiss(t, { filter: 'highpass', f: 250, dur: T * 0.85, peak: 0.5, a: 0.12 }, bank);   // 气息
+  return Math.max(t + T + (S.echo > 0 ? 1.2 : 0), k.tone(t, { f: 48, to: 36, dur: T * 0.7, peak: 0.3, a: 0.2 }), k.gong(t + 0.05, 73, 3, 0.18));
 }
 
 /** boss 现身、换阶段时吼一声：两支低沉的锯齿波打着拍，寒甲傀儡王带冰甲的嗡鸣，石甲巨像更沉、掉碎石，火灵是呼呼的火；狂暴再擂两下鼓 */
@@ -402,6 +486,13 @@ export class Sound {
     const { sfx, music } = chain(c, this.duckG);
     this.kit = new Kit(c, sfx);
     this.musicOut = music;
+    const kit = this.kit;
+    for (const [name, url] of Object.entries(SAMPLES)) {   // 下载失败（离线、预览页）就一直用合成的；解码用回调写法，老的苹果浏览器只认这个
+      fetch(url).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
+        .then((buf) => new Promise((ok, no) => c.decodeAudioData(buf, ok, no)))
+        .then((b) => { kit.samples[name] = /** @type {AudioBuffer} */ (b); })
+        .catch(() => {});
+    }
     const s = c.createBufferSource();   // 老的 iOS 要先在点击里放一段空声才解锁
     s.buffer = c.createBuffer(1, 1, 22050); s.connect(c.destination); s.start(0);
     this.timer = window.setInterval(() => this.tickMusic(), 40);
@@ -464,13 +555,18 @@ export class Sound {
    * @param {string} name @param {PlayOpts} [o] @param {number} [sec]
    */
   static async measure(name, o = {}, sec = 5) {
-    const sr = 22050, c = new OfflineAudioContext(1, sr * sec, sr), { sfx, music } = chain(c, c.destination), k = new Kit(c, sfx);
-    const m = /** @type {Record<string, MoodSpec>} */ (MOODS)[name];
-    if (m) { const st = { deg: 9 }; for (let i = 0, t = 0.01; t < sec - 0.2; i++, t += 15 / m.bpm) beat(k, music, m, i, t, st); }
-    else RECIPES[name](k, 0.01, o);
-    const d = (await c.startRendering()).getChannelData(0);
+    const sr = 22050, d = await Sound.render(name, o, sec, sr);
     let peak = 0, sq = 0, last = 0;
     for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); if (!(a <= peak)) peak = a; sq += d[i] * d[i]; if (a > 0.003) last = i; }
     return { peak: +peak.toFixed(3), rms: +Math.sqrt(sq / d.length).toFixed(4), sec: +(last / sr).toFixed(2) };
+  }
+
+  /** 离线渲染一个音效（或 sec 秒背景乐），连同混响，给出单声道采样（量数、导出试听用） @param {string} name @param {PlayOpts} [o] @param {number} [sec] @param {number} [sr] */
+  static async render(name, o = {}, sec = 5, sr = 22050) {
+    const c = new OfflineAudioContext(1, Math.round(sr * sec), sr), { sfx, music } = chain(c, c.destination), k = new Kit(c, sfx);
+    const m = /** @type {Record<string, MoodSpec>} */ (MOODS)[name];
+    if (m) { const st = { deg: 9 }; for (let i = 0, t = 0.01; t < sec - 0.2; i++, t += 15 / m.bpm) beat(k, music, m, i, t, st); }
+    else RECIPES[name](k, 0.01, o);
+    return (await c.startRendering()).getChannelData(0);
   }
 }
