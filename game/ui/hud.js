@@ -18,6 +18,8 @@ export const BRUSH_BIG = `"YC Brush Big", ${BRUSH}`;
 const KAI = '"STKaiti", "KaiTi", "Kaiti SC", "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", serif';
 /** 天赋印章的颜色：国画颜料（朱砂、石青、石绿、赭石、藤黄），比战斗里的元素色沉一些，压在宣纸上不刺眼 */
 const SEAL_INK = /** @type {Record<string, string>} */ ({ fire: '#b8441c', ice: '#2a6aa8', wind: '#2a8065', earth: '#8a5a2a', thunder: '#b0861a' });
+/** 三选一里不带元素的卡按种类上色（同样是压在纸上的沉色；战斗里的标记还用 KIND_COLOR） */
+const PICK_INK = /** @type {Record<string, string>} */ ({ 招式字: '#2f4f86', 字诀: '#1f6f62', 心法: '#9a5a00', 领悟: '#a07a14' });
 /** 宣纸的纸纹：一层压得很淡的分形噪声 */
 const PAPER_GRAIN = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .32 0 0 0 0 .25 0 0 0 0 .16 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`;
 const FONT_CSS = `
@@ -307,29 +309,36 @@ const CSS = FONT_CSS + `
 .yc-pad .yc-bottom > .yc-label, .yc-pad .yc-bottom > .yc-mana { position: absolute; right: 250px; width: 240px; }
 .yc-pad .yc-bottom > .yc-label { bottom: 16px; }
 .yc-pad .yc-bottom > .yc-mana { bottom: 4px; }
-/* 试炼的三选一：三张卡一排（横屏手机也放得下），下面是重抽、不拿 */
-.yc-picks { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(220, 232, 245, 0.5);
-  backdrop-filter: blur(3px); pointer-events: auto; }
+/* 试炼的三选一（10-30 换成和结算页同一种纸面）：三张笺一排（横屏手机也放得下），下面是重抽、不拿。
+   笺是浅一点的纸、一道细框；种类是一方小印，名字用书法字、颜料色；领悟那张底下泛一点金 */
+.yc-picks { position: absolute; inset: 0; display: flex; overflow-y: auto; padding: 10px 0; pointer-events: auto;
+  background: radial-gradient(ellipse at center, rgba(14,18,24,0.16), rgba(14,18,24,0.56)); }
 .yc-picks[hidden] { display: none; }
-.yc-picks-box { width: min(620px, calc(100% - 24px)); text-align: center; }
-.yc-picks-title { font-family: ${BRUSH}; font-size: 36px; letter-spacing: 6px; color: #16202b; text-shadow: 0 2px 10px rgba(255,255,255,0.8); }
-.yc-picks-sub { font-size: 13px; color: var(--muted); margin: 2px 0 12px; }
-.yc-pick-row { display: flex; gap: 12px; justify-content: center; }
-.yc-pick { flex: 1 1 0; min-width: 0; max-width: 190px; display: flex; flex-direction: column; align-items: center; gap: 4px;
-  padding: 12px 10px 14px; border-radius: 14px; border: 2px solid var(--c); background: rgba(255,255,255,0.92); color: var(--ink);
-  font: inherit; cursor: pointer; position: relative; box-shadow: 0 8px 22px -12px rgba(20,40,80,0.55); transition: transform .12s; }
-.yc-pick:hover, .yc-pick:focus-visible { transform: translateY(-3px); outline: none; box-shadow: 0 10px 26px -10px var(--c); }
-.yc-pick-kind { font-size: 11px; color: #fff; background: var(--c); border-radius: 999px; padding: 1px 8px; }
-.yc-pick-name { font-family: ${BRUSH}; font-size: 40px; line-height: 1.15; color: var(--c); white-space: nowrap; }
-.yc-pick-text { font-size: 12.5px; line-height: 1.55; color: #3b4856; }
-.yc-pick .yc-key { bottom: -16px; }
-.yc-pick.insight { background: linear-gradient(180deg, #fff8e6, rgba(255,255,255,0.94)); }
-.yc-picks-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
-.yc-picks-btns .yc-btn { margin-top: 0; padding: 8px 16px; font-size: 14px; }
-.yc-short .yc-picks-title { font-size: 26px; } .yc-short .yc-picks-sub { margin-bottom: 8px; }
-.yc-short .yc-pick { padding: 8px 8px 10px; } .yc-short .yc-pick-name { font-size: 30px; } .yc-short .yc-pick-text { font-size: 12px; line-height: 1.45; }
-.yc-short .yc-picks-btns { margin-top: 12px; }
-.yc-narrow .yc-pick-row { gap: 8px; } .yc-narrow .yc-pick-name { font-size: 30px; }
+.yc-picks-box { margin: auto; width: min(640px, calc(100% - 24px)); padding: 22px 28px 18px; text-align: center; }
+.yc-picks-title { font: normal 36px/1.15 ${BRUSH}; letter-spacing: 6px; color: #15110d; }
+.yc-picks-sub { font-size: 13.5px; line-height: 1.6; color: #5a4d3e; margin: 4px 0 14px; text-wrap: balance; }
+.yc-pick-row { display: flex; gap: 14px; justify-content: center; }
+.yc-pick { flex: 1 1 0; min-width: 0; max-width: 190px; display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 14px 10px; border-radius: 2px; border: 1px solid rgba(52,40,28,0.38); background: rgba(255,252,244,0.6); color: #231f1a;
+  font: inherit; cursor: pointer; position: relative; box-shadow: inset 0 0 0 3px rgba(255,252,244,0.6), inset 0 0 0 4px rgba(52,40,28,0.12);
+  transition: transform .12s, border-color .12s, box-shadow .12s; -webkit-tap-highlight-color: transparent; }
+.yc-pick:hover, .yc-pick:focus-visible { transform: translateY(-3px); outline: none; border-color: var(--c);
+  box-shadow: inset 0 0 0 3px rgba(255,252,244,0.6), inset 0 0 0 4px var(--c), 0 12px 20px -12px rgba(40,20,10,0.55); }
+.yc-pick-kind { font-size: 12px; line-height: 1.4; color: #f7efe2; background: var(--c); border-radius: 2px; padding: 1px 7px; letter-spacing: 1px;
+  transform: rotate(-3deg); box-shadow: inset 0 0 0 1.5px var(--c), inset 0 0 0 2.5px rgba(247,239,226,0.7); }
+.yc-pick-name { font: normal 40px/1.15 ${BRUSH}; color: var(--c); white-space: nowrap; }
+.yc-pick-text { font-size: 12.5px; line-height: 1.6; color: #4a3f33; }
+.yc-pick .yc-key { left: 9px; top: 6px; bottom: auto; transform: none; color: #9a8a76; }   /* 电脑上按 1～3 拿，标在笺的左上角 */
+.yc-pick.insight { background: linear-gradient(180deg, rgba(214,168,60,0.2), rgba(255,252,244,0.6) 65%); border-color: rgba(160,122,20,0.75); }
+.yc-picks-btns { display: flex; gap: 8px 28px; justify-content: center; flex-wrap: wrap; margin-top: 24px; }
+.yc-picks-btns .yc-ink b { font-size: 17px; }
+.yc-short .yc-picks-box { padding: 16px 24px 12px; }
+.yc-short .yc-picks-title { font-size: 26px; } .yc-short .yc-picks-sub { margin-bottom: 10px; font-size: 12.5px; }
+.yc-short .yc-pick { padding: 9px 8px 10px; } .yc-short .yc-pick-name { font-size: 30px; } .yc-short .yc-pick-text { font-size: 12px; line-height: 1.45; }
+.yc-short .yc-picks-btns { margin-top: 16px; }
+.yc-narrow .yc-picks-box { padding: 20px 16px 16px; }
+.yc-narrow .yc-pick-row { gap: 8px; } .yc-narrow .yc-pick-name { font-size: 26px; white-space: normal; }
+.yc-narrow .yc-picks-btns { margin-top: 14px; }
 /* 首页封面（showCover，10-30）：不糊画面、不压白卡，山门就是背景（镜头慢慢摆、法术自己放）；左边竖排大标题加红印，
    下面两个水墨按钮；点了按钮出第二步纸面板：这个模式的说明、选天赋（结算页上那块挪过来）、开始 */
 .yc-on-cover .yc-top, .yc-on-cover .yc-bottom, .yc-on-cover .yc-boss, .yc-on-cover .yc-card, .yc-on-cover .yc-big,
@@ -539,9 +548,9 @@ export class Hud {
     this.floats = el(`<div style="position:absolute;inset:0;overflow:hidden"></div>`);
     this.stick = el(`<div class="yc-stick"><i></i></div>`);
     this.knob = /** @type {HTMLElement} */ (this.stick.firstElementChild);
-    this.picks = el(`<div class="yc-picks" hidden><div class="yc-picks-box"><div class="yc-picks-title">三选一</div><div class="yc-picks-sub"></div>
+    this.picks = el(`<div class="yc-picks" hidden><div class="yc-picks-box yc-paper"><div class="yc-picks-title">三选一</div><div class="yc-picks-sub"></div>
       <div class="yc-pick-row"></div>
-      <div class="yc-picks-btns"><button class="yc-btn ghost" data-reroll></button><button class="yc-btn ghost" data-skip>不拿，回满气血与法力</button></div></div></div>`);
+      <div class="yc-picks-btns"><button class="yc-ink yc-sub" data-reroll><b></b></button><button class="yc-ink yc-sub" data-skip><b>不拿，回满气血与法力</b></button></div></div></div>`);
     /** @type {{ pick: (i: number) => void, reroll: () => void, skip: () => void } | null} */
     this.pickOn = null;
     /** 精力最近一次画到几格（setStamina） */
@@ -924,11 +933,11 @@ export class Hud {
    */
   showPicks(cards, on) {
     this.q('.yc-picks-title').textContent = on.title ?? '三选一';
-    /** @type {HTMLElement} */ (this.picks.querySelector('[data-skip]')).textContent = on.skipText ?? '不拿，回满气血与法力';
+    /** @type {HTMLElement} */ (this.picks.querySelector('[data-skip] b')).textContent = on.skipText ?? '不拿，回满气血与法力';
     const row = this.q('.yc-pick-row');
     row.innerHTML = '';
     cards.forEach((c, i) => {
-      const color = c.el ? elColor(c.el) : KIND_COLOR[c.kind] || '#4a74d9';
+      const color = c.el ? SEAL_INK[c.el] ?? elColor(c.el) : PICK_INK[c.kind] || '#2f4f86';
       const b = el(`<button class="yc-pick${c.insight ? ' insight' : ''}" style="--c:${color}"><span class="yc-pick-kind">${esc(c.kind)}</span>
         <b class="yc-pick-name">${esc(showName(c.name))}</b><span class="yc-pick-text">${esc(c.text)}</span><span class="yc-key">${i + 1}</span></button>`);
       b.addEventListener('click', () => this.pickOn?.pick(i));
@@ -937,7 +946,7 @@ export class Hud {
     this.q('.yc-picks-sub').textContent = on.sub;
     const rr = /** @type {HTMLButtonElement} */ (this.picks.querySelector('[data-reroll]'));
     rr.hidden = on.rerolls === null;
-    rr.textContent = `重抽（还剩 ${on.rerolls} 次）`;
+    /** @type {HTMLElement} */ (rr.querySelector('b')).textContent = `重抽（还剩 ${on.rerolls} 次）`;
     rr.disabled = !on.rerolls || !cards.length;
     this.pickOn = on;
     this.picks.hidden = false;
