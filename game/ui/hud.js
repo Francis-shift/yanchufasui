@@ -42,17 +42,22 @@ export const showName = (/** @type {string} */ s) => s.replace(/·/g, '•');
 
 const CSS = FONT_CSS + `
 .yc-ui { position: absolute; inset: 0; pointer-events: none; font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  color: #1d2733; --ink: #1d2733; --muted: #5d6b7a; --panel: rgba(250, 252, 255, 0.78); --line: rgba(30, 50, 80, 0.16); }
+  color: #231f1a; --ink: #231f1a; --muted: #6a5c4b; --panel: rgba(241,234,220,0.92); --line: rgba(52,40,28,0.38); --grain: ${PAPER_GRAIN};
+  --paper: #f1eadc; }
 .yc-ui * { box-sizing: border-box; }
 .yc-top { position: absolute; left: 16px; top: calc(14px + env(safe-area-inset-top, 0px)); display: flex; flex-direction: column; gap: 6px;
-  padding: 10px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(6px); min-width: 180px; }
+  padding: 10px 14px; min-width: 180px; }
+/* 战斗里的界面（10-30 本人嫌"太塑料"，改成和结算页同一路）：左上面板、boss 血条、咒语卡是一张张小笺——米黄纸、纸纹、内外两道细框、方角；
+   字用楷体，数字用书法字；条子是国画颜料色（气血石绿、法力石青、boss 朱砂），方头，槽是淡墨 */
+.yc-top, .yc-boss, .yc-card { background: var(--grain), var(--panel); border: 1px solid rgba(52,40,28,0.5); border-radius: 2px; font-family: ${KAI};
+  box-shadow: inset 0 0 0 3px var(--panel), inset 0 0 0 4px rgba(52,40,28,0.2), 0 12px 26px -14px rgba(8,12,18,0.75); }
 .yc-mute { position: absolute; right: 12px; top: calc(12px + env(safe-area-inset-top, 0px)); width: 36px; height: 36px; padding: 0; border-radius: 50%;
   display: grid; place-items: center; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer;
   pointer-events: auto; backdrop-filter: blur(6px); }
 .yc-mute svg { width: 20px; height: 20px; } .yc-mute.off { color: var(--muted); }
 /* 试炼的视角按钮（俯视 / 肩后 / 第一人称轮着切）：在声音开关下面 */
 .yc-view { position: absolute; right: 12px; top: calc(56px + env(safe-area-inset-top, 0px)); height: 30px; padding: 0 11px; border-radius: 15px;
-  border: 1px solid var(--line); background: var(--panel); color: var(--ink); font: inherit; font-size: 12.5px; white-space: nowrap; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink); font: 13px ${KAI}; white-space: nowrap; cursor: pointer;
   pointer-events: auto; backdrop-filter: blur(6px); }
 .yc-view[hidden] { display: none; }
 .yc-view small { margin-left: 6px; color: var(--muted); font-size: 11px; }
@@ -100,49 +105,55 @@ const CSS = FONT_CSS + `
 .yc-narrow .yc-set-box { padding: 18px 20px 14px; }
 .yc-g { display: flex; flex-direction: column; gap: 6px; }
 .yc-g + .yc-g { margin-top: 4px; }
-.yc-label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 12px; white-space: nowrap; }
-.yc-bar { height: 8px; border-radius: 4px; background: rgba(0,0,0,0.12); overflow: hidden; }
-.yc-bar > i { display: block; height: 100%; width: 100%; border-radius: 4px; transition: width .15s; }
-.yc-core > i { background: linear-gradient(90deg, #6b7cff, #39c6ff); }
-.yc-mana > i { background: linear-gradient(90deg, #4f8dff, #7fe0ff); }
-.yc-gauge { display: flex; gap: 2px; }   /* 气势槽一格一格画，每格染加它的那个元素的颜色 */
-.yc-gauge > i { flex: 1; width: auto; border-radius: 2px; background: var(--c, transparent); transition: background .15s; }
-.yc-gauge > i.w { box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2); }
-.yc-top.gauge-full .yc-gauge { box-shadow: 0 0 10px 2px rgba(255, 196, 80, 0.75); animation: yc-pulse 1.1s ease-in-out infinite; }
-.yc-top.gauge-full [data-gauge] { color: #b06d00; }
-@keyframes yc-pulse { 50% { box-shadow: 0 0 16px 4px rgba(255, 196, 80, 0.95); } }
+.yc-label { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; align-items: baseline; gap: 12px; white-space: nowrap; }
+.yc-label b { font: 13px/1.3 ${KAI}; color: #2b2520; }
+.yc-label [data-core], .yc-label [data-mana] { font: normal 19px/1 ${BRUSH}; color: #15110d; }   /* 数字用书法字 */
+.yc-bar { height: 8px; border-radius: 1px; background: rgba(52,40,28,0.13); box-shadow: inset 0 0 0 1px rgba(52,40,28,0.25); overflow: hidden; }
+.yc-bar > i { display: block; height: 100%; width: 100%; transition: width .15s; }
+.yc-core > i { background: linear-gradient(90deg, #2c6a50, #5f9c74); }
+.yc-mana > i { background: linear-gradient(90deg, #24548f, #4f8cc6); }
+/* 法力条和它的字直接压在画面上：字描一圈纸色，槽铺一层纸 */
+.yc-bottom > .yc-label { font-family: ${KAI}; color: #2b2520; text-shadow: 0 0 5px var(--paper), 0 0 2px var(--paper); }
+.yc-bottom > .yc-mana { height: 9px; background: var(--grain), rgba(241,234,220,0.78); box-shadow: inset 0 0 0 1px rgba(52,40,28,0.5), 0 4px 12px -6px rgba(8,12,18,0.7); }
+.yc-gauge { display: flex; gap: 2px; background: none; box-shadow: none; }   /* 气势槽一格一格画，每格染加它的那个元素的颜色 */
+.yc-gauge > i { flex: 1; width: auto; background: var(--c, transparent); box-shadow: inset 0 0 0 1px rgba(52,40,28,0.28); transition: background .15s; }
+.yc-gauge > i.w { box-shadow: inset 0 0 0 1px rgba(52,40,28,0.55); }
+.yc-top.gauge-full .yc-gauge { animation: yc-glow 1.1s ease-in-out infinite; }
+.yc-top.gauge-full [data-gauge] { color: #9a2a1e; }
+/* 满了：朱砂色的光一呼一吸（召唤印也是） */
+@keyframes yc-glow { 50% { filter: drop-shadow(0 0 6px rgba(205,60,30,0.85)); } }
 .yc-bottom { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   width: min(640px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 6px; pointer-events: auto; }
-.yc-input { width: 100%; font: inherit; font-size: 17px; padding: 12px 16px; border-radius: 14px; border: 1px solid var(--line);
-  background: rgba(255,255,255,0.9); color: var(--ink); outline: none; box-shadow: 0 6px 24px -10px rgba(20,40,80,0.4); }
-.yc-input:focus { border-color: #5b8cff; box-shadow: 0 0 0 3px rgba(91,140,255,0.25), 0 6px 24px -10px rgba(20,40,80,0.4); }
+.yc-input { width: 100%; font: inherit; font-size: 17px; padding: 12px 16px; border-radius: 3px; border: 1px solid rgba(52,40,28,0.5);
+  background: var(--grain), rgba(246,241,231,0.94); color: var(--ink); outline: none; box-shadow: 0 8px 20px -10px rgba(8,12,18,0.6); }
+.yc-input:focus { border-color: #8a2a10; box-shadow: 0 0 0 3px rgba(138,42,16,0.18), 0 8px 20px -10px rgba(8,12,18,0.6); }
 .yc-input:disabled { opacity: 0.6; }
 /* 输入框右边的麦克风：按住说话；输入框藏起来（试炼）时单独一个、带字 */
 .yc-say { display: flex; gap: 8px; align-items: center; justify-content: center; }
 .yc-say .yc-input { flex: 1; min-width: 0; }
-.yc-mic { flex: none; height: 46px; min-width: 46px; padding: 0 12px; border-radius: 23px; border: 1px solid var(--line); background: rgba(255,255,255,0.9);
-  color: #3b4856; font: inherit; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 4px; cursor: pointer;
-  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; box-shadow: 0 6px 24px -10px rgba(20,40,80,0.4); }
+.yc-mic { flex: none; height: 46px; min-width: 46px; padding: 0 14px; border-radius: 3px; border: 1px solid rgba(52,40,28,0.55); background: var(--grain), var(--paper);
+  color: #2b2520; font: 15px ${KAI}; display: flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  box-shadow: inset 0 0 0 3px var(--paper), inset 0 0 0 4px rgba(52,40,28,0.22), 0 8px 18px -10px rgba(8,12,18,0.7); }
 .yc-mic svg { width: 22px; height: 22px; flex: none; }
 .yc-mic[hidden] { display: none; }
 .yc-mic span { white-space: nowrap; }
 .yc-say .yc-input:not([hidden]) + .yc-mic { padding: 0; } .yc-say .yc-input:not([hidden]) + .yc-mic span { display: none; }
-.yc-mic.rec { background: #d9412b; border-color: #d9412b; color: #fff; animation: yc-rec 1s ease-in-out infinite; }
+.yc-mic.rec { background: #b3261e; border-color: #b3261e; color: #fbefe6; box-shadow: inset 0 0 0 3px #b3261e, inset 0 0 0 4px rgba(251,239,230,0.7);
+  animation: yc-glow 1s ease-in-out infinite; }
 .yc-mic.busy { opacity: 0.6; cursor: progress; }
-@keyframes yc-rec { 50% { box-shadow: 0 0 0 8px rgba(217,65,43,0.25); } }
-.yc-hint { font-size: 12px; color: var(--muted); text-align: center; text-shadow: 0 1px 0 rgba(255,255,255,0.6); }
+.yc-hint { font: 12.5px/1.6 ${KAI}; color: #3a3026; text-align: center; text-shadow: 0 0 5px var(--paper), 0 0 2px var(--paper); }
 .yc-card { position: absolute; left: 50%; top: calc(14px + env(safe-area-inset-top, 0px)); transform: translate(-50%, -8px);
-  width: min(560px, calc(100% - 32px)); padding: 12px 18px 14px; background: var(--panel); border: 1px solid var(--line);
-  border-radius: 16px; backdrop-filter: blur(8px); opacity: 0; transition: opacity .25s, transform .25s; }
+  width: min(560px, calc(100% - 32px)); padding: 12px 18px 14px; opacity: 0; transition: opacity .25s, transform .25s; }
 .yc-card.show { opacity: 1; transform: translate(-50%, 0); }
 .yc-name { font-family: ${BRUSH}; font-size: 40px; line-height: 1.15; text-align: center;
-  letter-spacing: 4px; color: #16202b; }
+  letter-spacing: 4px; color: #15110d; }
 .yc-said { margin-top: 8px; font-size: 15px; line-height: 1.9; }
 .yc-said u { text-decoration-thickness: 2px; text-underline-offset: 4px; }
-.yc-said .gray { color: #9aa4ae; text-decoration: line-through; }
+.yc-said .gray { color: #a3947f; text-decoration: line-through; }
 .yc-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.yc-tag { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: rgba(40,60,90,0.08); color: #2b3a4a; }
-.yc-tag.gray { color: #8a949e; }
+.yc-tag { font-size: 12px; padding: 2px 8px; border-radius: 2px; background: rgba(52,40,28,0.08); color: #3a3026; }
+.yc-tag.gray { color: #9a8a76; }
 .yc-meta { margin-top: 6px; font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 10px; }
 .yc-meta .warn { color: #b4541a; }
 .yc-float { position: absolute; transform: translate(-50%, -50%); font-weight: 700; font-size: 18px; white-space: nowrap;
@@ -239,20 +250,27 @@ const CSS = FONT_CSS + `
 .yc-skills { display: flex; gap: 12px; justify-content: center; align-items: flex-end; margin-bottom: 4px; }
 .yc-skills[hidden] { display: none; }
 .yc-skill { position: relative; }
-.yc-cast { width: 54px; height: 54px; border-radius: 50%; border: 2px solid var(--c); background: rgba(255,255,255,0.9);
-  color: var(--c); font-family: ${BRUSH}; font-size: 26px; line-height: 1.05; padding: 2px; cursor: pointer; touch-action: manipulation;
-  box-shadow: 0 6px 18px -8px rgba(20,40,80,0.5); }
+/* 招式钮、闪避钮是一方方圆印：纸底、颜料色的外圈加一道细内圈，书法字；咏唱时整方填满颜色、字留纸色（同选天赋的白文印）。
+   颜色用印章那套沉色（SEAL_INK），闪避是墨色 */
+.yc-cast, .yc-dash { width: 54px; height: 54px; border-radius: 50%; border: 2px solid var(--c); background: var(--grain), var(--paper);
+  color: var(--c); font-family: ${BRUSH}; font-size: 27px; line-height: 1.05; padding: 2px; cursor: pointer; touch-action: manipulation; position: relative;
+  box-shadow: inset 0 0 0 2.5px var(--paper), inset 0 0 0 3.5px var(--c), 0 8px 16px -8px rgba(8,12,18,0.75); }
+.yc-dash { --c: #2b2520; line-height: 1; padding: 0; }
 .yc-cast.named { font-size: 15px; letter-spacing: 1px; }
-.yc-cast:active { transform: scale(0.94); }
-.yc-cast.charging { background: var(--c); color: #fff; animation: yc-charge .6s ease-out; }
-@keyframes yc-charge { from { box-shadow: 0 0 0 0 var(--c); } to { box-shadow: 0 0 0 12px transparent; } }
-.yc-pen { position: absolute; right: -6px; top: -6px; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line);
-  background: #fff; color: #4a5a6a; font-size: 12px; line-height: 20px; padding: 0; cursor: pointer; }
-.yc-key { position: absolute; left: 50%; bottom: -14px; transform: translateX(-50%); font-size: 10px; color: var(--muted); }
-.yc-summon { position: relative; height: 54px; padding: 0 14px; border-radius: 27px; border: 2px solid #d99a1e; background: linear-gradient(180deg, #ffe6a3, #f0b24a);
-  color: #6b3f00; font-family: ${BRUSH}; font-size: 22px; cursor: pointer; animation: yc-pulse 1.1s ease-in-out infinite; }
+.yc-cast:active, .yc-dash:active { transform: scale(0.94); }
+.yc-cast.charging { background: var(--c); color: var(--paper); animation: yc-charge .6s ease-out;
+  box-shadow: inset 0 0 0 2.5px var(--c), inset 0 0 0 3.5px rgba(241,234,220,0.8); }
+@keyframes yc-charge { from { filter: drop-shadow(0 0 0 var(--c)); } 30% { filter: drop-shadow(0 0 9px var(--c)); } }
+.yc-pen { position: absolute; right: -6px; top: -6px; width: 22px; height: 22px; border-radius: 50%; border: 1px solid rgba(52,40,28,0.5);
+  background: var(--paper); color: #3a3026; font-size: 12px; line-height: 20px; padding: 0; cursor: pointer; }
+/* 键名：挂在印下沿的一小块墨签 */
+.yc-key { position: absolute; left: 50%; bottom: -9px; transform: translateX(-50%); font: 11px/1 ${KAI}; color: var(--paper); white-space: nowrap;
+  background: rgba(35,31,26,0.82); padding: 2px 4px 1px; border-radius: 2px; }
+/* 召唤：一方朱文大印，略歪，朱砂色的光一呼一吸 */
+.yc-summon { position: relative; height: 54px; padding: 0 14px; border: 0; border-radius: 3px; background: #b3261e; color: #fbefe6;
+  font: normal 24px/1 ${BRUSH}; letter-spacing: 2px; cursor: pointer; transform: rotate(-3deg); animation: yc-glow 1.1s ease-in-out infinite;
+  box-shadow: inset 0 0 0 2.5px #b3261e, inset 0 0 0 4px rgba(251,239,230,0.85), 0 8px 16px -8px rgba(60,8,0,0.8); }
 .yc-summon[hidden] { display: none; }
-.yc-summon .yc-key { white-space: nowrap; font: 10px/1 system-ui, sans-serif; bottom: -12px; }
 .yc-write { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(220, 232, 245, 0.45); pointer-events: auto; }
 .yc-write[hidden] { display: none; }
 .yc-write .yc-box { width: min(460px, calc(100% - 24px)); text-align: left; padding: 18px; }
@@ -268,32 +286,30 @@ const CSS = FONT_CSS + `
 .yc-btn.ghost { background: #fff; color: #4a74d9; }
 .yc-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .yc-narrow .yc-key { display: none; }
-.yc-short .yc-skills { margin-bottom: 0; } .yc-short .yc-cast, .yc-short .yc-summon { height: 46px; } .yc-short .yc-cast { width: 46px; }
+.yc-short .yc-skills { margin-bottom: 3px; } .yc-short .yc-cast, .yc-short .yc-summon { height: 46px; } .yc-short .yc-cast { width: 46px; }
 .yc-debug { position: absolute; right: 12px; bottom: calc(150px + env(safe-area-inset-bottom, 0px)); font: 12px/1.6 ui-monospace, Consolas, monospace;
   max-width: min(420px, calc(100vw - 24px)); overflow: hidden;
   background: rgba(20,24,32,0.72); color: #dfe7f1; padding: 8px 10px; border-radius: 10px; white-space: pre; }
 .yc-debug[hidden] { display: none; }
 /* 试炼模式：顶上居中的 boss 血条（下面一条细的是冰甲）、闪避键、开战按钮；战斗中不打字、不写咒 */
 .yc-boss { position: absolute; left: 50%; transform: translateX(-50%); top: calc(14px + env(safe-area-inset-top, 0px));
-  width: min(440px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 5px; padding: 8px 14px;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(6px); }
+  width: min(440px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 5px; padding: 8px 14px 10px; }
 .yc-boss[hidden] { display: none; }
 .yc-boss.yc-side { right: 104px; width: auto; max-width: 440px; transform: none; }   /* 矮窗口：放到左上面板右边，left 由 placeBoss 给 */
-.yc-boss .yc-label b { color: #9a2a1e; }
-.yc-bosshp > i { background: linear-gradient(90deg, #b3261e, #ff6b4a); }
-.yc-armor { height: 5px; } .yc-armor > i { background: linear-gradient(90deg, #7cc8ff, #e2f4ff); }
-.yc-armor.stone > i { background: linear-gradient(90deg, #8a6a44, #d8c3a0); }
-.yc-armor.flame > i { background: linear-gradient(90deg, #c2401a, #ffb35a); }
-.yc-dash { width: 54px; height: 54px; border-radius: 50%; border: 2px solid #5d6b7a; background: rgba(255,255,255,0.9); color: #3b4856;
-  font-family: ${BRUSH}; font-size: 26px; line-height: 1; padding: 0; cursor: pointer; touch-action: manipulation; position: relative; }
+.yc-boss [data-bossname] { font: normal 22px/1.1 ${BRUSH_BIG}; color: #15110d; letter-spacing: 2px; }   /* boss 名在大字那款字体里 */
+.yc-boss .yc-label b { color: #9a2a1e; overflow: hidden; text-overflow: ellipsis; }
+.yc-bosshp { height: 10px; } .yc-bosshp > i { background: linear-gradient(90deg, #7e1f16, #c0402a); }
+.yc-armor { height: 5px; } .yc-armor > i { background: linear-gradient(90deg, #5d8db8, #a9c8e2); }
+.yc-armor.stone > i { background: linear-gradient(90deg, #7a5230, #c49a66); }
+.yc-armor.flame > i { background: linear-gradient(90deg, #b8441c, #e0904c); }
 .yc-dash.cd { opacity: 0.45; }
-/* 精力格：闪避按钮上方一排短条，攒到几成填几成 */
+/* 精力格：闪避按钮上方一排短条，攒到几成填几成（石青） */
 .yc-pips { position: absolute; left: 50%; top: -11px; transform: translateX(-50%); display: flex; gap: 3px; pointer-events: none; }
-.yc-pips > i { width: 13px; height: 5px; border-radius: 3px; box-shadow: 0 0 0 1px rgba(255,255,255,0.7);
-  background: linear-gradient(90deg, #2f8fd8 calc(var(--f, 1) * 100%), rgba(60,72,86,0.3) 0); }
+.yc-pips > i { width: 13px; height: 5px; border-radius: 1px; box-shadow: 0 0 0 1px rgba(241,234,220,0.85);
+  background: linear-gradient(90deg, #24548f calc(var(--f, 1) * 100%), rgba(52,40,28,0.4) 0); }
 .yc-pad .yc-pips { top: -13px; } .yc-pad .yc-pips > i { width: 18px; height: 6px; }
-.yc-dash .yc-key { white-space: nowrap; font: 10px/1 system-ui, sans-serif; }
-.yc-go { align-self: center; margin-top: 2px; }
+.yc-ink.yc-go { align-self: center; margin-top: 6px; min-width: 0; align-items: center; padding: 6px 30px 8px 24px; }   /* 开战：水墨钮 */
+.yc-ink.yc-go b { font-size: 28px; }
 .yc-go[hidden], .yc-input[hidden] { display: none; }
 .yc-nopen .yc-pen { display: none; }
 .yc-short .yc-dash { width: 46px; height: 46px; }
@@ -301,14 +317,14 @@ const CSS = FONT_CSS + `
 /* 窄（手机竖屏）：阵眼、波次、气势排成顶上一行，省出画面给敌人的来路；咒语卡由 placeCard 放在这一行下面 */
 .yc-narrow .yc-name { font-size: 32px; } .yc-narrow .yc-big { font-size: 46px; }
 .yc-narrow .yc-top { left: 10px; right: 10px; top: calc(8px + env(safe-area-inset-top, 0px)); flex-direction: row; gap: 10px;
-  padding: 7px 10px; min-width: 0; border-radius: 10px; }
+  padding: 7px 10px; min-width: 0; }
 .yc-narrow .yc-g { flex: 1; min-width: 0; gap: 4px; }
 .yc-narrow .yc-g + .yc-g { margin-top: 0; }
 .yc-narrow .yc-g-gauge { flex: 1.35; }
 .yc-narrow .yc-label { gap: 6px; }
 .yc-narrow .yc-card { width: calc(100% - 20px); }
 .yc-narrow .yc-mute { right: 10px; top: calc(60px + env(safe-area-inset-top, 0px)); }   /* 顶上一行占满了宽，挪到它下面 */
-.yc-narrow .yc-view { right: 10px; top: calc(122px + env(safe-area-inset-top, 0px)); }   /* 落在 boss 血条下面（血条约到 113） */
+.yc-narrow .yc-view { right: 10px; top: calc(138px + env(safe-area-inset-top, 0px)); }   /* 落在 boss 血条下面（血条约到 129） */
 .yc-narrow .yc-boss { left: 10px; right: 100px; width: auto; transform: none; }   /* boss 血条也在那一行下面：右边让出设置与声音开关 */
 /* 矮（手机键盘弹起来了）：咒语卡只留名字、原话、一行结果，提示语不显示 */
 .yc-short .yc-hint, .yc-short .yc-tags { display: none; }
@@ -378,7 +394,7 @@ const CSS = FONT_CSS + `
   transform: rotate(-3deg); box-shadow: inset 0 0 0 1.5px var(--c), inset 0 0 0 2.5px rgba(247,239,226,0.7); }
 .yc-pick-name { font: normal 40px/1.15 ${BRUSH}; color: var(--c); white-space: nowrap; }
 .yc-pick-text { font-size: 12.5px; line-height: 1.6; color: #4a3f33; }
-.yc-pick .yc-key { left: 9px; top: 6px; bottom: auto; transform: none; color: #9a8a76; }   /* 电脑上按 1～3 拿，标在笺的左上角 */
+.yc-pick .yc-key { left: 9px; top: 6px; bottom: auto; transform: none; color: #9a8a76; background: none; padding: 0; }   /* 电脑上按 1～3 拿，标在笺的左上角 */
 .yc-pick.insight { background: linear-gradient(180deg, rgba(214,168,60,0.2), rgba(255,252,244,0.6) 65%); border-color: rgba(160,122,20,0.75); }
 .yc-picks-btns { display: flex; gap: 8px 28px; justify-content: center; flex-wrap: wrap; margin-top: 24px; }
 .yc-picks-btns .yc-ink b { font-size: 17px; }
@@ -565,7 +581,7 @@ export class Hud {
       <div class="yc-label"><span>法力</span><b data-mana>100</b></div><div class="yc-bar yc-mana"><i data-manabar></i></div>
       <div class="yc-say"><input class="yc-input" maxlength="${INPUT_MAX_CHARS}" enterkeyhint="send" autocomplete="off" aria-label="咒语" placeholder="说出你的咒语……（回车施法）">
         <button class="yc-mic" type="button" hidden></button></div>
-      <button class="yc-btn yc-go" data-go hidden>开战</button>
+      <button class="yc-ink yc-go" data-go hidden><b>开战</b></button>
       <div class="yc-hint" data-hint>开口就慢放，想好再说。例：先冻住最前面那只，再用风把它们吹下悬崖</div></div>`);
     this.boss = el(`<div class="yc-boss" hidden><div class="yc-label"><span data-bossname></span><b data-bossphase></b></div>
       <div class="yc-bar yc-bosshp"><i data-bosshp></i></div><div class="yc-bar yc-armor"><i data-armor></i></div></div>`);
@@ -762,7 +778,7 @@ export class Hud {
       if (this.stamina.max) this.setStamina(this.stamina.v, this.stamina.max, this.stamina.locked);
     }
     skills.forEach((s, i) => {
-      const w = el(`<div class="yc-skill" style="--c:${elColor(s.el)}" data-el="${s.el}"><button class="yc-cast"></button>
+      const w = el(`<div class="yc-skill" style="--c:${SEAL_INK[s.el] ?? elColor(s.el)}" data-el="${s.el}"><button class="yc-cast"></button>
         <button class="yc-pen" aria-label="给这个按钮写一句咒">✎</button><span class="yc-key">${esc(this.keyLabels.skills[i] ?? '')}</span></div>`);
       const cast = /** @type {HTMLElement} */ (w.querySelector('.yc-cast'));
       // 按下就放（不等松手），也不让按钮抢走输入框的焦点、收起手机键盘
@@ -938,7 +954,7 @@ export class Hud {
     if (bar.childElementCount !== max) bar.innerHTML = '<i></i>'.repeat(max);
     [...bar.children].forEach((c, i) => {
       const k = i < g ? cols[i] : undefined;
-      /** @type {HTMLElement} */ (c).style.setProperty('--c', !k ? 'transparent' : k === 'white' ? '#fffdf6' : elColor(k));
+      /** @type {HTMLElement} */ (c).style.setProperty('--c', !k ? 'transparent' : k === 'white' ? '#fffdf6' : SEAL_INK[k] ?? elColor(k));
       c.classList.toggle('w', k === 'white');
     });
     this.top.classList.toggle('gauge-full', g >= max);

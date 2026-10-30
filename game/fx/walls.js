@@ -105,6 +105,11 @@ export class Walls {
       .flatMap((w) => w.pts.map((p) => ({ x: p.x, z: p.z, r: 0.6, bounce: !!w.payload?.runes?.includes('fan') })));
   }
 
+  /** 挡敌方弹幕的墙段：四种墙都算（10-30 本人：火冰风墙也该挡冰锥、火球），只是帘子不挡路；bounce 同上，只有土墙写得了「返」 */
+  shields() {
+    return this.list.flatMap((w) => w.pts.map((p) => ({ x: p.x, z: p.z, r: 0.6, bounce: w.el === 'earth' && !!w.payload?.runes?.includes('fan') })));
+  }
+
   /** 正在生效的帘子（火冰风墙） */
   curtains() { return this.list.filter((w) => w.el !== 'earth'); }
 

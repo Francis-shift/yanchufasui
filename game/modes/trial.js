@@ -84,12 +84,14 @@ export class Trial {
    *           particles: import('../fx/particles.js').Particles, hud: import('../ui/hud.js').Hud,
    *           caster: THREE.Object3D, origins: THREE.Vector3[], canvas: HTMLElement, mobile: boolean,
    *           floatText: (p: THREE.Vector3, text: string, color: string) => void, win: () => void, lose: () => void,
-   *           blockers: () => { x: number, z: number, r: number, bounce?: boolean }[], reward: (mana: number, gauge: number) => void,
+   *           blockers: () => { x: number, z: number, r: number }[], shields: () => { x: number, z: number, r: number, bounce?: boolean }[],
+   *           reward: (mana: number, gauge: number) => void,
    *           local: (x: number, y: number) => { x: number, y: number }, pick: (insight: boolean, done: () => void) => void,
    *           strike: (e: any, dmg: number, at: { x: number, z: number }) => void,
    *           dodge?: () => void, ghost?: (mat: THREE.Material) => THREE.Object3D | null,
    *           fireWave?: (from: { x: number, z: number }, dir: { x: number, z: number }) => void }} d
-   *   origins：法术起点（施法者胸口高度），跟着玩家走；blockers：此刻的土墙（挡冰锥；bounce 的写了字诀「返」，把冰锥弹回去）；
+   *   origins：法术起点（施法者胸口高度），跟着玩家走；blockers：此刻的土墙（挡路、挡冲锋）；
+   *   shields：此刻挡弹幕的墙段（四种墙都算；bounce 的写了字诀「返」，把冰锥弹回去）；
    *   reward：完美闪避回法力、加气势；local：屏幕坐标换成界面坐标（画面转了 90° 时要转回来）；
    *   pick：出三选一（insight：打完 boss 那次），选完调 done 接着打；strike：弹回去的冰锥撞上敌人，打它一下（main.js 结算）；
    *   dodge：施法者做闪避的动作；ghost：施法者模型此刻姿势的一份拷贝（残影用；模型没到给 null，照旧用胶囊）；
@@ -1250,9 +1252,9 @@ export class Trial {
     return false;
   }
 
-  /** 冰锥飞一帧：追人的转弯；撞上土墙、场上的石物件就碎（写了「返」的土墙弹回去）；撞上人就伤人；弹回去的撞上敌人打敌人 @param {number} dt */
+  /** 冰锥飞一帧：追人的转弯；撞上墙（四种都算）、场上的石物件就碎（写了「返」的土墙弹回去）；撞上人就伤人；弹回去的撞上敌人打敌人 @param {number} dt */
   updateBullets(dt) {
-    const { particles } = this.d, walls = this.d.blockers(), H = BOSS.homing;
+    const { particles } = this.d, walls = this.d.shields(), H = BOSS.homing;
     const ghost = this.ghostT > 0 ? this.ghost.position : null;   // 残影在：追踪的改追它
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];

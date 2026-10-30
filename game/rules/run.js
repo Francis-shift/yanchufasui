@@ -34,7 +34,7 @@ export const KIND_NAMES = { move: '招式字', rune: '字诀', art: '心法', in
 export const CARDS = [
   // 招式字：换掉一个按钮的形态、轨迹、颗数；拿了选换哪个按钮（轨迹、颗数只换得了弹）
   { id: 'burst', kind: 'move', name: '爆', text: '落点炸开一圈；换进已是「爆」的按钮，范围更大', max: 2, ready: true },
-  { id: 'wall', kind: 'move', name: '墙', text: '一道墙横在前面，挡路也挡冰锥；再拿墙更长', max: 2, ready: true },
+  { id: 'wall', kind: 'move', name: '墙', text: '一道墙横在前面，冰锥火球都挡得下，土墙还挡路；再拿墙更长', max: 2, ready: true },
   { id: 'rain', kind: 'move', name: '雨', text: '两秒里从天上落六次；再拿铺得更开', max: 2, ready: true },
   { id: 'sky', kind: 'move', name: '天降', text: '弹从天而降，盾挡不住', max: 1, ready: true },
   { id: 'behind', kind: 'move', name: '绕后', text: '弹绕到背后再打', max: 1, ready: true },

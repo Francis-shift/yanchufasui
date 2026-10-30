@@ -212,7 +212,8 @@ export function start(root, opts = {}) {
     dodge: () => caster.dodge(), ghost: (mat) => caster.ghost(mat),
     fireWave: (from, dir) => fusions.beam(new THREE.Vector3(from.x, 1.3, from.z), new THREE.Vector3(dir.x, 0, dir.z), null),   // 火灵的火浪借豪火灭却的火云
     canvas: renderer.domElement, mobile, floatText: floatAt, win: trialWon, lose: trialLost,
-    blockers: () => walls.obstacles(),   // 土墙挡得住冰锥
+    blockers: () => walls.obstacles(),   // 土墙挡路、挡冲锋
+    shields: () => walls.shields(),      // 四种墙都挡弹幕
     reward: (mana, gauge) => {   // 完美闪避：回法力、加气势；拿了刹那、反手的开窗口
       S.mana = Math.min(MANA_MAX, S.mana + mana); setGauge(Math.min(S.mods.ult, S.gauge + gauge));
       if (S.mods.chana) { S.slowT = RUN.arts.slow.sec; floatAt(new THREE.Vector3(CASTER_POS.x, 3.1, CASTER_POS.z), '刹那', '#cfe6ff'); }
