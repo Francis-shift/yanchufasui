@@ -310,13 +310,16 @@ export function buildLayout(scene, opts = {}) {
     new THREE.MeshStandardMaterial({ color: 0xffe3a6, emissive: coreColor, emissiveIntensity: 0.8, roughness: 0.2 }));
   crystal.position.set(CORE_POS.x, 1.7, CORE_POS.z);
   crystal.castShadow = true;
-  scene.add(coreSigil, crystal);
+  // 整组放在一个组里：试炼用不上阵眼，main 整组藏起来（10-30 本人）
+  const core = new THREE.Group();
+  core.add(coreSigil, crystal);
   for (let k = 0; k < 8; k++) {
     const a = (k / 8) * Math.PI * 2;
     const post = shadowy(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.7, 0.3), stone));
     post.position.set(CORE_POS.x + Math.cos(a) * 2.7, 0.35, CORE_POS.z + Math.sin(a) * 2.7);
-    scene.add(post);
+    core.add(post);
   }
+  scene.add(core);
 
   // 施法者（占位：背对镜头的白衣修士）
   const caster = new THREE.Group();
@@ -329,7 +332,7 @@ export function buildLayout(scene, opts = {}) {
   caster.position.copy(CASTER_POS);
   scene.add(caster);
 
-  return { coreSigil, crystal, caster, gateBox, stoneBox, huabiaoBox, censerBox, peakRock: peak, plaza, ambience };
+  return { core, coreSigil, crystal, caster, gateBox, stoneBox, huabiaoBox, censerBox, peakRock: peak, plaza, ambience };
 }
 
 /**

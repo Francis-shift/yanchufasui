@@ -5,9 +5,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as THREE from 'three';
 
-import { flightPlan, guardPlan, summonPoints } from '../game/fx/dragon.js';
+import { emergePoint, flightPlan, guardPlan, summonPoints } from '../game/fx/dragon.js';
 import { RUN } from '../game/rules/numbers.js';
-import { SOLIDS } from '../game/world/layout.js';
+import { OBSTACLES, PLAZA_R, SOLIDS } from '../game/world/layout.js';
 
 /** @param {THREE.Vector3} p @param {{ min: number[], max: number[] }} b */
 const distToBox = (p, b) => Math.hypot(
@@ -98,4 +98,46 @@ test('护身：从人脚下的地里钻出来，贴着人绕圈（半径、离�
     assert.equal(p.slam, false);
     assert.equal(p.move, 0, '每帧跟着人重算');
   }
+});
+
+test('召龙的法阵跟着施法者：守关站原位时还是原来那一点；试炼里站到哪都亮在人旁边、广场上、不压着障碍', () => {
+  assert.deepEqual(emergePoint().toArray(), [-3, 0, 4]);
+  for (let x = -9.5; x <= 9.5; x += 0.5) {
+    for (let z = -9.5; z <= 9.5; z += 0.5) {
+      if (Math.hypot(x, z) > PLAZA_R - 1.2 || OBSTACLES.some((o) => Math.hypot(x - o.x, z - o.z) < o.r + 0.4)) continue;
+      const E = emergePoint({ x, z });
+      const d = Math.hypot(E.x - x, E.z - z);
+      assert.ok(d > 2 && d < 4.6, `站在 (${x}, ${z})：法阵离人 ${d.toFixed(2)} 米`);
+      assert.ok(Math.hypot(E.x, E.z) <= PLAZA_R - 1.2, `站在 (${x}, ${z})：法阵 (${E.x.toFixed(1)}, ${E.z.toFixed(1)}) 出了广场`);
+      assert.ok(!OBSTACLES.some((o) => Math.hypot(E.x - o.x, E.z - o.z) < o.r + 0.6), `站在 (${x}, ${z})：法阵压着障碍`);
+    }
+  }
+});
+
+test('召龙：法阵亮在召唤那一刻定下的破土点，冰龙从那里钻出来；目标走动重算时沿用，不跳', () => {
+  const E = emergePoint({ x: 6, z: 2 }), T = new THREE.Vector3(0, 0, -3.5);
+  for (const el of ['ice', 'fire', 'thunder', 'wind']) assert.ok(flightPlan(el, T, undefined, undefined, E).sigil.equals(E), `${el} 的法阵不在破土点`);
+  const ice = flightPlan('ice', T, undefined, undefined, E);
+  assert.ok(ice.pts[0].y < -3 && Math.hypot(ice.pts[1].x - E.x, ice.pts[1].z - E.z) < 1e-9, '冰龙不是从破土点钻出来');
+  const moved = flightPlan('ice', new THREE.Vector3(2, 0, -5), 'open', undefined, E);
+  assert.ok(moved.sigil.equals(E) && moved.pts[1].equals(ice.pts[1]), '目标挪了，破土点跟着跳');
+});
+test('召龙：试炼里站到哪，冰龙破土盘上去到绕场这一段，八成五以上的站位离实心物件够远（1.2 米加摆幅），其余也不贴上去（0.4 米以上）', () => {
+  const T = new THREE.Vector3(0, 0, -3.5);
+  let n = 0, ok = 0, worst = Infinity;
+  for (let x = -9.5; x <= 9.5; x += 0.5) {
+    for (let z = -9.5; z <= 9.5; z += 0.5) {
+      if (Math.hypot(x, z) > PLAZA_R - 1.2 || OBSTACLES.some((o) => Math.hypot(x - o.x, z - o.z) < o.r + 0.4)) continue;
+      const curve = new THREE.CatmullRomCurve3(summonPoints(T, 'open', emergePoint({ x, z })), false, 'centripetal');
+      let min = Infinity;
+      for (let i = 0; i <= 200; i++) {
+        const q = curve.getPoint((i / 200) * (6 / 13));   // 到绕场第一点（第 7 个控制点）为止
+        if (q.y >= -0.5) min = Math.min(min, toSolids(q));
+      }
+      n++; if (min >= 1.2 + 0.18 * 1.3) ok++;
+      worst = Math.min(worst, min);
+    }
+  }
+  assert.ok(ok / n >= 0.85, `只有 ${ok} / ${n} 个站位够远`);
+  assert.ok(worst >= 0.4, `最近的离实心物件只有 ${worst.toFixed(2)} 米`);
 });

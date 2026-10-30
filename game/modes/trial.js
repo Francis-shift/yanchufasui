@@ -17,7 +17,7 @@ import {
   pyreSpots, recoverSec, regenStamina, ringReach, rockSpots, slamCount, spawnSpot, spikeDirs, spikeReach, spiralAngles, teleSec, waveReach,
 } from '../rules/trial.js';
 import { waveHalfW } from '../rules/fusion.js';
-import { CASTER_POS, CORE_POS, OBSTACLES, PLAZA_R } from '../world/layout.js';
+import { CASTER_POS, OBSTACLES, PLAZA_R } from '../world/layout.js';
 import { rand } from '../fx/common.js';
 import { distToSegment } from '../fx/walls.js';
 import { BOSS_CLIPS, bossPose } from '../actors/bossanim.js';
@@ -30,7 +30,7 @@ const HOME = CASTER_POS.clone();
 const ARENA_R = PLAZA_R - 0.9;
 const BODY = 0.35;
 /** 玩家走不进去的：场景障碍加阵眼那一圈石桩 */
-const BLOCK = [...OBSTACLES, { x: CORE_POS.x, z: CORE_POS.z, r: 2.9 }];
+const BLOCK = OBSTACLES;   // 阵眼在试炼里整组藏起来了（10-30），不再挡路
 const BOSS_AT = { x: 0, z: -3.5 };
 const BOSS_BODY = 1.0;
 const RED = 0xff3b2f;

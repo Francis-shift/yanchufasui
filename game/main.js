@@ -416,6 +416,7 @@ export function start(root, opts = {}) {
     hud.setSkills(S.talents.map((el) => ({ el, ...skillLabel(el) })),
       { cast: pressTalent, pen: openWrite, summon: pressSummon, dash: mode === 'trial' ? () => trial.dash() : undefined });
     hud.setCore(S.core, CORE_HP);
+    layout.core.visible = mode !== 'trial';   // 试炼用不上阵眼：阵盘、水晶、石桩整组藏起来（也不挡路，见 trial.js BLOCK）
     if (mode === 'trial') trial.prepare();   // 试炼：战前先写咒、试招，点"开战"boss 才出来
     else { trial.stop(); startWave(0); }
     setGauge(0);
@@ -479,6 +480,7 @@ export function start(root, opts = {}) {
     Object.assign(S, { mode: 'defense', phase: 'title', mana: MANA_MAX, core: CORE_HP, gauge: 0, wave: 0, queue: [], busy: false, restT: 0 });
     barrier.reset();
     hud.setCore(S.core, CORE_HP);
+    layout.core.visible = true;
     setGauge(0);
     showTitle();
     onResize();

@@ -23,7 +23,7 @@
  */
 import * as THREE from 'three';
 import { PALETTE, arcsTex, col, easeOutBack, easeOutCubic, perSec, rand, randDir, ringMat, scaleArr, sigilMat, sigilTex } from './common.js';
-import { CASTER_POS, GATE, SOLIDS } from '../world/layout.js';
+import { CASTER_POS, GATE, OBSTACLES, PLAZA_R, SOLIDS } from '../world/layout.js';
 import { decodeDRG2, fetchBytes } from '../world/drg2.js';
 import { SUMMONS } from '../rules/numbers.js';
 
@@ -31,9 +31,36 @@ const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const DRAGON_LEN = 20;          // 龙身长（米）
 const STATIONS = 160;           // 沿龙身取多少个截面算曲线位置，顶点在相邻截面之间插值
 const REST = 7;                 // 每个顶点的预计算量：截面号、插值比例、侧偏移、上偏移、法线在侧/上/前三个方向的分量
-/** 破土点：施法者左前方（广场上，地面以下看不见） */
-const EMERGE = new THREE.Vector3(CASTER_POS.x - 3, 0, CASTER_POS.z - 1.2);
 const v3 = (x, y, z) => new THREE.Vector3(x, y, z);
+/** 破土点在施法者哪一侧：先左前方，不行换右前方、左后方、右后方，再不行绕一圈 8 个方向、3.2 米和 4.5 米各试一遍 */
+const EMERGE_SIDES = [[-3, -1.2], [3, -1.2], [-3, 1.2], [3, 1.2],
+  ...[3.2, 4.5].flatMap((d) => Array.from({ length: 8 }, (_, k) => [Math.cos((k * Math.PI) / 4) * d, Math.sin((k * Math.PI) / 4) * d]))];
+/**
+ * 破土点（召龙的法阵亮在这里，冰龙、龙影从这里钻出来）：施法者旁边 3 米多，广场上、地面以下看不见。
+ * 召唤那一刻按施法者现在的位置算（10-30 本人：试炼里施法者跟着玩家走，原来算死在开局的位置，法阵亮在阵眼旁边）；
+ * 守关时施法者不动，就是原来那一点。离广场边 1.2 米内、压着香炉石灯的不要；冰龙从这里盘上去到绕场那一段
+ * 离牌坊、石兽、华表不够远（riseClearance）的换下一个，都不够挑最远的；一个都不行才在脚下。
+ * @param {{ x: number, z: number }} [c] 施法者站的地方
+ */
+export function emergePoint(c = CASTER_POS) {
+  const cands = EMERGE_SIDES.map(([dx, dz]) => v3(c.x + dx, 0, c.z + dz));
+  let best = null, bestD = -Infinity;
+  for (const E of cands) {
+    if (Math.hypot(E.x, E.z) > PLAZA_R - 1.2 || OBSTACLES.some((o) => Math.hypot(E.x - o.x, E.z - o.z) < o.r + 0.6)) continue;
+    const d = riseClearance(E);
+    if (d >= need(SWAY.ice)) return E;
+    if (d > bestD) { bestD = d; best = E; }
+  }
+  return best ?? v3(c.x, 0, c.z);
+}
+/**
+ * 冰龙从 E 破土、盘上去、飞到绕场这一段离实心物件最近多远（地面以下不算）。取到绕场第二点：
+ * 曲线在第一点前后的弯法要看下一点，只取到第一点量出来的和真飞的对不上
+ * @param {THREE.Vector3} E
+ */
+function riseClearance(E) {
+  return pathClearance(summonPoints(E, 'open', E).slice(0, 8), v3(0, -99, 0), -0.5);
+}
 const clamp = THREE.MathUtils.clamp;
 
 /**
@@ -113,10 +140,9 @@ export function divePoints(T, mode) {
  * 绕场高度按固定镜头算过：后排 10 米高会出画面顶边（10-19 截图），压到 7～7.6 米；
  * 后排原在 z ≈ -8.5，牌坊换成 13 米宽的模型后正好穿过横梁和屋顶（10-21 实机截图），挪到牌坊前面 z ≈ -4.2
  * （两点之间的曲线会往后鼓约 1 米）。
- * @param {THREE.Vector3} T 落点 @param {'open' | 'gate'} [mode]
+ * @param {THREE.Vector3} T 落点 @param {'open' | 'gate'} [mode] @param {THREE.Vector3} [E] 破土点
  */
-export function summonPoints(T, mode = diveMode(T)) {
-  const E = EMERGE;
+export function summonPoints(T, mode = diveMode(T), E = emergePoint()) {
   return [
     E.clone().add(v3(0, -4, 0)), E.clone().add(v3(0, -0.5, 0)),                  // 地下 → 破土
     E.clone().add(v3(0.9, 1.6, -0.7)), E.clone().add(v3(2.1, 3.1, 0.5)),         // 螺旋上升
@@ -155,9 +181,9 @@ const segs = (list, last) => (s, f) => {
   return last;
 };
 
-/** @param {THREE.Vector3} T @param {'open' | 'gate'} mode @returns {FlightPlan} */
-function icePlan(T, mode) {
-  return { pts: summonPoints(T, mode), hit: 11, move: 9, sigil: EMERGE, rise: true, slam: true, pour: 'in', sway: SWAY.ice,
+/** @param {THREE.Vector3} T @param {'open' | 'gate'} mode @param {THREE.Vector3} E 破土点 @returns {FlightPlan} */
+function icePlan(T, mode, E) {
+  return { pts: summonPoints(T, mode, E), hit: 11, move: 9, sigil: E, rise: true, slam: true, pour: 'in', sway: SWAY.ice,
     // 地下段快速通过；破土盘旋放慢让人看清；绕场；俯冲与灌入
     speed: (s, f) => (s < f.sEmerge ? 14 : s < f.sEmerge + 9 ? 8.5 : s < f.sHit - 8 ? 17 : 30),
     breath: (s, f) => s > f.sHit - 7 };
@@ -168,10 +194,10 @@ function icePlan(T, mode) {
  * 横扫这条线左右各拉开三四十米，从牌坊附近过时会撞柱子、擦屋顶：先试贴着目标那条线，
  * 不行就把线挪到牌坊前面（z = 牌坊 + 3.2，龙息斜着喷过去），再不行抬高一点（choose 挑）。
  * 目标在牌坊背后（diveMode 是 gate）扫不到，照冰龙的走法从门洞俯冲。
- * @param {THREE.Vector3} T @param {'open' | 'gate'} mode @param {number} [pick] @returns {FlightPlan}
+ * @param {THREE.Vector3} T @param {'open' | 'gate'} mode @param {number | undefined} pick @param {THREE.Vector3} E 破土点（只亮法阵） @returns {FlightPlan}
  */
-function firePlan(T, mode, pick) {
-  const base = { sigil: EMERGE, rise: false, slam: true, sway: SWAY.fire, down: 8 };
+function firePlan(T, mode, pick, E) {
+  const base = { sigil: E, rise: false, slam: true, sway: SWAY.fire, down: 8 };
   if (mode === 'gate') {
     return { ...base, pts: [v3(30, 22, -1), v3(15, 10.5, 0), v3(6.5, 6.6, 1), ...divePoints(T, 'gate').pts], hit: 5, move: 4, pour: 'in',
       speed: segs([[3, 24]], 30), breath: (s, f) => s > f.knots[3] && s < f.sHit + 2 };
@@ -191,16 +217,16 @@ function firePlan(T, mode, pick) {
 /**
  * 雷龙：从左边天上沿着圈的后沿斜插下来，在目标上空 7.2 米绕一圈多（半径 4 米），绕的时候劈五道雷（劈谁由 main 的 strike 钩子定），
  * 绕完冲回天上。圈心夹在广场中间一块：绕圈的后沿离牌坊屋顶 2 米，前沿不出画面。目标走动不挪圈，雷跟着锁定的敌人劈。
- * @param {THREE.Vector3} T @returns {FlightPlan}
+ * @param {THREE.Vector3} T @param {THREE.Vector3} E 破土点（只亮法阵） @returns {FlightPlan}
  */
-function thunderPlan(T) {
+function thunderPlan(T, E) {
   const C = v3(clamp(T.x, -6, 6), 7.2, clamp(T.z, -1.2, 3)), R = 4, n = 14, turns = 1.15;
   const ring = Array.from({ length: n + 1 }, (_, i) => {
     const a = -Math.PI / 2 + (i / n) * turns * Math.PI * 2;
     return v3(C.x + Math.cos(a) * R, C.y + Math.sin(i * 1.7) * 0.4, C.z + Math.sin(a) * R);
   });
   const m = SUMMONS.thunder.strikes;   // 劈几道：从圈上第 2 个点到倒数第 1 个点均匀排开
-  return { sigil: EMERGE, rise: false, slam: false, hit: 2 + n, move: Infinity, sway: SWAY.thunder,
+  return { sigil: E, rise: false, slam: false, hit: 2 + n, move: Infinity, sway: SWAY.thunder,
     pts: [v3(C.x - 20, 30, C.z - R), v3(C.x - 9, 13, C.z - R), ...ring, v3(C.x + 6, 11, C.z + 1), v3(C.x + 12, 26, C.z - 6), v3(C.x + 18, 46, C.z - 16)],
     strikes: Array.from({ length: m }, (_, j) => 4 + Math.round((j * (n - 3)) / Math.max(1, m - 1))), speed: segs([[2, 34], [2 + n, 11]], 26) };
 }
@@ -209,9 +235,9 @@ function thunderPlan(T) {
  * 风龙：从左边云海里升上来，绕着目标螺旋上升两圈（6.5 米升到 9.3 米，半径 3.4 收到 2.4），再直上云霄。
  * 龙一开始绕圈（hit），main 就在目标处起旋风。目标在牌坊前后（左右 12 米内）时圈挪到牌坊前面，免得缠到牌坊上；
  * 还会擦到什么就再往前挪（choose 挑）。
- * @param {THREE.Vector3} T @param {number} [pick] @returns {FlightPlan}
+ * @param {THREE.Vector3} T @param {number | undefined} pick @param {THREE.Vector3} E 破土点（只亮法阵） @returns {FlightPlan}
  */
-function windPlan(T, pick) {
+function windPlan(T, pick, E) {
   /** @param {number} dz 圈心再往前挪多少 @returns {FlightPlan} */
   const make = (dz) => {
     const H = T.clone();
@@ -222,7 +248,7 @@ function windPlan(T, pick) {
       const f = i / n, a = -Math.PI / 2 + f * turns * Math.PI * 2, r = r0 - f;
       return v3(H.x + Math.cos(a) * r, H.y + 6.5 + f * 2.8, H.z + Math.sin(a) * r);
     });
-    return { sigil: EMERGE, rise: false, slam: false, hit: 3, move: 0, sway: SWAY.wind,
+    return { sigil: E, rise: false, slam: false, hit: 3, move: 0, sway: SWAY.wind,
       pts: [v3(H.x - 40, H.y - 6, H.z - 14), v3(H.x - 24, H.y - 1, H.z - 6), v3(H.x - 12, H.y + 7.5, H.z - r0), ...helix,
         v3(H.x + 1.5, H.y + 13, H.z + 0.5), v3(H.x + 5, H.y + 28, H.z - 8), v3(H.x + 9, H.y + 46, H.z - 18)],
       speed: segs([[3, 26], [3 + n, 16]], 28) };
@@ -254,19 +280,19 @@ function earthPlan(T, pick) {
 
 /**
  * 召唤时这条龙怎么飞；目标走动时用召唤时定下的 mode、pick 重算。
- * @param {string} el @param {THREE.Vector3} T 落点（地面） @param {'open' | 'gate'} [mode] @param {number} [pick] @returns {FlightPlan}
+ * @param {string} el @param {THREE.Vector3} T 落点（地面） @param {'open' | 'gate'} [mode] @param {number} [pick]
+ * @param {THREE.Vector3} [E] 破土点（召唤那一刻定下，目标走动重算时沿用，法阵不跳） @returns {FlightPlan}
  */
-export function flightPlan(el, T, mode = diveMode(T), pick = undefined) {
-  if (el === 'fire') return firePlan(T, mode, pick);
-  if (el === 'thunder') return thunderPlan(T);
-  if (el === 'wind') return windPlan(T, pick);
+export function flightPlan(el, T, mode = diveMode(T), pick = undefined, E = emergePoint()) {
+  if (el === 'fire') return firePlan(T, mode, pick, E);
+  if (el === 'thunder') return thunderPlan(T, E);
+  if (el === 'wind') return windPlan(T, pick, E);
   if (el === 'earth') return earthPlan(T, pick);
-  return icePlan(T, mode);
+  return icePlan(T, mode, E);
 }
 
-/** 龙影：从法阵里升起、盘到半空 @param {string} el @returns {FlightPlan} */
-function ghostPlan(el) {
-  const E = EMERGE;
+/** 龙影：从法阵里升起、盘到半空 @param {string} el @param {THREE.Vector3} E 破土点 @returns {FlightPlan} */
+function ghostPlan(el, E) {
   const pts = [v3(0, -4, 0), v3(0, -0.5, 0), v3(0.9, 1.8, -0.7), v3(2, 3.6, 0.5), v3(0.5, 5.2, 1.6), v3(-1.8, 6.4, 0.6), v3(-2.4, 7.6, -1.5)]
     .map((d) => E.clone().add(d));
   return { pts, hit: pts.length - 1, move: Infinity, sigil: E, rise: true, slam: false, sway: SWAY[el] || SWAY.ice,
@@ -482,7 +508,7 @@ export class DragonFx {
   ghost(el, onDone) {
     this.preload(el);
     if (this.flights.length || !this.lookFor(el)) { onDone(); return; }
-    this.flights.push(new Flight(this, 'ghost', EMERGE.clone().add(new THREE.Vector3(0, 7, 0)), el, { impact: () => onDone() }));
+    this.flights.push(new Flight(this, 'ghost', emergePoint().add(new THREE.Vector3(0, 7, 0)), el, { impact: () => onDone() }));
   }
 
   /** @param {number} dt */
@@ -516,7 +542,8 @@ class Flight {
     this.pal = PALETTE[el] || PALETTE.ice;
     this.target = target.clone();
     this.mode = diveMode(this.target);
-    this.plan = kind === 'ghost' ? ghostPlan(el) : this.planFor(this.target);
+    this.E = emergePoint();                            // 破土点：召唤这一刻施法者在哪就在哪旁边，之后人走开也不挪
+    this.plan = kind === 'ghost' ? ghostPlan(el, this.E) : this.planFor(this.target);
     this.done = false;
     /** @type {THREE.Vector3[]} 龙身中线上隔一段取一个点（护身的 tick 用，每帧重写） */
     this.spinePts = Array.from({ length: 17 }, () => new THREE.Vector3());
@@ -559,7 +586,7 @@ class Flight {
 
   /** 目标在 T 时怎么飞：护身绕人转，别的照这条龙的走法（走法沿用召唤时定下的 mode、pick） @param {THREE.Vector3} T @returns {FlightPlan} */
   planFor(T) {
-    return this.guard ? guardPlan(T, this.el, this.guard) : flightPlan(this.el, T, this.mode, this.plan?.pick);
+    return this.guard ? guardPlan(T, this.el, this.guard) : flightPlan(this.el, T, this.mode, this.plan?.pick, this.E);
   }
 
   /** 曲线变了（刚建好、目标走动）：重算全长、每个控制点所在的弧长、砸中处的弧长 */
