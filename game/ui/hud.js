@@ -14,6 +14,12 @@ import { PATH_NAMES, TARGET_NAMES } from '../rules/intent.js';
  */
 export const BRUSH = '"YC Brush", "YC Brush Rest", "STXingkai", "STKaiti", "KaiTi", "Kaiti SC", serif';
 export const BRUSH_BIG = `"YC Brush Big", ${BRUSH}`;
+/** 纸面板上的正文：系统自带的楷体；手机上多半没有，退成宋体也还是书卷气 */
+const KAI = '"STKaiti", "KaiTi", "Kaiti SC", "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", serif';
+/** 天赋印章的颜色：国画颜料（朱砂、石青、石绿、赭石、藤黄），比战斗里的元素色沉一些，压在宣纸上不刺眼 */
+const SEAL_INK = /** @type {Record<string, string>} */ ({ fire: '#b8441c', ice: '#2a6aa8', wind: '#2a8065', earth: '#8a5a2a', thunder: '#b0861a' });
+/** 宣纸的纸纹：一层压得很淡的分形噪声 */
+const PAPER_GRAIN = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .32 0 0 0 0 .25 0 0 0 0 .16 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`;
 const FONT_CSS = `
 @font-face { font-family: "YC Brush"; src: url("/fonts/brush-core.woff") format("woff"); font-display: swap; }
 @font-face { font-family: "YC Brush Rest"; src: url("/fonts/brush-rest.woff") format("woff"); font-display: swap; }
@@ -94,26 +100,54 @@ const CSS = FONT_CSS + `
 .yc-big { position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%) scale(0.9); font-family: ${BRUSH_BIG};
   font-size: 64px; letter-spacing: 8px; opacity: 0; transition: opacity .2s, transform .3s; text-shadow: 0 2px 12px rgba(255,255,255,0.7); }
 .yc-big.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-/* 首页与结算页：放不下时整块面板可以上下滚（margin: auto 居中，比 place-items 安全：太高时顶上不会被裁掉） */
-.yc-overlay { position: absolute; inset: 0; display: flex; overflow-y: auto; padding: 8px 0; background: rgba(220, 232, 245, 0.55);
-  backdrop-filter: blur(3px); pointer-events: auto; }
+/* 宣纸面板（结算页、封面第二步共用，10-30 本人嫌原来的白卡"太 low"）：米黄的纸、细细的纸纹、古籍那样的内外两道边栏；
+   正文用楷体，数字用书法字 */
+.yc-paper { position: relative; color: #231f1a; font-family: ${KAI}; border-radius: 2px;
+  background: radial-gradient(ellipse at 12% 8%, rgba(255,255,255,0.55), transparent 55%),
+    radial-gradient(ellipse at 92% 100%, rgba(140,105,60,0.14), transparent 60%), ${PAPER_GRAIN}, #f1eadc;
+  box-shadow: 0 26px 60px -26px rgba(8,12,18,0.85), 0 0 0 1px rgba(60,45,30,0.18); }
+.yc-paper::before, .yc-paper::after { content: ""; position: absolute; pointer-events: none; border-radius: 1px; }
+.yc-paper::before { inset: 7px; border: 1.5px solid rgba(52,40,28,0.62); }
+.yc-paper::after { inset: 11px; border: 1px solid rgba(52,40,28,0.3); }
+.yc-paper > * { position: relative; z-index: 1; }
+/* 结算页：画面压暗（不糊），纸面板在正中；宽的时候分左右两栏：左边是这一局（标题、红印、几格数字），右边是再来一局（选天赋、按钮）。
+   放不下时整块可以上下滚（margin: auto 居中，比 place-items 安全：太高时顶上不会被裁掉） */
+.yc-overlay { position: absolute; inset: 0; display: flex; overflow-y: auto; padding: 10px 0; pointer-events: auto;
+  background: radial-gradient(ellipse at center, rgba(14,18,24,0.22), rgba(14,18,24,0.62)); }
 .yc-overlay[hidden] { display: none; }
-.yc-box { margin: auto; text-align: center; padding: 28px 32px; background: rgba(255,255,255,0.86); border-radius: 18px; border: 1px solid var(--line);
-  max-width: min(460px, calc(100% - 32px)); }
-.yc-box h1 { margin: 0 0 6px; font-family: ${BRUSH_BIG}; font-size: 48px; letter-spacing: 8px; }
-.yc-box p { margin: 6px 0; color: var(--muted); font-size: 14px; line-height: 1.7; }
+.yc-overlay .yc-box { margin: auto; width: min(780px, calc(100% - 28px)); padding: 26px 34px 22px; text-align: center;
+  display: grid; grid-template-columns: 1.05fr 1fr; column-gap: 34px; align-items: center; }
+.yc-res-l { min-width: 0; }
+.yc-res-r { min-width: 0; padding-left: 30px; border-left: 1px solid rgba(52,40,28,0.28); }
+.yc-res-head { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.yc-box h1 { margin: 0; font: normal 46px/1.15 ${BRUSH_BIG}; letter-spacing: 6px; color: #15110d; }
+.yc-res-head .yc-seal { margin: 0; font-size: 17px; transform: rotate(6deg); }
+.yc-box p { margin: 8px 0 0; color: #5a4d3e; font-size: 13.5px; line-height: 1.7; text-wrap: balance; }   /* 折行时两行一样长，不甩一两个字到下一行 */
 .yc-box p[hidden], .yc-best[hidden] { display: none; }
-.yc-box [data-lead] { color: #2b3a4a; font-size: 15px; }
-.yc-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0 8px; }
+.yc-box [data-lead] { color: #2a241d; font-size: 15px; }
+.yc-stats { display: grid; grid-template-columns: repeat(3, 1fr); margin: 14px 0 4px; }
 .yc-stats[hidden] { display: none; }
-.yc-stat { padding: 8px 4px 6px; border-radius: 12px; background: rgba(40,60,90,0.06); }
-.yc-stat b { display: block; font-size: 24px; line-height: 1.2; color: #16202b; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.yc-stat span { font-size: 12px; color: var(--muted); }
-.yc-best { display: inline-block; margin: 4px 0 2px; padding: 3px 12px; border-radius: 999px; font-size: 13px; color: #2b3a4a; background: rgba(40,60,90,0.07); }
-.yc-best.hot { color: #7a4a00; background: rgba(240,178,74,0.28); font-weight: 600; }
-.yc-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 12px; }
+.yc-stat { padding: 0 4px; }
+.yc-stat + .yc-stat { border-left: 1px solid rgba(52,40,28,0.25); }
+.yc-stat b { display: block; font: normal 18px/1.3 ${KAI}; color: #15110d; white-space: nowrap; }
+.yc-stat b em { font: normal 34px/1.1 ${BRUSH}; font-style: normal; margin: 0 1px; }   /* 数字用书法字，单位楷体 */
+.yc-stat span { font-size: 12px; color: #7a6a57; letter-spacing: 2px; }
+.yc-best { display: inline-block; margin: 10px 0 0; font-size: 13.5px; color: #5a4d3e; }
+.yc-best.hot { color: #9a2a1e; }
+.yc-best.hot::after { content: "新纪录"; margin-left: 8px; padding: 1px 5px; font: normal 13px/1.3 ${BRUSH}; color: #fbefe6; background: #b3261e;
+  border-radius: 2px; display: inline-block; transform: rotate(-4deg); }
+.yc-btns { display: flex; gap: 8px 22px; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 12px; }
 .yc-btns .yc-btn { margin-top: 0; }
 .yc-btns [hidden] { display: none; }
+.yc-overlay .yc-ink { align-items: center; min-width: 140px; padding: 8px 26px 10px; }
+.yc-overlay .yc-btns::after { content: ""; order: 0; flex-basis: 100%; height: 0; }   /* 主按钮独占一行，三个次按钮排在下面一行 */
+.yc-overlay .yc-ink:not(.yc-sub)::before { right: -16px; }
+.yc-overlay .yc-ink b { font-size: 26px; letter-spacing: 0.1em; }
+/* 次一等的按钮：墨字，底下只剩一道细笔画 */
+.yc-ink.yc-sub { color: #1f1a15; min-width: 0; padding: 4px 4px 8px; }
+.yc-ink.yc-sub::before { inset: auto -6px 0 -6px; height: 8px; opacity: 0.8; filter: none; }
+.yc-ink.yc-sub b { font-size: 19px; letter-spacing: 0.08em; text-shadow: none; }
+.yc-ink.yc-sub:hover::before, .yc-ink.yc-sub:focus-visible::before { height: 11px; opacity: 1; }
 /* 战报卡：压在结算页上面看大图，下面保存、分享、关闭 */
 .yc-report { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
   padding: 12px; background: rgba(20, 28, 38, 0.72); backdrop-filter: blur(3px); pointer-events: auto; }
@@ -130,20 +164,28 @@ const CSS = FONT_CSS + `
 .yc-report-btns { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
 .yc-report-btns .yc-btn { margin-top: 0; padding: 8px 18px; font-size: 14px; text-decoration: none; }
 .yc-box .yc-note { margin: 10px 0 0; font-size: 12px; line-height: 1.6; }
+.yc-write .yc-box { background: rgba(255,255,255,0.86); border-radius: 18px; border: 1px solid var(--line); }   /* 写咒对话框还是原来的样子 */
 .yc-btn { margin-top: 12px; font: inherit; font-size: 16px; padding: 10px 26px; border-radius: 12px; border: 1px solid #4a74d9;
   background: #4a74d9; color: #fff; cursor: pointer; }
 .yc-btn:focus-visible { outline: 3px solid rgba(74,116,217,0.4); outline-offset: 2px; }
 /* 天赋：选天赋（封面第二步与结算页上）、战斗中的按钮栏、给按钮写咒的对话框 */
-.yc-picker { margin: 14px 0 2px; }
-.yc-picker-title { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
-.yc-talents { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-.yc-tal { width: 52px; height: 52px; border-radius: 50%; border: 2px solid var(--c); background: rgba(255,255,255,0.92);
-  font-family: ${BRUSH}; font-size: 26px; line-height: 1; color: var(--c); cursor: pointer; position: relative; padding: 0; }
-.yc-tal.on { background: var(--c); color: #fff; box-shadow: 0 4px 14px -4px var(--c); }
-.yc-tal:disabled { opacity: 0.35; cursor: not-allowed; }
-.yc-tal small { position: absolute; left: 50%; bottom: -17px; transform: translateX(-50%); font: 11px/1 system-ui, sans-serif; color: var(--muted); white-space: nowrap; }
-.yc-syn { margin-top: 18px; font-size: 12px; color: var(--muted); min-height: 1.7em; line-height: 1.7; }
-.yc-syn b { color: #2b3a4a; font-weight: 600; }
+/* 选天赋：五方印——选上的是填满颜色的白文印（里面一圈纸色细线、略歪），没选的只描边、淡一点；颜色是国画颜料（朱砂、石青、石绿、赭石、藤黄） */
+.yc-picker { margin: 4px 0 2px; }
+.yc-picker-title { font-size: 13px; color: #7a6a57; margin-bottom: 10px; letter-spacing: 2px; }
+.yc-picker-title::before, .yc-picker-title::after { content: ""; display: inline-block; vertical-align: middle; width: 26px; height: 1px;
+  margin: 0 10px; background: rgba(52,40,28,0.4); }
+.yc-talents { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.yc-tal { width: 50px; height: 50px; border-radius: 3px; border: 2px solid var(--c); background: rgba(255,252,246,0.5);
+  font-family: ${BRUSH}; font-size: 28px; line-height: 1; color: var(--c); cursor: pointer; position: relative; padding: 0; opacity: 0.72;
+  transition: transform .12s, opacity .12s; -webkit-tap-highlight-color: transparent; }
+.yc-tal:hover { opacity: 1; }
+.yc-tal.on { opacity: 1; background: var(--c); color: #f7efe2; transform: rotate(-4deg);
+  box-shadow: inset 0 0 0 3px var(--c), inset 0 0 0 4.5px rgba(247,239,226,0.8), 0 3px 8px -3px rgba(40,20,10,0.45); }
+.yc-tal:nth-child(even).on { transform: rotate(3deg); }
+.yc-tal:disabled { opacity: 0.3; cursor: not-allowed; }
+.yc-tal small { position: absolute; left: 50%; bottom: -17px; transform: translateX(-50%); font: 11px/1 ${KAI}; color: #7a6a57; white-space: nowrap; }
+.yc-syn { margin-top: 14px; font-size: 12.5px; color: #7a6a57; min-height: 1.7em; line-height: 1.8; }
+.yc-syn b { font: normal 17px/1 ${BRUSH}; color: #8e2a1f; margin-left: 2px; }
 .yc-skills { display: flex; gap: 12px; justify-content: center; align-items: flex-end; margin-bottom: 4px; }
 .yc-skills[hidden] { display: none; }
 .yc-skill { position: relative; }
@@ -224,16 +266,22 @@ const CSS = FONT_CSS + `
 .yc-short .yc-meta { margin-top: 2px; gap: 2px 10px; }
 .yc-short .yc-big { font-size: 40px; }
 /* 横过来的手机（约 740×360）：面板放宽让字少折行、天赋钮缩小，整块不用滚就看得到按钮 */
-.yc-short .yc-overlay .yc-box { padding: 12px 22px 14px; max-width: min(640px, calc(100% - 32px)); }
-.yc-short .yc-overlay .yc-tal { width: 42px; height: 42px; font-size: 22px; }
-.yc-short .yc-overlay .yc-syn { margin-top: 12px; }
-.yc-short .yc-overlay h1 { font-size: 30px; line-height: 1.1; margin: 0; }
-.yc-short .yc-overlay p { margin: 2px 0; font-size: 13px; line-height: 1.5; }
-.yc-short .yc-overlay [data-tip] { font-size: 12px; }
-.yc-short .yc-stats { margin: 6px 0 4px; } .yc-short .yc-stat { padding: 3px 4px 2px; } .yc-short .yc-stat b { font-size: 17px; }
-.yc-short .yc-best { margin: 2px 0 0; }
-.yc-short .yc-picker { margin: 6px 0 0; } .yc-short .yc-overlay .yc-picker-title { display: none; }
-.yc-short .yc-btns { margin-top: 8px; } .yc-short .yc-btns .yc-btn { padding: 8px 22px; }
+.yc-short .yc-overlay .yc-box { padding: 16px 24px 14px; column-gap: 24px; }
+.yc-short .yc-res-r { padding-left: 22px; }
+.yc-short .yc-overlay .yc-tal { width: 40px; height: 40px; font-size: 23px; }
+.yc-short .yc-overlay .yc-syn { margin-top: 8px; font-size: 11.5px; line-height: 1.6; } .yc-short .yc-syn b { font-size: 15px; }
+.yc-short .yc-overlay h1 { font-size: 32px; }
+.yc-short .yc-overlay p { margin: 4px 0 0; font-size: 12.5px; line-height: 1.55; }
+.yc-short .yc-overlay [data-lead] { font-size: 13.5px; }
+.yc-short .yc-stats { margin: 8px 0 2px; } .yc-short .yc-stat b em { font-size: 26px; } .yc-short .yc-stat b { font-size: 15px; }
+.yc-short .yc-best { margin: 6px 0 0; font-size: 12.5px; }
+.yc-short .yc-picker { margin: 0; } .yc-short .yc-overlay .yc-picker-title { display: none; }
+.yc-short .yc-btns { margin-top: 6px; } .yc-short .yc-overlay .yc-ink:not(.yc-sub) b { font-size: 22px; }
+.yc-short .yc-overlay .yc-ink:not(.yc-sub) { padding: 6px 22px 8px; } .yc-short .yc-ink.yc-sub b { font-size: 17px; }
+/* 竖屏：结算页叠成一栏 */
+.yc-narrow .yc-overlay .yc-box { grid-template-columns: 1fr; row-gap: 14px; padding: 22px 20px 18px; }
+.yc-narrow .yc-res-r { padding: 14px 0 0; border-left: 0; border-top: 1px solid rgba(52,40,28,0.28); }
+.yc-narrow .yc-box h1 { font-size: 38px; }
 /* 试炼 · 手机（setPad）：左半边是摇杆（按哪儿就从哪儿起），右下角一簇按钮——大的"闪"在角上，天赋沿弧排开，召唤在最外 */
 .yc-stick { position: absolute; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; display: none;
   border: 2px solid rgba(255,255,255,0.75); background: rgba(30,50,80,0.16); pointer-events: none; }
@@ -284,7 +332,8 @@ const CSS = FONT_CSS + `
 .yc-narrow .yc-pick-row { gap: 8px; } .yc-narrow .yc-pick-name { font-size: 30px; }
 /* 首页封面（showCover，10-30）：不糊画面、不压白卡，山门就是背景（镜头慢慢摆、法术自己放）；左边竖排大标题加红印，
    下面两个水墨按钮；点了按钮出第二步纸面板：这个模式的说明、选天赋（结算页上那块挪过来）、开始 */
-.yc-on-cover .yc-top, .yc-on-cover .yc-bottom, .yc-on-cover .yc-boss, .yc-on-cover .yc-card, .yc-on-cover .yc-big { visibility: hidden; }
+.yc-on-cover .yc-top, .yc-on-cover .yc-bottom, .yc-on-cover .yc-boss, .yc-on-cover .yc-card, .yc-on-cover .yc-big,
+.yc-on-result .yc-top, .yc-on-result .yc-bottom, .yc-on-result .yc-boss, .yc-on-result .yc-card, .yc-on-result .yc-big { visibility: hidden; }
 .yc-cover { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .yc-cover[hidden] { display: none; }
 .yc-cover::before { content: ""; position: absolute; inset: 0;
@@ -319,15 +368,14 @@ const CSS = FONT_CSS + `
 .yc-ink:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 .yc-cover.step2 .yc-cover-modes, .yc-cover.step2 .yc-cover-best { display: none; }
 .yc-cover-step { position: absolute; right: clamp(16px, 6vw, 110px); top: 50%; transform: translateY(-50%); width: min(400px, calc(100% - 32px));
-  max-height: calc(100% - 24px); overflow-y: auto; padding: 18px 22px 16px; text-align: center; pointer-events: auto;
-  background: rgba(247,243,234,0.94); border-radius: 4px; box-shadow: 0 20px 50px -22px rgba(16,22,30,0.7), inset 0 0 0 1px rgba(70,50,30,0.14); }
+  max-height: calc(100% - 24px); overflow-y: auto; padding: 24px 28px 18px; text-align: center; pointer-events: auto; }
 .yc-cover-step[hidden] { display: none; }
-.yc-cover-step h2 { margin: 0; font: normal 38px/1.15 ${BRUSH}; letter-spacing: 0.3em; text-indent: 0.3em; color: #16202b; }
-.yc-cover-step p { margin: 6px 0 0; font-size: 13.5px; line-height: 1.7; color: #3b4856; }
+.yc-cover-step h2 { margin: 0; font: normal 40px/1.15 ${BRUSH_BIG}; letter-spacing: 0.3em; text-indent: 0.3em; color: #15110d; }
+.yc-cover-step p { margin: 6px 0 12px; font-size: 14px; line-height: 1.7; color: #4a3f33; }
 .yc-cover-step .yc-btns { align-items: center; gap: 16px; margin-top: 14px; }
 .yc-cover-step .yc-ink { min-width: 132px; align-items: center; padding: 8px 28px 10px; }
 .yc-cover-step .yc-ink::before { right: -14px; }   /* 后面紧跟着"返回"，飞白别伸过去 */
-.yc-cback { font: inherit; font-size: 14px; color: #5d6b7a; background: none; border: 0; cursor: pointer; padding: 6px 8px;
+.yc-cback { font: inherit; font-size: 14px; color: #5a4d3e; background: none; border: 0; cursor: pointer; padding: 6px 8px;
   text-decoration: underline; text-underline-offset: 4px; }
 /* 手机竖屏：标题在左上，按钮并排压在最下面，中间留给画面；第二步是底部的纸面板 */
 .yc-narrow .yc-cover::before { background: linear-gradient(180deg, rgba(246,241,231,0.55), rgba(246,241,231,0.18) 38%, rgba(246,241,231,0) 55%,
@@ -347,7 +395,7 @@ const CSS = FONT_CSS + `
 .yc-short .yc-cover-title { font-size: clamp(40px, 12vh, 64px); }
 .yc-short .yc-cover-tag { font-size: 13px; }
 .yc-short .yc-ink b { font-size: 26px; } .yc-short .yc-cover-modes .yc-ink { padding: 8px 24px 10px 20px; }
-.yc-short .yc-cover-step { width: min(440px, 58%); padding: 10px 16px 10px; }
+.yc-short .yc-cover-step { width: min(440px, 58%); padding: 16px 22px 12px; }
 .yc-short .yc-cover-step h2 { font-size: 26px; } .yc-short .yc-cover-step p { font-size: 12px; line-height: 1.5; margin-top: 2px; }
 .yc-short .yc-cover-step .yc-picker-title { display: none; } .yc-short .yc-cover-step .yc-picker { margin: 8px 0 0; }
 .yc-short .yc-cover-step .yc-tal { width: 42px; height: 42px; font-size: 22px; } .yc-short .yc-cover-step .yc-syn { margin-top: 12px; }
@@ -454,19 +502,20 @@ export class Hud {
     this.card = el(`<div class="yc-card" role="status" aria-live="polite"></div>`);
     this.big = el(`<div class="yc-big"></div>`);
     // 首页与结算页是同一块面板（内容由 showOverlay 填）
-    this.overlay = el(`<div class="yc-overlay"><div class="yc-box"><h1>言出法随</h1>
-      <p data-lead></p><div class="yc-stats" hidden></div><p data-tip hidden></p><div class="yc-best" hidden></div>
-      <div class="yc-picker"><div class="yc-picker-title">选天赋（最多 3 个）</div><div class="yc-talents"></div><div class="yc-syn"></div></div>
-      <div class="yc-btns"><button class="yc-btn" data-trial>开始试炼</button><button class="yc-btn ghost" data-start>守关模式</button>
-        <button class="yc-btn ghost" data-report style="order:2" hidden>看战报</button><button class="yc-btn ghost" data-home style="order:3">回首页</button></div>
-      <p class="yc-note" data-note hidden></p></div></div>`);
+    this.overlay = el(`<div class="yc-overlay"><div class="yc-box yc-paper">
+      <div class="yc-res-l"><div class="yc-res-head"><h1>言出法随</h1><i class="yc-seal" data-seal></i></div>
+        <p data-lead></p><div class="yc-stats" hidden></div><p data-tip hidden></p><div class="yc-best" hidden></div></div>
+      <div class="yc-res-r"><div class="yc-picker"><div class="yc-picker-title">选天赋（最多 3 个）</div><div class="yc-talents"></div><div class="yc-syn"></div></div>
+        <div class="yc-btns"><button class="yc-ink" data-trial><b>开始试炼</b></button><button class="yc-ink yc-sub" data-start><b>守关模式</b></button>
+          <button class="yc-ink yc-sub" data-report style="order:2" hidden><b>看战报</b></button><button class="yc-ink yc-sub" data-home style="order:3"><b>回首页</b></button></div>
+        <p class="yc-note" data-note hidden></p></div></div></div>`);
     // 首页封面（showCover）：第二步选天赋用的就是上面结算页那块（picker 在两处之间挪）
     this.cover = el(`<div class="yc-cover" hidden><div class="yc-cover-main">
       <div class="yc-cover-head"><div class="yc-cover-tcol"><h1 class="yc-cover-title">言出法随</h1><i class="yc-seal">敕令</i></div>
         <p class="yc-cover-tag">打一句中文，法术就是什么<br>说得越有画面感，气势越足</p></div>
       <div class="yc-cover-best" hidden></div>
       <div class="yc-cover-modes"><button class="yc-ink" data-mode="trial"></button><button class="yc-ink" data-mode="defense"></button></div></div>
-      <div class="yc-cover-step" hidden><h2></h2><p></p>
+      <div class="yc-cover-step yc-paper" hidden><h2></h2><p></p>
         <div class="yc-btns"><button class="yc-ink" data-cgo><b>开始</b></button><button class="yc-cback" data-back>返回</button></div></div></div>`);
     this.picker = /** @type {HTMLElement} */ (this.overlay.querySelector('.yc-picker'));
     /** 封面上点了哪个模式（第二步"开始"就开这个） @type {'trial' | 'defense'} */
@@ -559,7 +608,7 @@ export class Hud {
     const box = this.q('.yc-talents');
     box.innerHTML = '';
     for (const t of list) {
-      const b = el(`<button class="yc-tal${t.on ? ' on' : ''}" style="--c:${elColor(t.el)}" aria-pressed="${t.on}"${t.open ? '' : ' disabled'}>${esc(t.name)}${t.open ? '' : '<small>即将领悟</small>'}</button>`);
+      const b = el(`<button class="yc-tal${t.on ? ' on' : ''}" style="--c:${SEAL_INK[t.el] ?? elColor(t.el)}" aria-pressed="${t.on}"${t.open ? '' : ' disabled'}>${esc(t.name)}${t.open ? '' : '<small>即将领悟</small>'}</button>`);
       b.addEventListener('click', () => onToggle(t.el));
       box.append(b);
     }
@@ -912,22 +961,25 @@ export class Hud {
       n.textContent = text ?? ''; n.hidden = !text;
     };
     /** @type {HTMLElement} */ (box.querySelector('h1')).textContent = title;
+    /** @type {HTMLElement} */ (box.querySelector('[data-seal]')).textContent = o.main === 'trial' ? '试炼' : '守关';
     set('[data-lead]', o.lead); set('[data-tip]', o.tip); set('[data-note]', o.note);
-    set('.yc-best', o.best ? `本机最佳　${o.best}${o.fresh ? '　· 新纪录' : ''}` : '');
+    set('.yc-best', o.best ? `本机最佳　${o.best}` : '');   // 新纪录是 .hot 加的红印
     this.q('.yc-best').classList.toggle('hot', !!o.fresh);
     const stats = this.q('.yc-stats');
-    stats.innerHTML = (o.stats ?? []).map((s) => `<div class="yc-stat"><b>${esc(s.v)}</b><span>${esc(s.k)}</span></div>`).join('');
+    stats.innerHTML = (o.stats ?? []).map((s) =>
+      `<div class="yc-stat"><b>${esc(s.v).replace(/\d+(:\d+)?/g, '<em>$&</em>')}</b><span>${esc(s.k)}</span></div>`).join('');
     stats.hidden = !o.stats?.length;
     const trialFirst = o.main === 'trial';
     for (const [sel, text, first] of /** @type {const} */ ([['[data-trial]', o.trial, trialFirst], ['[data-start]', o.defense, !trialFirst]])) {
       const b = /** @type {HTMLElement} */ (box.querySelector(sel));
-      b.textContent = text; b.classList.toggle('ghost', !first); b.style.order = first ? '0' : '1';
+      /** @type {HTMLElement} */ (b.querySelector('b')).textContent = text; b.classList.toggle('yc-sub', !first); b.style.order = first ? '0' : '1';
     }
     /** @type {HTMLElement} */ (box.querySelector('.yc-btns')).before(this.picker);   // 选天赋可能还在封面上
     this.hideCover();
     box.hidden = false;
+    this.root.classList.add('yc-on-result');   // 结算页开着时战斗界面藏起来（和封面一样只是看不见）
   }
-  hideOverlay() { this.overlay.hidden = true; this.closeReport(); this.hideCover(); }
+  hideOverlay() { this.overlay.hidden = true; this.root.classList.remove('yc-on-result'); this.closeReport(); this.hideCover(); }
 
   /**
    * 首页封面：竖排大标题、红印、两个水墨按钮（模式名 + 一行小字）、本机最佳。点模式按钮进第二步：模式名、说明、选天赋、开始 / 返回。
@@ -945,6 +997,7 @@ export class Hud {
     const best = /** @type {HTMLElement} */ (this.cover.querySelector('.yc-cover-best'));
     best.textContent = o.best; best.hidden = !o.best;
     this.overlay.hidden = true;
+    this.root.classList.remove('yc-on-result');
     this.closeReport();
     this.cover.hidden = false;
     this.root.classList.add('yc-on-cover');

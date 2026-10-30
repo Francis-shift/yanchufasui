@@ -1836,7 +1836,7 @@ export function start(root, opts = {}) {
 
   /**
    * 召龙的肩后镜头：一召就推到人的肩后、朝龙要砸的地方，龙开飞（召唤法阵亮完）后停 SHOT.sec 秒或到龙砸中，再拉回俯视。
-   * 模型还在下载时法阵先亮着等（最多 3 秒），从召的那一刻算起最多停 SHOT.sec + 1 秒——boss 照常出招，不能一直看龙。
+   * 模型还在下载时法阵先亮着等（最多 3 秒），从召的那一刻算起最多停 SHOT.wait 秒——boss 照常出招，不能一直看龙。
    * 走位方向照旧按俯视（steer 不跟着转）
    * @param {number} rdt
    */
@@ -1846,7 +1846,7 @@ export function start(root, opts = {}) {
       const f = s.f;
       s.wait += rdt;
       if (f.started) s.t += rdt;
-      if (!dragon.flights.includes(f) || f.impacted || s.t > SHOT.sec || s.wait > SHOT.sec + 1 || S.phase !== 'playing') tcam.shot = null;
+      if (!dragon.flights.includes(f) || f.impacted || s.t > SHOT.sec || s.wait > SHOT.wait || S.phase !== 'playing') tcam.shot = null;
       else {
         const sp = shoulderPose(trial.p, f.target, f.emerged ? f.headPos : null, steer.dir, camera.aspect);
         const k = tcam.w > 0 ? 1 - Math.exp(-rdt * 5) : 1;   // 刚开始直接放到位（这时还没混进画面）
