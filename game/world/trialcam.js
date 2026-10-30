@@ -134,6 +134,84 @@ export function shoulderPose(p, target, head, fwd, aspect = 16 / 9) {
 }
 
 /**
+ * 三档视角（设计文档第 4 节"10-29 定"）：俯视跟随（默认）/ 肩后 / 第一人称，一个按钮轮着切（电脑上按 V）。
+ * 后两档用同一套锁定："往前"朝着目标，镜头跟着往前转，转速有上限（boss 冲撞擦身而过时不甩半圈）；
+ * 摇杆上 = 朝目标走、左右 = 绕着它转。
+ */
+export const VIEWS = /** @type {const} */ (['follow', 'shoulder', 'first']);
+/** @typedef {typeof VIEWS[number]} View */
+/** 按钮上写的名字 @type {Record<View, string>} */
+export const VIEW_NAMES = { follow: '俯视', shoulder: '肩后', first: '第一人称' };
+/** 下一档 @param {View} v @returns {View} */
+export function nextView(v) { return VIEWS[(VIEWS.indexOf(v) + 1) % VIEWS.length]; }
+/** 存在浏览器里的那一档（存的东西不认识就回到俯视） @param {unknown} s @returns {View} */
+export function readView(s) { return VIEWS.includes(/** @type {View} */ (s)) ? /** @type {View} */ (s) : 'follow'; }
+
+export const LOCK = {
+  /** "往前"每秒最多转几弧度 */
+  turn: 2.4,
+  /**
+   * 肩后：在人身后几米、往右偏几米（横屏；画面窄按宽高比少偏）、多高；看人前面几米、多高的地方——
+   * 往前下方看，人落在画面左下，身边和前面地上的预警看得见
+   */
+  back: 4.6, side: 1.2, up: 3.4, ahead: 3, lookY: 0,
+  /** 第一人称：眼睛多高、往前探多少（别看见自己的头），看前面几米、多高（略往下，看得到前面的地） */
+  eye: 1.62, nose: 0.2, far: 10, farY: 0.7,
+  /** 第一人称时法术从哪出手：人前面几米、往右几米、多高（在镜头前面，不从镜头里钻出来） */
+  hand: { ahead: 0.9, side: 0.25, y: 1.3 },
+};
+
+/**
+ * 锁谁：有 boss 锁 boss；小怪潮里锁最近的一只；场上没有敌人给 null（保持原来的朝向）
+ * @param {{ x: number, z: number }} p 人
+ * @param {{ x: number, z: number } | null} boss
+ * @param {{ x: number, z: number }[]} others 场上别的敌人
+ * @returns {{ x: number, z: number } | null}
+ */
+export function lockTarget(p, boss, others) {
+  if (boss) return boss;
+  let best = null, bd = Infinity;
+  for (const e of others) {
+    const d = (e.x - p.x) ** 2 + (e.z - p.z) ** 2;
+    if (d < bd) { bd = d; best = e; }
+  }
+  return best;
+}
+
+/**
+ * "往前"朝目标转一步：水平、长度 1，每秒最多转 rate 弧度，走近路（不绕远的那一边）；没有目标、目标就在脚下时不转
+ * @param {THREE.Vector3} dir 现在朝哪（会被改掉） @param {{ x: number, z: number }} p
+ * @param {{ x: number, z: number } | null} target @param {number} dt @param {number} [rate]
+ */
+export function turnToward(dir, p, target, dt, rate = LOCK.turn) {
+  const cur = Math.atan2(dir.x, dir.z);
+  let a = cur;
+  if (target && Math.hypot(target.x - p.x, target.z - p.z) > 0.5) {
+    let d = Math.atan2(target.x - p.x, target.z - p.z) - cur;
+    d = Math.atan2(Math.sin(d), Math.cos(d));   // 收到 ±π：走近路
+    a = cur + THREE.MathUtils.clamp(d, -rate * dt, rate * dt);
+  }
+  return dir.set(Math.sin(a), 0, Math.cos(a));
+}
+
+/**
+ * 肩后 / 第一人称的机位和看的点
+ * @param {'shoulder' | 'first'} view @param {{ x: number, z: number }} p 人 @param {THREE.Vector3} dir "往前"（水平、长度 1）
+ * @param {number} [aspect] 画面宽高比
+ * @returns {{ pos: THREE.Vector3, look: THREE.Vector3 }}
+ */
+export function lockPose(view, p, dir, aspect = 16 / 9) {
+  const L = LOCK, rx = -dir.z, rz = dir.x;   // 右手方向
+  if (view === 'first') {
+    return { pos: new THREE.Vector3(p.x + dir.x * L.nose, L.eye, p.z + dir.z * L.nose),
+      look: new THREE.Vector3(p.x + dir.x * L.far, L.farY, p.z + dir.z * L.far) };
+  }
+  const side = L.side * THREE.MathUtils.clamp(aspect / 1.7, 0.25, 1);
+  return { pos: new THREE.Vector3(p.x - dir.x * L.back + rx * side, L.up, p.z - dir.z * L.back + rz * side),
+    look: new THREE.Vector3(p.x + dir.x * L.ahead + rx * side, L.lookY, p.z + dir.z * L.ahead + rz * side) };
+}
+
+/**
  * 一个点投到画面外时，边缘箭头放在哪、朝哪（画面坐标 -1～1，y 朝上）；在画面里就给 null
  * @param {THREE.Vector3} at 世界坐标 @param {THREE.Camera} camera @param {number} [edge] 箭头离边多远（投影坐标）
  * @returns {{ x: number, y: number, angle: number } | null} angle：箭头朝向（弧度，0 朝右、逆时针为正）

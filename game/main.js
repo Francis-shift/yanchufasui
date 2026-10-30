@@ -47,7 +47,8 @@ import { buildEnvironment } from './world/environment.js';
 import { invasionTarget, stepInvasion } from './world/invasion.js';
 import { buildBarrier } from './world/barrier.js';
 import { fitFrame } from './world/framing.js';
-import { FOLLOW, SHOT, followPose, kickAt, offscreenArrow, shoulderPose, viewDir } from './world/trialcam.js';
+import { FOLLOW, LOCK, SHOT, VIEW_NAMES, followPose, kickAt, lockPose, lockTarget, nextView, offscreenArrow, readView, shoulderPose, turnToward,
+  viewDir } from './world/trialcam.js';
 import { loadProps } from './world/props.js';
 import { buildLayout, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS, OBSTACLES } from './world/layout.js';
 import { Hud, preloadFonts } from './ui/hud.js';
@@ -228,6 +229,24 @@ export function start(root, opts = {}) {
     /** @type {{ f: any, t: number, wait: number } | null} */ shot: null, w: 0, pos: new THREE.Vector3(), at: new THREE.Vector3(), aimed: false };
   /** 试炼里"往前"是哪个方向（trial.update 按它算摇杆和按键）：跟俯视跟随的朝向走，演肩后镜头时不跟着转 */
   const steer = { dir: viewDir(FOLLOW.pitch, FOLLOW.yaw).negate(), getWorldDirection: (/** @type {THREE.Vector3} */ v) => v.copy(steer.dir) };
+  /**
+   * 试炼的视角（三档，world/trialcam.js VIEWS）：存在这台设备的浏览器里，下次打开还是这一档。
+   * dir：肩后、第一人称锁着目标转的"往前"；fromPos / fromLook、sw：切档时从哪个机位滑过来、滑到几成；hid：上一帧藏没藏施法者；
+   * low：平视了几成（俯视 0、肩后 / 第一人称 1，切档时慢慢变），太阳和台面反光按它压暗
+   */
+  const VIEW_KEY = 'yc-view';
+  const view = { mode: (() => { try { return readView(localStorage.getItem(VIEW_KEY)); } catch { return readView(null); } })(),
+    dir: viewDir(FOLLOW.pitch, FOLLOW.yaw).negate().setY(0).normalize(), fromPos: new THREE.Vector3(), fromLook: new THREE.Vector3(), sw: 1, hid: false,
+    low: 0 };
+  function cycleView() {
+    view.mode = nextView(view.mode);
+    try { localStorage.setItem(VIEW_KEY, view.mode); } catch { /* 存不进去就只记在这次打开里 */ }
+    view.fromPos.copy(camPos); view.fromLook.copy(camLook); view.sw = 0;
+    view.dir.copy(steer.dir).setY(0).normalize();   // 从现在的"往前"开始转向目标，不一下子扭过去
+    hud.setView(VIEW_NAMES[view.mode], true);
+    sound.play('tick');
+  }
+  hud.onView = cycleView;
   function layoutCamera() {
     const w = root.clientWidth || window.innerWidth, h = root.clientHeight || window.innerHeight;
     camera.aspect = w / h;
@@ -705,7 +724,8 @@ export function start(root, opts = {}) {
     }
     if (document.activeElement instanceof HTMLInputElement) return;   // 在打字（主输入框或写咒对话框）
     if (S.mode === 'trial' && S.phase === 'playing' && hud.write.hidden) {
-      // 试炼：走位、闪避；战前按回车开战。不打字，所以不抢焦点
+      // 试炼：走位、闪避；V 切视角；战前按回车开战。不打字，所以不抢焦点
+      if (e.code === 'KeyV' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); cycleView(); return; }
       if (trial.key(e.code, true)) { e.preventDefault(); return; }
       if (e.key === 'Enter' && !trial.fighting) { e.preventDefault(); trial.engage(); return; }
     }
@@ -1811,11 +1831,52 @@ export function start(root, opts = {}) {
   const UP = new THREE.Vector3(0, 1, 0), _side = new THREE.Vector3();
 
   /**
-   * 试炼的跟随镜头（设计文档第 4 节"10-29 定：试炼的镜头与三档视角"）：看的点跟得快、离多远拉远快推近慢
-   * （boss 冲过来时先把它框进来，走近了再慢慢推回去）；开口时推近一点；完美闪避推近一下；召龙时推到肩后（ultShot）
+   * 试炼的镜头（设计文档第 4 节"10-29 定：试炼的镜头与三档视角"）：按现在是哪一档算机位；刚切档时从切的那一刻的机位滑过去
    * @param {number} rdt 现实时间（慢放、顿帧时镜头照常跟）
    */
   function trialCamera(rdt) {
+    if (view.mode === 'follow') followCamera(rdt); else lockCamera(rdt);
+    if (view.sw < 1) {
+      view.sw = Math.min(1, view.sw + rdt / 0.45);
+      const k = THREE.MathUtils.smoothstep(view.sw, 0, 1);
+      _v.copy(camPos); camPos.copy(view.fromPos).lerp(_v, k);
+      _v.copy(camLook); camLook.copy(view.fromLook).lerp(_v, k);
+    }
+  }
+
+  /**
+   * 肩后 / 第一人称：锁着目标转（有 boss 锁 boss，小怪潮锁最近的一只，没敌人保持朝向；转速有上限），"往前"跟着它；
+   * 开口时肩后推近一点。大招镜头、完美闪避推近只在俯视里演（肩后本来就近，第一人称推过去会看见自己）
+   * @param {number} rdt
+   */
+  function lockCamera(rdt) {
+    const b = trial.boss;
+    const t = lockTarget(trial.p, b && b.pos, b ? [] : enemies.list.filter((e) => e.mode !== 'fall').map((e) => e.pos));
+    if (!tcam.on) {   // 开局、换了窗口大小：直接朝着目标
+      tcam.on = true; tcam.shot = null; tcam.w = 0; tcam.kickT = Infinity; tcam.perfects = trial.perfects;
+      turnToward(view.dir, trial.p, t, 1e3);
+    }
+    tcam.shot = null; tcam.perfects = trial.perfects;   // 切回俯视时不补演
+    turnToward(view.dir, trial.p, t, rdt);
+    steer.dir.copy(view.dir);
+    const pose = lockPose(view.mode === 'first' ? 'first' : 'shoulder', trial.p, view.dir, camera.aspect);
+    camPos.copy(pose.pos); camLook.copy(pose.look);
+    if (view.mode === 'shoulder') camPos.lerp(camLook, 0.18 * cam.focus);
+    env.aim(_v.subVectors(camLook, camPos).normalize());   // 雾取镜头朝向那段天边的颜色
+  }
+
+  /** 第一人称：法术从镜头前面、偏右一点出手（不从镜头里钻出来）；trial.sync 每帧放回胸口，这里接着挪 */
+  function firstHand() {
+    const h = LOCK.hand, d = view.dir;
+    for (const o of [origin, fx.origin]) o.set(trial.p.x + d.x * h.ahead - d.z * h.side, h.y, trial.p.z + d.z * h.ahead + d.x * h.side);
+  }
+
+  /**
+   * 俯视跟随：看的点跟得快、离多远拉远快推近慢（boss 冲过来时先把它框进来，走近了再慢慢推回去）；
+   * 开口时推近一点；完美闪避推近一下；召龙时推到肩后（ultShot）
+   * @param {number} rdt
+   */
+  function followCamera(rdt) {
     const b = trial.boss;
     const safe = { ...FOLLOW.safe, top: Math.min(FOLLOW.safe.top, hud.safeTop()) };   // 矮屏幕上 boss 血条占得多，量着它来
     const pose = followPose(camera, trial.p, b ? { x: b.pos.x, z: b.pos.z, h: BOSS_H } : null, { safe });
@@ -1897,7 +1958,10 @@ export function start(root, opts = {}) {
     for (let i = timers.length - 1; i >= 0; i--) { timers[i].t -= dt; if (timers[i].t <= 0) { const t = timers.splice(i, 1)[0]; t.fn(); } }
     if (S.phase === 'playing' || S.phase === 'rest') {
       S.mana = regenMana(S.mana, pdt, S.mods.manaRegen);
-      if (S.mode === 'trial') trial.update(dt, steer, pdt);   // 试炼：走位、小怪潮与 boss 轮换（三选一时停住）
+      if (S.mode === 'trial') {   // 试炼：走位、小怪潮与 boss 轮换（三选一时停住）
+        trial.update(dt, steer, pdt);
+        if (view.mode === 'first' && trial.on) firstHand();
+      }
       else updateWave(dt);
     }
     fx.sound = S.phase === 'title' ? null : sound;   // 首页的法术不出声
@@ -1962,6 +2026,17 @@ export function start(root, opts = {}) {
       camPos.copy(cam.base).lerp(cam.near, cam.focus);
       camLook.copy(cam.look).lerp(cam.nearLook, cam.focus);
     }
+    // 第一人称：藏起施法者的身体（挨打时一闪一闪也不闪出来），切走、离开试炼时放回来；视角按钮只在试炼里出
+    const inTrial = S.mode === 'trial' && trial.on;
+    const hide = inTrial && view.mode === 'first' && view.sw > 0.5;
+    if (hide) layout.caster.visible = false;
+    else if (view.hid) layout.caster.visible = true;
+    view.hid = hide;
+    // 肩后、第一人称平着看：太阳本体会进画（压到两成），台面也会把太阳镜面反射过来，泛光晕成半屏白、盖住敌人（压到 5%，留一小点夕阳反光）
+    view.low += ((inTrial && view.mode !== 'follow' ? 1 : 0) - view.low) * Math.min(1, realDt * 4);
+    env.setGlare(1 - 0.8 * view.low);
+    layout.plaza.setGlint(1 - 0.95 * view.low);
+    hud.setView(VIEW_NAMES[view.mode], inTrial && S.phase === 'playing');
     shakeOff.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(fx.shake * 0.5);
     camera.position.copy(camPos).add(shakeOff);
     camera.lookAt(camLook);

@@ -109,19 +109,21 @@ export function buildEnvironment(scene, renderer) {
   scene.background = fogBase.clone();
   scene.fog = new THREE.FogExp2(fogBase.getHex(), 0.005);
 
+  /** 太阳本体和紧贴它的光晕亮几成（setGlare）：试炼平视的两档视角太阳会进画，泛光把它晕成半屏白雾，压暗 */
+  const glare = { value: 1 };
   // 天空：天边按方向从金橙过渡到淡紫灰、往上变成偏暗的蓝；太阳一圈大光晕（太阳本身在画面右上角外面，光晕进画）。
   // 入侵：来路那一侧盖上翻滚的紫黑雾，边缘一圈紫光，闪电时照亮云团；剩下的天越往后越偏红
   const skyMat = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { ...U, uTop: { value: ZENITH } },
+    uniforms: { ...U, uTop: { value: ZENITH }, uGlare: glare },
     vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position);
       gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
-    fragmentShader: `varying vec3 vDir; uniform vec3 uTop;
+    fragmentShader: `varying vec3 vDir; uniform vec3 uTop; uniform float uGlare;
       ${COMMON_GLSL}
       void main(){ vec3 d = normalize(vDir); float h = clamp(d.y, 0., 1.);
         vec3 c = mix(horizonAt(d), uTop, pow(h, 0.6));
         float s = max(dot(d, uSun), 0.);
-        c += uSunCol * (pow(s, 1200.) * 8. + pow(s, 64.) * 0.6 + pow(s, 8.) * 0.3 + pow(s, 3.) * 0.15) * (1. - uDim);
+        c += uSunCol * ((pow(s, 1200.) * 8. + pow(s, 64.) * 0.6) * uGlare + pow(s, 8.) * 0.3 + pow(s, 3.) * 0.15) * (1. - uDim);
         if (uInv > 0.001) {
           c *= mix(vec3(1.), vec3(1.08, 0.74, 0.6), smoothstep(0.45, 0.9, uInv));   // 剩下的天偏红：最后只剩一道红金色光缝
           vec2 uv = vec2(invAngle(d) * 2.4, d.y * 7.);
@@ -196,6 +198,8 @@ export function buildEnvironment(scene, renderer) {
   const aim = (dir) => { aimDir.copy(dir); apply(); };
   /** 阴影贴图大小（画质档定）@param {number} size */
   const setShadowMap = (size) => { sun.shadow.mapSize.set(size, size); };
+  /** 太阳本体和紧贴它的光晕亮几成（1 照常） @param {number} k */
+  const setGlare = (k) => { glare.value = k; };
 
   // 闪电：黑雾盖住了一片天以后，隔几秒在雾里劈一道（越往后越密）
   const R = rng(77);
@@ -226,7 +230,7 @@ export function buildEnvironment(scene, renderer) {
   const rockMaterial = (map, haze) => farRockMat(U, map, haze, -3);
   /** 邻峰的黑雾里出来一个敌人（enemies.js 的 emerge 钩子）：雾鼓起来一下，几秒内落回去 */
   const spawnPuff = () => { spawnFog.uPuff.value = Math.min(1, spawnFog.uPuff.value + 0.7); };
-  return { sun, hemi, clouds, setDim, setInvasion, setShadowMap, aim, update, flash: strike, look: LOOK, useRocks, usePavilion, usePines, rockMaterial,
+  return { sun, hemi, clouds, setDim, setInvasion, setShadowMap, setGlare, aim, update, flash: strike, look: LOOK, useRocks, usePavilion, usePines, rockMaterial,
     spawnPuff, spawnFog: spawnFog.mesh };
 }
 

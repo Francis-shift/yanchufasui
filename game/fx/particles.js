@@ -55,7 +55,8 @@ export class Particles {
         void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.);
           gl_Position = projectionMatrix * mv;
           gl_PointSize = aSize * uScale / max(-mv.z, 0.1);
-          vColor = aColor; vAlpha = aAlpha; vSeed = aSeed; }`,
+          // 贴着镜头的淡掉（第一人称、肩后时镜头就在粒子堆里，离 0.2 米的一颗会放大成几百像素，叠起来糊成一片白）
+          vColor = aColor; vAlpha = aAlpha * smoothstep(0.4, 1.6, -mv.z); vSeed = aSeed; }`,
       fragmentShader: this.ink ? INK_FRAG : GLOW_FRAG,
     });
     this.points = new THREE.Points(geo, this.mat);

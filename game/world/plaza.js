@@ -288,7 +288,7 @@ export function useStoneMaps(n, d, m) {
  * 两块台面共用：时间（水洼里的涟漪）、入侵程度（倒影染紫）、平面反射（电影档才有，见 buildPlaza 的 reflect；
  * 流畅档 uReflOn = 0，水洼只照出环境贴图里的天）。meshes：反射那一遍要先藏起来的台面（它们自己要读这张图）
  */
-const FLOOR = { time: { value: 0 }, inv: { value: 0 }, refl: { value: flat(0, 0, 0) }, reflMat: { value: new THREE.Matrix4() }, reflOn: { value: 0 },
+const FLOOR = { time: { value: 0 }, inv: { value: 0 }, refl: { value: flat(0, 0, 0) }, reflMat: { value: new THREE.Matrix4() }, reflOn: { value: 0 }, glint: { value: 1 },
   /** @type {THREE.Object3D[]} */ meshes: [] };
 
 /**
@@ -305,13 +305,13 @@ function stoneFloor(floor, wear, R, extra) {
   const mat = new THREE.MeshStandardMaterial({ map: floor.color, roughnessMap: floor.aux, bumpMap: floor.aux, bumpScale: 1.2, roughness: 1 });
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, { uStoneN: STONE.n, uStoneD: STONE.d, uStoneM: STONE.m, uStone: STONE.on, uWear: { value: wear }, uR: { value: R },
-      uFloorTime: FLOOR.time, uFloorInv: FLOOR.inv, uRefl: FLOOR.refl, uReflMat: FLOOR.reflMat, uReflOn: FLOOR.reflOn }, extra?.uniforms);
+      uFloorTime: FLOOR.time, uFloorInv: FLOOR.inv, uRefl: FLOOR.refl, uReflMat: FLOOR.reflMat, uReflOn: FLOOR.reflOn, uGlint: FLOOR.glint }, extra?.uniforms);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nuniform mat4 uReflMat; varying vec4 vRefl;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvRefl = uReflMat * modelMatrix * vec4(transformed, 1.0);');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-        uniform sampler2D uStoneN, uStoneD, uStoneM, uWear, uRefl; uniform float uStone, uR, uFloorTime, uFloorInv, uReflOn; varying vec4 vRefl;
+        uniform sampler2D uStoneN, uStoneD, uStoneM, uWear, uRefl; uniform float uStone, uR, uFloorTime, uFloorInv, uReflOn, uGlint; varying vec4 vRefl;
         float sHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float sNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
           return mix(mix(sHash(i), sHash(i + vec2(1., 0.)), f.x), mix(sHash(i + vec2(0., 1.)), sHash(i + 1.), f.x), f.y); }${extra?.decl ?? ''}`)
@@ -368,7 +368,7 @@ function stoneFloor(floor, wear, R, extra) {
         // 云影：几块大而软的影子顺着风慢慢飘过（约 0.3 米每秒），只压太阳直射的那份，入侵后天被黑雾盖住就不要了
         vec2 cp = sp + uFloorTime * vec2(-0.22, 0.17);
         float cl = 1. - 0.38 * (1. - uFloorInv) * smoothstep(0.44, 0.62, 0.6 * sNoise(cp / 6.) + 0.4 * sNoise(cp / 2.6 + 5.3));
-        reflectedLight.directDiffuse *= cl; reflectedLight.directSpecular *= cl;
+        reflectedLight.directDiffuse *= cl; reflectedLight.directSpecular *= cl * uGlint;
         if (pool > 0.) {
           float nv = saturate(dot(normal, geometryViewDir)), F = 0.04 + 0.96 * pow(1. - nv, 3.5);   // 俯看 25° 约 0.18（真水约 0.08；原来 0.3 太像镜子）
           // 倒影：跟着细波和涟漪扭，再在 5 个点上取平均糊开一点（约 4 个像素），积水不干净、偏暗偏黄
@@ -691,6 +691,11 @@ export function buildPlaza(scene, o) {
     base: cliff,
     /** 入侵程度（world/invasion.js）：台面裂缝、焦痕跟着长 @param {number} k */
     setInvasion(k) { FLOOR.inv.value = k; ROCK_INV.value = k; },
+    /**
+     * 台面上太阳的直射高光留几成。试炼平视的两档（肩后、第一人称）朝太阳看时，磨光的路面和水洼在 6～7 米外把太阳镜面反射过来，
+     * 泛光再晕成半屏白，连站在那里的敌人都看不见（10-30 在预览里关掉太阳光才消失）；俯视看不到这个角度，不用压 @param {number} k
+     */
+    setGlint(k) { FLOOR.glint.value = k; },
     /** 施法：阵纹里一道金光扫向阵眼 */
     flow() { sigil.flow.value = 0; },
     /** 阵眼挨打：阵纹闪一下 */

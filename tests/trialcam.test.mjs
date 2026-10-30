@@ -2,7 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { FOLLOW, SHOT, followPose, kickAt, offscreenArrow, shoulderPose, viewDir } from '../game/world/trialcam.js';
+import { FOLLOW, LOCK, SHOT, VIEWS, followPose, kickAt, lockPose, lockTarget, nextView, offscreenArrow, readView, shoulderPose, turnToward,
+  viewDir } from '../game/world/trialcam.js';
 
 const lens = (aspect = 16 / 9) => new THREE.PerspectiveCamera(50, aspect, 0.1, 500);
 
@@ -171,6 +172,79 @@ test('召龙的肩后镜头：竖长的窗口少往右偏，人不出画', () =>
   cam.position.copy(pos); cam.lookAt(look); cam.updateMatrixWorld();
   const chest = new THREE.Vector3(p.x, 1.2, p.z).project(cam);
   assert.ok(chest.x < 0 && chest.x > -0.9 && Math.abs(chest.y) < 1, JSON.stringify(chest));
+});
+
+test('视角三档轮着切，存的东西不认识就回到俯视', () => {
+  assert.deepEqual([...VIEWS], ['follow', 'shoulder', 'first']);
+  assert.equal(nextView('follow'), 'shoulder');
+  assert.equal(nextView('shoulder'), 'first');
+  assert.equal(nextView('first'), 'follow');
+  assert.equal(readView('first'), 'first');
+  for (const s of [null, '', 'third', 'FIRST', '{"x":1}']) assert.equal(readView(s), 'follow');
+});
+
+test('锁谁：有 boss 锁 boss，没有锁最近的一只，都没有给 null', () => {
+  const p = { x: 0, z: 0 }, boss = { x: 9, z: 9 };
+  const near = { x: 1, z: -2 }, far = { x: -5, z: 5 };
+  assert.equal(lockTarget(p, boss, [near, far]), boss);
+  assert.equal(lockTarget(p, null, [far, near]), near);
+  assert.equal(lockTarget(p, null, []), null);
+});
+
+test('往前朝目标转：每帧最多转 rate×dt，走近路，转到了就停；没目标、目标在脚下不转', () => {
+  const p = { x: 0, z: 0 };
+  // 朝 +z，目标在 -x（左手边 90°）：一帧 0.1 秒最多转 0.24 弧度
+  const d = new THREE.Vector3(0, 0, 1);
+  turnToward(d, p, { x: -5, z: 0 }, 0.1);
+  assert.ok(Math.abs(Math.atan2(d.x, d.z) - -LOCK.turn * 0.1) < 1e-9, `${Math.atan2(d.x, d.z)}`);
+  assert.ok(Math.abs(d.length() - 1) < 1e-9 && d.y === 0);
+  // 转够了就正对着
+  for (let i = 0; i < 20; i++) turnToward(d, p, { x: -5, z: 0 }, 0.1);
+  assert.ok(Math.abs(d.x + 1) < 1e-9 && Math.abs(d.z) < 1e-9);
+  // 跨过 ±180°：朝 (−0.1, −1) 附近，目标在 (+0.1, −1) 方向，应该往小的那边转一点点，不绕一大圈
+  const e = new THREE.Vector3(Math.sin(Math.PI - 0.05), 0, Math.cos(Math.PI - 0.05));
+  turnToward(e, p, { x: -Math.sin(0.05) * 5, z: -Math.cos(0.05) * 5 }, 1);
+  assert.ok(Math.abs(Math.abs(Math.atan2(e.x, e.z)) - (Math.PI - 0.05)) < 1e-9, `${Math.atan2(e.x, e.z)}`);
+  // 没目标、目标就在脚下：不转
+  const f = new THREE.Vector3(0.6, 0, -0.8);
+  turnToward(f, p, null, 1);
+  turnToward(f, p, { x: 0.1, z: 0.2 }, 1);
+  assert.ok(Math.abs(f.x - 0.6) < 1e-9 && Math.abs(f.z + 0.8) < 1e-9);
+});
+
+test('肩后：镜头在人身后、偏右、比人高；人在画面左边偏下、整个人在画面里，前面几米的地看得见', () => {
+  for (const aspect of [16 / 9, 740 / 360, 0.6]) {
+    for (const [p, a] of [[{ x: 0, z: 5 }, 0], [{ x: -6, z: 2 }, 2.1], [{ x: 7, z: -7 }, -2.8]]) {
+      const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
+      const { pos, look } = lockPose('shoulder', p, dir, aspect);
+      const off = new THREE.Vector3(pos.x - p.x, 0, pos.z - p.z);
+      assert.ok(Math.abs(off.dot(dir) + LOCK.back) < 1e-9, '身后');
+      assert.ok(off.dot(new THREE.Vector3(-dir.z, 0, dir.x)) > 0, '偏右');
+      assert.equal(pos.y, LOCK.up);
+      const cam = new THREE.PerspectiveCamera(aspect < 0.8 ? 62 : 50, aspect, 0.1, 500);
+      cam.position.copy(pos); cam.lookAt(look); cam.updateMatrixWorld();
+      const feet = new THREE.Vector3(p.x, 0, p.z).project(cam), top = new THREE.Vector3(p.x, 1.9, p.z).project(cam);
+      assert.ok(feet.x < 0 && feet.x > -0.9 && feet.y > -0.8 && top.y < 0.5, `feet ${feet.x} ${feet.y} top ${top.y} @ ${aspect}`);
+      // 人前面 3 米的地在画面里
+      const ahead = new THREE.Vector3(p.x + dir.x * 3, 0, p.z + dir.z * 3).project(cam);
+      assert.ok(Math.abs(ahead.x) < 1 && Math.abs(ahead.y) < 1 && ahead.z < 1, `ahead ${ahead.x} ${ahead.y}`);
+    }
+  }
+});
+
+test('第一人称：镜头在眼睛的位置、稍往前，朝"往前"略往下看；正前方的目标在画面正中一带', () => {
+  const p = { x: 2, z: -1 }, dir = new THREE.Vector3(-0.6, 0, -0.8);
+  const { pos, look } = lockPose('first', p, dir);
+  assert.equal(pos.y, LOCK.eye);
+  assert.ok(Math.abs(Math.hypot(pos.x - p.x, pos.z - p.z) - LOCK.nose) < 1e-9);
+  assert.ok(look.y < pos.y);
+  const cam = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 500);
+  cam.position.copy(pos); cam.lookAt(look); cam.updateMatrixWorld();
+  const boss = new THREE.Vector3(p.x + dir.x * 8, 1.6, p.z + dir.z * 8).project(cam);
+  assert.ok(Math.abs(boss.x) < 1e-6 && Math.abs(boss.y) < 0.4 && boss.z < 1, JSON.stringify(boss));
+  // 自己的脚在镜头底下，看不见
+  const feet = new THREE.Vector3(p.x, 0, p.z).project(cam);
+  assert.ok(feet.y < -1 || feet.z > 1, JSON.stringify(feet));
 });
 
 test('召龙的肩后镜头：目标就在脚下时朝俯视跟随的"往前"看，不出 NaN', () => {

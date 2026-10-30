@@ -50,6 +50,12 @@ const CSS = FONT_CSS + `
   display: grid; place-items: center; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer;
   pointer-events: auto; backdrop-filter: blur(6px); }
 .yc-mute svg { width: 20px; height: 20px; } .yc-mute.off { color: var(--muted); }
+/* 试炼的视角按钮（俯视 / 肩后 / 第一人称轮着切）：在声音开关下面 */
+.yc-view { position: absolute; right: 12px; top: calc(56px + env(safe-area-inset-top, 0px)); height: 30px; padding: 0 11px; border-radius: 15px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink); font: inherit; font-size: 12.5px; white-space: nowrap; cursor: pointer;
+  pointer-events: auto; backdrop-filter: blur(6px); }
+.yc-view[hidden] { display: none; }
+.yc-view small { margin-left: 6px; color: var(--muted); font-size: 11px; }
 .yc-g { display: flex; flex-direction: column; gap: 6px; }
 .yc-g + .yc-g { margin-top: 4px; }
 .yc-label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 12px; white-space: nowrap; }
@@ -259,6 +265,7 @@ const CSS = FONT_CSS + `
 .yc-narrow .yc-label { gap: 6px; }
 .yc-narrow .yc-card { width: calc(100% - 20px); }
 .yc-narrow .yc-mute { right: 10px; top: calc(60px + env(safe-area-inset-top, 0px)); }   /* 顶上一行占满了宽，挪到它下面 */
+.yc-narrow .yc-view { right: 10px; top: calc(102px + env(safe-area-inset-top, 0px)); }
 .yc-narrow .yc-boss { left: 10px; right: 56px; width: auto; transform: none; }   /* boss 血条也在那一行下面：右边让出声音开关 */
 /* 矮（手机键盘弹起来了）：咒语卡只留名字、原话、一行结果，提示语不显示 */
 .yc-short .yc-hint, .yc-short .yc-tags { display: none; }
@@ -295,7 +302,7 @@ const CSS = FONT_CSS + `
 .yc-pad .yc-bottom { left: auto; right: 14px; bottom: 10px; transform: none; width: 232px; pointer-events: none; }
 .yc-pad .yc-bottom button { pointer-events: auto; }
 .yc-pad .yc-skills:not([hidden]) { order: 5; display: block; position: relative; width: 232px; height: 200px; margin: 4px 0 0; }
-.yc-pad .yc-key { display: none; }
+.yc-pad .yc-key, .yc-pad .yc-view small { display: none; }
 .yc-pad .yc-dash { position: absolute; right: 0; bottom: 0; width: 80px; height: 80px; font-size: 36px; }
 .yc-pad .yc-skill { position: absolute; }
 .yc-pad .yc-cast { width: 58px; height: 58px; }
@@ -562,6 +569,12 @@ export class Hud {
     /** @type {(() => void) | null} */
     this.onMute = null;
     this.mute.addEventListener('click', () => { this.mute.blur(); this.onMute?.(); });
+    // 试炼的视角按钮（setView 写名字、管出不出）：同样点完还焦点
+    this.viewBtn = el(`<button class="yc-view" type="button" hidden></button>`);
+    /** @type {(() => void) | null} */
+    this.onView = null;
+    this.viewShown = '';
+    this.viewBtn.addEventListener('click', () => { this.viewBtn.blur(); this.onView?.(); });
     this.report = el(`<div class="yc-report" hidden><img alt="战报卡"><p class="yc-report-msg"></p>
       <div class="yc-report-btns"><a class="yc-btn" data-save download="言出法随-战报.png">保存图片</a>
         <button class="yc-btn ghost" data-share>分享</button><button class="yc-btn ghost" data-close>关闭</button></div></div>`);
@@ -574,7 +587,7 @@ export class Hud {
     this.arrow = el(`<div class="yc-arrow" hidden><i></i></div>`);
     /** boss 血条下沿（界面坐标，没有血条为 0），placeBoss 量 */
     this.bossEdge = 0;
-    this.root.append(this.floats, this.stick, this.arrow, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay, this.cover, this.report, this.mute);
+    this.root.append(this.floats, this.stick, this.arrow, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay, this.cover, this.report, this.mute, this.viewBtn);
     root.append(this.root);
     this.input = /** @type {HTMLInputElement} */ (this.bottom.querySelector('input'));
     this.go = /** @type {HTMLButtonElement} */ (this.bottom.querySelector('[data-go]'));
@@ -1057,6 +1070,18 @@ export class Hud {
     this.reportSeq++;
     this.report.hidden = true;
     if (this.reportUrl) { URL.revokeObjectURL(this.reportUrl); this.reportUrl = ''; }
+  }
+
+  /** 视角按钮：写现在是哪一档、出不出（每帧调，没变就不动） @param {string} name @param {boolean} shown */
+  setView(name, shown) {
+    const key = shown ? name : '';
+    if (key === this.viewShown) return;
+    this.viewShown = key;
+    this.viewBtn.hidden = !shown;
+    if (!shown) return;
+    this.viewBtn.innerHTML = `视角：${esc(name)}<small>V</small>`;
+    this.viewBtn.title = '切换视角：俯视 / 肩后 / 第一人称';
+    this.viewBtn.setAttribute('aria-label', `视角：${name}，点了换下一档`);
   }
 
   /** 声音开关画成开着还是关着；toggle 给了就换成点它时调的 @param {boolean} muted @param {() => void} [toggle] */
