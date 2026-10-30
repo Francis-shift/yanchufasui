@@ -66,7 +66,7 @@ const CSS = FONT_CSS + `
   display: grid; place-items: center; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer;
   pointer-events: auto; backdrop-filter: blur(6px); }
 .yc-gear svg { width: 20px; height: 20px; }
-.yc-set { position: absolute; inset: 0; display: flex; overflow-y: auto; padding: 10px 0; pointer-events: auto;
+.yc-set { position: absolute; inset: 0; z-index: 3; display: flex; overflow-y: auto; padding: 10px 0; pointer-events: auto;
   background: radial-gradient(ellipse at center, rgba(14,18,24,0.3), rgba(14,18,24,0.66)); }
 .yc-set[hidden] { display: none; }
 .yc-set-box { margin: auto; width: min(760px, calc(100% - 24px)); padding: 22px 32px 18px; }
@@ -163,7 +163,8 @@ const CSS = FONT_CSS + `
 .yc-big.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 /* 宣纸面板（结算页、封面第二步共用，10-30 本人嫌原来的白卡"太 low"）：米黄的纸、细细的纸纹、古籍那样的内外两道边栏；
    正文用楷体，数字用书法字 */
-.yc-paper { position: relative; color: #231f1a; font-family: ${KAI}; border-radius: 2px;
+/* isolation：纸里的内容抬到边栏上面那层只在纸里算，不然会盖过后面弹出的战报卡和设置 */
+.yc-paper { position: relative; isolation: isolate; color: #231f1a; font-family: ${KAI}; border-radius: 2px;
   background: radial-gradient(ellipse at 12% 8%, rgba(255,255,255,0.55), transparent 55%),
     radial-gradient(ellipse at 92% 100%, rgba(140,105,60,0.14), transparent 60%), ${PAPER_GRAIN}, #f1eadc;
   box-shadow: 0 26px 60px -26px rgba(8,12,18,0.85), 0 0 0 1px rgba(60,45,30,0.18); }
@@ -210,7 +211,7 @@ const CSS = FONT_CSS + `
 .yc-ink.yc-sub b { font-size: 19px; letter-spacing: 0.08em; text-shadow: none; }
 .yc-ink.yc-sub:hover::before, .yc-ink.yc-sub:focus-visible::before { height: 11px; opacity: 1; }
 /* 战报卡：压在结算页上面看大图，下面保存、分享、关闭 */
-.yc-report { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+.yc-report { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
   padding: 12px; background: rgba(20, 28, 38, 0.72); backdrop-filter: blur(3px); pointer-events: auto; }
 .yc-report[hidden], .yc-report [hidden] { display: none; }
 .yc-arrow { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; pointer-events: none;
