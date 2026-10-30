@@ -432,6 +432,8 @@ function chain(c, out) {
 }
 
 const STORE = 'yc-sound';
+/** 设置里调的音效、音乐音量（0～1，乘在 chain 的 0.85 / 0.22 上），记在本机 */
+const VOL_STORE = 'yc-volume', SFX_GAIN = 0.85, MUSIC_GAIN = 0.22;
 /** @typedef {'calm' | 'battle' | 'boss' | null} Mood */
 
 export class Sound {
@@ -445,6 +447,14 @@ export class Sound {
     /** @type {AudioNode | null} */
     this.musicOut = null;
     this.muted = (() => { try { return localStorage.getItem(STORE) === 'off'; } catch { return false; } })();
+    /** 音效、音乐音量（setVolume） */
+    this.vol = (() => {
+      const v = { sfx: 1, music: 1 };
+      try { const o = JSON.parse(localStorage.getItem(VOL_STORE) || '{}'); for (const k of /** @type {const} */ (['sfx', 'music'])) if (typeof o[k] === 'number') v[k] = Math.min(1, Math.max(0, o[k])); } catch { /* 坏了用默认 */ }
+      return v;
+    })();
+    /** @type {{ sfx: GainNode, music: GainNode } | null} */
+    this.gains = null;
     this.hidden = typeof document !== 'undefined' && document.hidden;
     this.voices = 0;
     /** @type {Record<string, number>} */
@@ -486,6 +496,8 @@ export class Sound {
     const { sfx, music } = chain(c, this.duckG);
     this.kit = new Kit(c, sfx);
     this.musicOut = music;
+    this.gains = { sfx, music };
+    this.setVolume('sfx', this.vol.sfx, false); this.setVolume('music', this.vol.music, false);
     const kit = this.kit;
     for (const [name, url] of Object.entries(SAMPLES)) {   // 下载失败（离线、预览页）就一直用合成的；解码用回调写法，老的苹果浏览器只认这个
       fetch(url).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
@@ -540,6 +552,14 @@ export class Sound {
     try { localStorage.setItem(STORE, on ? 'off' : 'on'); } catch { /* 无痕窗口之类 */ }
     if (!on && !this.ctx) this.build();
     this.wake();
+  }
+
+  /** 音效或音乐音量（0～1）；save 为 false 时只设不存 @param {'sfx' | 'music'} kind @param {number} v @param {boolean} [save] */
+  setVolume(kind, v, save = true) {
+    this.vol[kind] = Math.min(1, Math.max(0, v));
+    const g = this.gains?.[kind];
+    if (g) g.gain.value = (kind === 'sfx' ? SFX_GAIN : MUSIC_GAIN) * this.vol[kind];
+    if (save) try { localStorage.setItem(VOL_STORE, JSON.stringify(this.vol)); } catch { /* 无痕窗口之类 */ }
   }
 
   dispose() {

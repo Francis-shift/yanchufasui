@@ -37,13 +37,19 @@ export const TIERS = {
   },
 };
 
+/** 设置里选的档存在这台设备的浏览器里（'cinema' / 'smooth'，没存或认不出 = 自动） */
+export const QUALITY_KEY = 'yc-quality';
+
 /**
+ * 先看地址里的 ?q=，再看设置里选的，都没有就电脑电影档、手机流畅档
  * @param {string} search 地址里的查询串（location.search）
  * @param {boolean} mobile 是不是触屏手机
+ * @param {string | null} [pref] 设置里选的（localStorage 里 QUALITY_KEY 的值）
  * @returns {Quality}
  */
-export function pickQuality(search, mobile) {
+export function pickQuality(search, mobile, pref = null) {
   const p = new URLSearchParams(search), q = p.get('q');
-  const tier = q === 'cinema' || q === 'smooth' ? TIERS[q] : mobile ? TIERS.smooth : TIERS.cinema;
+  const ok = (/** @type {string | null} */ s) => s === 'cinema' || s === 'smooth';
+  const tier = ok(q) ? TIERS[/** @type {'cinema' | 'smooth'} */ (q)] : ok(pref) ? TIERS[/** @type {'cinema' | 'smooth'} */ (pref)] : mobile ? TIERS.smooth : TIERS.cinema;
   return p.get('refl') === '0' ? { ...tier, reflect: 0 } : tier;
 }

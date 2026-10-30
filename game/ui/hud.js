@@ -56,6 +56,48 @@ const CSS = FONT_CSS + `
   pointer-events: auto; backdrop-filter: blur(6px); }
 .yc-view[hidden] { display: none; }
 .yc-view small { margin-left: 6px; color: var(--muted); font-size: 11px; }
+/* 设置（10-30）：齿轮在声音开关左边，点开是一张纸面板；开着时游戏停住（main.js） */
+.yc-gear { position: absolute; right: 56px; top: calc(12px + env(safe-area-inset-top, 0px)); width: 36px; height: 36px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer;
+  pointer-events: auto; backdrop-filter: blur(6px); }
+.yc-gear svg { width: 20px; height: 20px; }
+.yc-set { position: absolute; inset: 0; display: flex; overflow-y: auto; padding: 10px 0; pointer-events: auto;
+  background: radial-gradient(ellipse at center, rgba(14,18,24,0.3), rgba(14,18,24,0.66)); }
+.yc-set[hidden] { display: none; }
+.yc-set-box { margin: auto; width: min(760px, calc(100% - 24px)); padding: 22px 32px 18px; }
+.yc-set-title { font: normal 34px/1.15 ${BRUSH}; letter-spacing: 8px; text-align: center; color: #15110d; }
+.yc-set-main { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 28px; margin-top: 10px; }
+.yc-set-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.yc-set-k { flex: none; width: 2.6em; font-size: 15px; color: #3a3026; }
+.yc-seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.yc-seg button, .yc-keybtn, .yc-set-mini { font: inherit; font-size: 14px; padding: 3px 11px; border-radius: 3px; border: 1px solid rgba(52,40,28,0.35);
+  background: rgba(255,255,255,0.35); color: #2a231c; cursor: pointer; }
+.yc-seg button.on { background: #2b2520; color: #f6f1e7; border-color: #2b2520; }
+.yc-seg button:hover, .yc-keybtn:hover, .yc-set-mini:hover { border-color: rgba(52,40,28,0.7); }
+.yc-set-row input[type=range] { flex: 1; min-width: 0; accent-color: #8a2a10; }
+.yc-set-v { flex: none; width: 2.4em; text-align: right; font-size: 13px; color: #5a4d3e; }
+.yc-set-note { margin: 6px 0 0; font-size: 12.5px; line-height: 1.6; color: #6a5c4b; text-wrap: balance; }
+.yc-set-note:empty { display: none; }
+.yc-set-note.warn { color: #8a2a10; }
+.yc-set-keys[hidden] { display: none; }
+.yc-set-sub { margin-top: 14px; padding-top: 10px; border-top: 1px solid rgba(52,40,28,0.25); font-size: 15px; color: #3a3026; }
+.yc-set-sub small { margin-left: 8px; font-size: 12.5px; color: #6a5c4b; }
+.yc-keygrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 22px; margin-top: 8px; }
+.yc-keyrow { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 14px; min-width: 0; }
+.yc-keybtn { min-width: 68px; font: 600 14px/1.4 system-ui, sans-serif; }
+.yc-keybtn.wait { background: #8a2a10; color: #fff; border-color: #8a2a10; }
+.yc-set-mini { font-size: 12.5px; padding: 1px 8px; margin-left: 6px; }
+.yc-set-btns { display: flex; gap: 8px 34px; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 20px; }
+.yc-set-btns .yc-ink:not(.yc-sub) { padding: 6px 24px 8px; } .yc-set-btns .yc-ink:not(.yc-sub) b { font-size: 26px; }
+.yc-set-btns .yc-ink.yc-sub b { font-size: 18px; }
+.yc-set-btns [hidden] { display: none; }
+.yc-short .yc-set-box { padding: 14px 26px 12px; } .yc-short .yc-set-title { font-size: 26px; }
+.yc-short .yc-set-main { margin-top: 4px; gap: 6px 24px; } .yc-short .yc-set-sub { margin-top: 8px; padding-top: 6px; }
+.yc-short .yc-keygrid { gap: 5px 18px; margin-top: 5px; } .yc-short .yc-set-btns { margin-top: 10px; }
+.yc-short .yc-set-btns .yc-ink:not(.yc-sub) b { font-size: 22px; }
+.yc-narrow .yc-gear { right: 54px; top: calc(60px + env(safe-area-inset-top, 0px)); }
+.yc-narrow .yc-set-main { grid-template-columns: 1fr; } .yc-narrow .yc-keygrid { grid-template-columns: repeat(2, 1fr); }
+.yc-narrow .yc-set-box { padding: 18px 20px 14px; }
 .yc-g { display: flex; flex-direction: column; gap: 6px; }
 .yc-g + .yc-g { margin-top: 4px; }
 .yc-label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 12px; white-space: nowrap; }
@@ -207,9 +249,10 @@ const CSS = FONT_CSS + `
 .yc-pen { position: absolute; right: -6px; top: -6px; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line);
   background: #fff; color: #4a5a6a; font-size: 12px; line-height: 20px; padding: 0; cursor: pointer; }
 .yc-key { position: absolute; left: 50%; bottom: -14px; transform: translateX(-50%); font-size: 10px; color: var(--muted); }
-.yc-summon { height: 54px; padding: 0 14px; border-radius: 27px; border: 2px solid #d99a1e; background: linear-gradient(180deg, #ffe6a3, #f0b24a);
+.yc-summon { position: relative; height: 54px; padding: 0 14px; border-radius: 27px; border: 2px solid #d99a1e; background: linear-gradient(180deg, #ffe6a3, #f0b24a);
   color: #6b3f00; font-family: ${BRUSH}; font-size: 22px; cursor: pointer; animation: yc-pulse 1.1s ease-in-out infinite; }
 .yc-summon[hidden] { display: none; }
+.yc-summon .yc-key { white-space: nowrap; font: 10px/1 system-ui, sans-serif; bottom: -12px; }
 .yc-write { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(220, 232, 245, 0.45); pointer-events: auto; }
 .yc-write[hidden] { display: none; }
 .yc-write .yc-box { width: min(460px, calc(100% - 24px)); text-align: left; padding: 18px; }
@@ -235,7 +278,7 @@ const CSS = FONT_CSS + `
   width: min(440px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 5px; padding: 8px 14px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(6px); }
 .yc-boss[hidden] { display: none; }
-.yc-boss.yc-side { right: 60px; width: auto; max-width: 440px; transform: none; }   /* 矮窗口：放到左上面板右边，left 由 placeBoss 给 */
+.yc-boss.yc-side { right: 104px; width: auto; max-width: 440px; transform: none; }   /* 矮窗口：放到左上面板右边，left 由 placeBoss 给 */
 .yc-boss .yc-label b { color: #9a2a1e; }
 .yc-bosshp > i { background: linear-gradient(90deg, #b3261e, #ff6b4a); }
 .yc-armor { height: 5px; } .yc-armor > i { background: linear-gradient(90deg, #7cc8ff, #e2f4ff); }
@@ -265,8 +308,8 @@ const CSS = FONT_CSS + `
 .yc-narrow .yc-label { gap: 6px; }
 .yc-narrow .yc-card { width: calc(100% - 20px); }
 .yc-narrow .yc-mute { right: 10px; top: calc(60px + env(safe-area-inset-top, 0px)); }   /* 顶上一行占满了宽，挪到它下面 */
-.yc-narrow .yc-view { right: 10px; top: calc(102px + env(safe-area-inset-top, 0px)); }
-.yc-narrow .yc-boss { left: 10px; right: 56px; width: auto; transform: none; }   /* boss 血条也在那一行下面：右边让出声音开关 */
+.yc-narrow .yc-view { right: 10px; top: calc(122px + env(safe-area-inset-top, 0px)); }   /* 落在 boss 血条下面（血条约到 113） */
+.yc-narrow .yc-boss { left: 10px; right: 100px; width: auto; transform: none; }   /* boss 血条也在那一行下面：右边让出设置与声音开关 */
 /* 矮（手机键盘弹起来了）：咒语卡只留名字、原话、一行结果，提示语不显示 */
 .yc-short .yc-hint, .yc-short .yc-tags { display: none; }
 .yc-short .yc-card { padding: 6px 12px 8px; }
@@ -311,7 +354,7 @@ const CSS = FONT_CSS + `
 .yc-pad .yc-skill:nth-of-type(3) { right: 11px; bottom: 111px; }
 .yc-pad .yc-summon { position: absolute; left: 0; top: 0; height: 50px; }
 /* boss 血条紧挨左上面板右边放（横屏手机只有 600～900 宽，居中会和面板撞上、被挤到画面中间） */
-.yc-pad .yc-boss { left: 212px; right: 60px; width: auto; max-width: 440px; transform: none; }   /* 右边留出声音开关 */
+.yc-pad .yc-boss { left: 212px; right: 104px; width: auto; max-width: 440px; transform: none; }   /* 右边留出设置与声音开关 */
 /* 法力条挪到下方正中（摇杆和按钮之间空着），不然右边一列太高，顶到 boss 血条 */
 .yc-pad .yc-bottom > .yc-label, .yc-pad .yc-bottom > .yc-mana { position: absolute; right: 250px; width: 240px; }
 .yc-pad .yc-bottom > .yc-label { bottom: 16px; }
@@ -492,6 +535,17 @@ const el = (html) => { const t = document.createElement('template'); t.innerHTML
 /** @param {string} s */
 const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] || c);
 
+/**
+ * 设置面板画成什么样（main.js 每次有变化重画一遍）。
+ * quality：设置里选的档（auto 跟设备走），qualityNow：现在实际是哪档；qnote：画质那行下面的说明（warn 时标红）；
+ * keys：试炼键位（触屏上不给 = 不显示这一节），wait：正在等哪一项按新键；inGame：在一局里（才有重新开始、回首页）；
+ * confirm：哪个按钮等着再点一次确认
+ * @typedef {{ quality: string, qualityNow: string, qnote: string, warn: boolean, view: string, sfx: number, music: number,
+ *   keys: { act: string, name: string, label: string }[] | null, knote: string, wait: string | null, inGame: boolean, mode: string, confirm: string | null }} SettingsState
+ * @typedef {{ quality: (v: string) => void, view: (v: string) => void, volume: (kind: 'sfx' | 'music', v: number) => void, key: (act: string) => void,
+ *   keyReset: () => void, restart: () => void, quit: () => void, close: () => void }} SettingsHandlers
+ */
+
 export class Hud {
   /** @param {HTMLElement} root */
   constructor(root) {
@@ -575,6 +629,57 @@ export class Hud {
     this.onView = null;
     this.viewShown = '';
     this.viewBtn.addEventListener('click', () => { this.viewBtn.blur(); this.onView?.(); });
+    /** 按钮下面、视角按钮上写的键名（setKeyLabels；守关是数字） */
+    this.keyLabels = { dash: '空格', skills: ['1', '2', '3'], ult: '4', view: 'V' };
+    // 设置：齿轮 + 纸面板（openSettings / renderSettings）；各项点了调 setOn 里对应的
+    const tooth = (/** @type {number} */ a) => `<rect x="10.5" y="1.6" width="3" height="4.2" rx="0.8" transform="rotate(${a} 12 12)"/>`;
+    this.gear = el(`<button class="yc-gear" type="button" title="设置（Esc）" aria-label="设置"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="currentColor">
+      <path fill-rule="evenodd" d="M12 4.6a7.4 7.4 0 1 1 0 14.8a7.4 7.4 0 1 1 0-14.8zm0 4.3a3.1 3.1 0 1 0 0 6.2a3.1 3.1 0 1 0 0-6.2z"/>
+      ${[0, 45, 90, 135, 180, 225, 270, 315].map(tooth).join('')}</g></svg></button>`);
+    /** @type {(() => void) | null} */
+    this.onGear = null;
+    this.gear.addEventListener('click', () => { this.gear.blur(); this.onGear?.(); });
+    const seg = (/** @type {string} */ k, /** @type {[string, string][]} */ opts) =>
+      `<div class="yc-seg" data-seg="${k}">${opts.map(([v, t]) => `<button type="button" data-v="${v}">${t}</button>`).join('')}</div>`;
+    const vol = (/** @type {string} */ k, /** @type {string} */ name) =>
+      `<div class="yc-set-row"><span class="yc-set-k">${name}</span><input type="range" min="0" max="100" step="5" data-vol="${k}" aria-label="${name}音量"><span class="yc-set-v" data-volv="${k}"></span></div>`;
+    this.set = el(`<div class="yc-set" hidden role="dialog" aria-label="设置"><div class="yc-set-box yc-paper">
+      <div class="yc-set-title">设置</div>
+      <div class="yc-set-main">
+        <div class="yc-set-row"><span class="yc-set-k">画质</span>${seg('quality', [['auto', '自动'], ['cinema', '电影档'], ['smooth', '流畅档']])}</div>
+        <div class="yc-set-row"><span class="yc-set-k">视角</span>${seg('view', [['follow', '俯视'], ['shoulder', '肩后'], ['first', '第一人称']])}</div>
+        ${vol('sfx', '音效')}${vol('music', '音乐')}
+      </div>
+      <p class="yc-set-note" data-qnote></p>
+      <div class="yc-set-keys" data-keys><div class="yc-set-sub">试炼键位<small>点一项，再按新的键；撞了别的就互换</small></div>
+        <div class="yc-keygrid"></div>
+        <p class="yc-set-note"><span data-knote></span><button type="button" class="yc-set-mini" data-keyreset>恢复默认</button></p></div>
+      <div class="yc-set-btns"><button class="yc-ink yc-sub" data-restart><b></b></button><button class="yc-ink yc-sub" data-quit><b></b></button>
+        <button class="yc-ink" data-close><b>继续</b></button></div></div></div>`);
+    /** @type {SettingsHandlers | null} */
+    this.setOn = null;
+    for (const s of this.set.querySelectorAll('[data-seg]')) {
+      s.addEventListener('click', (e) => {
+        const b = /** @type {HTMLElement} */ (e.target).closest('button');
+        if (!b) return;
+        const v = /** @type {string} */ (b.dataset.v), k = /** @type {HTMLElement} */ (s).dataset.seg;
+        if (k === 'quality') this.setOn?.quality(v); else this.setOn?.view(v);
+      });
+    }
+    for (const r of this.set.querySelectorAll('[data-vol]')) {
+      const inp = /** @type {HTMLInputElement} */ (r), k = /** @type {'sfx' | 'music'} */ (inp.dataset.vol);
+      inp.addEventListener('input', () => { this.q(`[data-volv="${k}"]`).textContent = inp.value; this.setOn?.volume(k, +inp.value / 100); });
+    }
+    this.set.querySelector('.yc-keygrid')?.addEventListener('click', (e) => {
+      const b = /** @type {HTMLElement} */ (e.target).closest('[data-act]');
+      if (b) this.setOn?.key(/** @type {string} */ (/** @type {HTMLElement} */ (b).dataset.act));
+    });
+    const sb = (sel, fn) => /** @type {HTMLElement} */ (this.set.querySelector(sel)).addEventListener('click', fn);
+    sb('[data-keyreset]', () => this.setOn?.keyReset());
+    sb('[data-restart]', () => this.setOn?.restart());
+    sb('[data-quit]', () => this.setOn?.quit());
+    sb('[data-close]', () => this.setOn?.close());
+    this.set.addEventListener('click', (e) => { if (e.target === this.set) this.setOn?.close(); });   // 点纸外面的暗处也是关
     this.report = el(`<div class="yc-report" hidden><img alt="战报卡"><p class="yc-report-msg"></p>
       <div class="yc-report-btns"><a class="yc-btn" data-save download="言出法随-战报.png">保存图片</a>
         <button class="yc-btn ghost" data-share>分享</button><button class="yc-btn ghost" data-close>关闭</button></div></div>`);
@@ -587,7 +692,7 @@ export class Hud {
     this.arrow = el(`<div class="yc-arrow" hidden><i></i></div>`);
     /** boss 血条下沿（界面坐标，没有血条为 0），placeBoss 量 */
     this.bossEdge = 0;
-    this.root.append(this.floats, this.stick, this.arrow, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay, this.cover, this.report, this.mute, this.viewBtn);
+    this.root.append(this.floats, this.stick, this.arrow, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay, this.cover, this.report, this.mute, this.viewBtn, this.gear, this.set);
     root.append(this.root);
     this.input = /** @type {HTMLInputElement} */ (this.bottom.querySelector('input'));
     this.go = /** @type {HTMLButtonElement} */ (this.bottom.querySelector('[data-go]'));
@@ -651,14 +756,14 @@ export class Hud {
     const bar = this.q('.yc-skills');
     bar.innerHTML = '';
     if (on.dash) {
-      const d = el(`<button class="yc-dash" aria-label="闪避">闪<span class="yc-key">空格</span><span class="yc-pips"></span></button>`);
+      const d = el(`<button class="yc-dash" aria-label="闪避">闪<span class="yc-key">${esc(this.keyLabels.dash)}</span><span class="yc-pips"></span></button>`);
       d.addEventListener('pointerdown', (e) => { e.preventDefault(); on.dash?.(); });
       bar.append(d);
       if (this.stamina.max) this.setStamina(this.stamina.v, this.stamina.max, this.stamina.locked);
     }
     skills.forEach((s, i) => {
       const w = el(`<div class="yc-skill" style="--c:${elColor(s.el)}" data-el="${s.el}"><button class="yc-cast"></button>
-        <button class="yc-pen" aria-label="给这个按钮写一句咒">✎</button><span class="yc-key">${i + 1}</span></div>`);
+        <button class="yc-pen" aria-label="给这个按钮写一句咒">✎</button><span class="yc-key">${esc(this.keyLabels.skills[i] ?? '')}</span></div>`);
       const cast = /** @type {HTMLElement} */ (w.querySelector('.yc-cast'));
       // 按下就放（不等松手），也不让按钮抢走输入框的焦点、收起手机键盘
       cast.addEventListener('pointerdown', (e) => { e.preventDefault(); on.cast(s.el); });
@@ -666,7 +771,7 @@ export class Hud {
       bar.append(w);
       this.setSkillLabel(s.el, s.label, s.named);
     });
-    const sm = el(`<button class="yc-summon" hidden>召唤</button>`);
+    const sm = el(`<button class="yc-summon" hidden>召唤<span class="yc-key">${esc(this.keyLabels.ult)}</span></button>`);
     sm.addEventListener('pointerdown', (e) => { e.preventDefault(); on.summon(); });
     bar.append(sm);
     bar.hidden = !skills.length;
@@ -806,7 +911,7 @@ export class Hud {
     const pad = this.root.classList.contains('yc-pad');   // 手机试炼布局由 CSS 放在面板右边
     const W = this.root.clientWidth, w = Math.min(440, W - 32), right = this.topRight() + 8;
     const overlaps = !pad && (W - w) / 2 < right;
-    const side = overlaps && W - right - 60 >= 280;
+    const side = overlaps && W - right - 104 >= 280;   // 右边让出设置与声音开关
     this.boss.classList.toggle('yc-side', side);
     this.boss.style.left = side ? `${right}px` : '';
     this.boss.style.top = overlaps && !side ? `${this.topBottom() + 6}px` : '';
@@ -1074,14 +1179,62 @@ export class Hud {
 
   /** 视角按钮：写现在是哪一档、出不出（每帧调，没变就不动） @param {string} name @param {boolean} shown */
   setView(name, shown) {
-    const key = shown ? name : '';
+    const key = shown ? `${name}|${this.keyLabels.view}` : '';
     if (key === this.viewShown) return;
     this.viewShown = key;
     this.viewBtn.hidden = !shown;
     if (!shown) return;
-    this.viewBtn.innerHTML = `视角：${esc(name)}<small>V</small>`;
+    this.viewBtn.innerHTML = `视角：${esc(name)}<small>${esc(this.keyLabels.view)}</small>`;
     this.viewBtn.title = '切换视角：俯视 / 肩后 / 第一人称';
     this.viewBtn.setAttribute('aria-label', `视角：${name}，点了换下一档`);
+  }
+
+  /** 打开设置面板（画成什么样由调用方接着 renderSettings） @param {SettingsHandlers} on */
+  openSettings(on) { this.setOn = on; this.set.hidden = false; }
+  closeSettings() { this.set.hidden = true; this.setOn = null; }
+  get settingsOn() { return !this.set.hidden; }
+  /** 按现在的设置重画面板（选中哪档、音量、键位、按钮字） @param {SettingsState} s */
+  renderSettings(s) {
+    for (const g of this.set.querySelectorAll('[data-seg]')) {
+      const cur = /** @type {HTMLElement} */ (g).dataset.seg === 'quality' ? s.quality : s.view;
+      for (const b of g.querySelectorAll('button')) {
+        const on = b.dataset.v === cur;
+        b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
+      }
+    }
+    for (const k of /** @type {const} */ (['sfx', 'music'])) {
+      const v = String(Math.round(s[k] * 100));
+      /** @type {HTMLInputElement} */ (this.q(`[data-vol="${k}"]`)).value = v;
+      this.q(`[data-volv="${k}"]`).textContent = v;
+    }
+    const qn = this.q('[data-qnote]');
+    qn.textContent = s.qnote; qn.classList.toggle('warn', s.warn);
+    const keys = /** @type {HTMLElement} */ (this.set.querySelector('[data-keys]'));
+    keys.hidden = !s.keys;
+    if (s.keys) {
+      /** @type {HTMLElement} */ (this.set.querySelector('.yc-keygrid')).innerHTML = s.keys.map((k) => `<div class="yc-keyrow"><span>${esc(k.name)}</span>`
+        + `<button type="button" class="yc-keybtn${s.wait === k.act ? ' wait' : ''}" data-act="${k.act}" aria-label="${esc(k.name)}：${esc(k.label)}，点了改">`
+        + `${s.wait === k.act ? '按新键…' : esc(k.label)}</button></div>`).join('');
+      this.q('[data-knote]').textContent = s.knote;
+    }
+    const rs = /** @type {HTMLElement} */ (this.set.querySelector('[data-restart]')), qt = /** @type {HTMLElement} */ (this.set.querySelector('[data-quit]'));
+    rs.hidden = qt.hidden = !s.inGame;
+    /** @type {HTMLElement} */ (rs.querySelector('b')).textContent = s.confirm === 'restart' ? '再点一次确认' : s.mode === 'trial' ? '重新开始' : '重新守关';
+    /** @type {HTMLElement} */ (qt.querySelector('b')).textContent = s.confirm === 'quit' ? '再点一次确认' : '回首页';
+  }
+
+  /**
+   * 按钮下面、视角按钮上写的键名：试炼电脑上按设置里绑的，守关是数字（触屏上 .yc-pad 不显示）
+   * @param {{ dash: string, skills: string[], ult: string, view: string }} k
+   */
+  setKeyLabels(k) {
+    this.keyLabels = k;
+    const d = this.root.querySelector('.yc-dash .yc-key');
+    if (d) d.textContent = k.dash;
+    this.root.querySelectorAll('.yc-skill .yc-key').forEach((s, i) => { s.textContent = k.skills[i] ?? ''; });
+    const u = this.root.querySelector('.yc-summon .yc-key');
+    if (u) u.textContent = k.ult;
+    if (this.viewShown) this.setView(this.viewShown.split('|')[0], true);
   }
 
   /** 声音开关画成开着还是关着；toggle 给了就换成点它时调的 @param {boolean} muted @param {() => void} [toggle] */

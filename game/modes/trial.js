@@ -1,7 +1,7 @@
 // @ts-check
 /**
  * 试炼模式（灰盒，设计文档第 2 节"试炼模式"）：在山门广场上走位躲 boss 的招。
- * 战中不打字：WASD / 方向键走位、空格闪避、1～3 放天赋、4 召唤（手机横过来玩：左手摇杆走位，右手点"闪"和天赋）；战前可以给按钮写咒。
+ * 战中不打字：WASD / 方向键走位、Shift 闪避、Q / E / R 放天赋、V 召唤（设置里能改，数字 1～4 也能放；手机横过来玩：左手摇杆走位，右手点"闪"和天赋）；战前可以给按钮写咒。
  * 规则（冰甲、换阶段、挑招、判定、走位边界）在 rules/trial.js；这里管玩家走位与受伤、boss 的动作、地上的预警。
  * 一局（rules/run.js RUN_STAGES）：小怪潮 → 三选一 → boss → 三选一 → …… → 第三个 boss；这里按顺序推进，选卡交给 main.js（d.pick）。
  * 第一个 boss 寒甲傀儡王（冰甲只怕火）；第二个石甲巨像（石甲只怕雷：重踏、落石雨、蓄力冲撞——蓄力时打够伤害就打断、硬直，一线地刺）；
@@ -40,13 +40,16 @@ const SWEEP_HALF = (BOSS.sweep.halfDeg * Math.PI) / 180;
 const MAX_BULLETS = 200;
 /** 第几个 boss 用哪张招式表 */
 const BOSS_CFG = [BOSS, STONE, FLAME];
-/** 每个 boss 现身时的提示：手机版、电脑版 @type {Record<string, [string, string]>} */
+/**
+ * 每个 boss 现身时的提示：手机版、电脑版。电脑版里 {招} {召} {闪} 换成现在绑的键（设置里能改，见 rules/keymap.js 与 keyText）
+ * @type {Record<string, [string, string]>}
+ */
 const BOSS_HINT = {
-  boss: ['躲开地上的红圈和红扇；冰甲只怕火，先用火打碎它', '躲开地上的红圈和红扇；冰甲只怕火，先用火打碎它。1、2、3 放天赋，4 召唤，空格闪避'],
+  boss: ['躲开地上的红圈和红扇；冰甲只怕火，先用火打碎它', '躲开地上的红圈和红扇；冰甲只怕火，先用火打碎它。{招} 放天赋，{召} 召唤，{闪} 闪避'],
   stone: ['石甲只怕雷；它蹲下蓄力时猛打能打断冲撞，打断了趁它硬直多打几下；落石看红圈，地刺横着躲',
-    '石甲只怕雷；它蹲下蓄力时猛打能打断冲撞，打断了趁它硬直多打几下；落石看红圈，地刺横着躲。1、2、3 放天赋，4 召唤，空格闪避'],
+    '石甲只怕雷；它蹲下蓄力时猛打能打断冲撞，打断了趁它硬直多打几下；落石看红圈，地刺横着躲。{招} 放天赋，{召} 召唤，{闪} 闪避'],
   flame: ['火罩只怕冰，先用冰浇熄它；火圈看红圈，火环跑进缺口，或者迎着火环点「闪」穿过去',
-    '火罩只怕冰，先用冰浇熄它；火圈看红圈，火环跑进缺口，或者迎着火环按空格闪避穿过去。1、2、3 放天赋，4 召唤'],
+    '火罩只怕冰，先用冰浇熄它；火圈看红圈，火环跑进缺口，或者迎着火环按 {闪} 闪避穿过去。{招} 放天赋，{召} 召唤'],
 };
 /** 每个 boss 的大字颜色：现身时的名字、甲碎了与重凝 @type {Record<string, [string, string]>} */
 const BOSS_INK = { boss: ['#1f4f7a', '#2f6fae'], stone: ['#4a3a28', '#6b5236'], flame: ['#8a2a10', '#c2501e'] };
@@ -67,8 +70,8 @@ const CHASE_R = PLAZA_R - 0.6;
 const CHARGER_BODY = 0.4;
 /** 每段小怪潮开头的提示：这一段新来了什么、怎么对付 @type {[string, string][]} 手机版、电脑版 */
 const WAVE_HINT = [
-  ['小傀儡追着人自爆：边走边打，别让它们贴身', '小傀儡追着人自爆：边走边打，别让它们贴身。1、2、3 放天赋，4 召唤，空格闪避'],
-  ['新来的符箓傀儡站在远处射紫火球：看地上的红点，走开或者闪避；火球也能完美闪避', '新来的符箓傀儡站在远处射紫火球：看地上的红点，走开或者按空格闪避；火球也能完美闪避'],
+  ['小傀儡追着人自爆：边走边打，别让它们贴身', '小傀儡追着人自爆：边走边打，别让它们贴身。{招} 放天赋，{召} 召唤，{闪} 闪避'],
+  ['新来的符箓傀儡站在远处射紫火球：看地上的红点，走开或者闪避；火球也能完美闪避', '新来的符箓傀儡站在远处射紫火球：看地上的红点，走开或者按 {闪} 闪避；火球也能完美闪避'],
   ['铁头傀儡地上亮起红条就要冲过来：横着躲开，它冲完会晕一会儿，趁机打', '铁头傀儡地上亮起红条就要冲过来：横着躲开，它冲完会晕一会儿，趁机打'],
 ];
 /** @type {Record<string, [number, number]>} 键 → 屏幕上的方向（右、上） */
@@ -105,6 +108,8 @@ export class Trial {
     this.face = new THREE.Vector3(0, 0, -1);   // 最近一次走的方向：原地闪避朝这边
     /** @type {Set<string>} */
     this.keys = new Set();
+    /** 电脑版提示里写的键名（main.js 按设置里绑的键给；pcHint 换进 {招} {召} {闪}） */
+    this.keyText = { skills: 'Q、E、R', ult: 'V', dash: 'Shift' };
     this.stick = { x: 0, y: 0 };
     /** @type {{ id: number, x: number, y: number, t: number, moved: boolean } | null} */
     this.ptr = null;
@@ -276,10 +281,12 @@ export class Trial {
     };
   }
 
-  /** 键盘：走位键按下 / 松开，空格闪避。处理了就返回 true（调用方据此 preventDefault） @param {string} code @param {boolean} down */
+  /** 电脑版提示里的 {招} {召} {闪} 换成现在绑的键 @param {string} s */
+  pcHint(s) { const k = this.keyText; return s.replace(/\{招\}/g, k.skills).replace(/\{召\}/g, k.ult).replace(/\{闪\}/g, k.dash); }
+
+  /** 键盘：走位键按下 / 松开（闪避、放招按设置里绑的键，由 main.js 管）。处理了就返回 true（调用方据此 preventDefault） @param {string} code @param {boolean} down */
   key(code, down) {
     if (!this.on) return false;
-    if (code === 'Space') { if (down) this.dash(); return true; }
     if (!(code in MOVE_KEYS)) return false;
     if (down) this.keys.add(code); else this.keys.delete(code);
     return true;
@@ -301,7 +308,7 @@ export class Trial {
     hud.setWave('试炼', '战前准备');
     hud.setHint(this.d.mobile
       ? `一局：小怪潮与 ${BOSS_COUNT} 个 boss 交替；开局只会本命招，每打完一段三选一学字。战前点按钮右上角的笔写一句咒（开战后不能写）；左手拖动走位，右手点「闪」闪避；准备好了点「开战」`
-      : `一局：小怪潮与 ${BOSS_COUNT} 个 boss 交替；开局只会本命招，每打完一段三选一学字。战前点按钮右上角的笔写一句咒（开战后不能写）；WASD / 方向键走位，空格闪避；准备好了点「开战」或按回车`);
+      : this.pcHint(`一局：小怪潮与 ${BOSS_COUNT} 个 boss 交替；开局只会本命招，每打完一段三选一学字。战前点按钮右上角的笔写一句咒（开战后不能写）；WASD / 方向键走位，{闪} 闪避，{招} 放天赋；Esc 打开设置可以改键；准备好了点「开战」或按回车`));
     this.showStamina();
   }
 
@@ -335,7 +342,7 @@ export class Trial {
     const { hud } = this.d;
     hud.bigText(`第 ${this.round} 波`, '#16202b', 1400);
     this.d.fx.sound?.play('drums');
-    hud.setHint(WAVE_HINT[Math.min(this.round, WAVE_HINT.length) - 1][this.d.mobile ? 0 : 1]);
+    hud.setHint(this.d.mobile ? WAVE_HINT[Math.min(this.round, WAVE_HINT.length) - 1][0] : this.pcHint(WAVE_HINT[Math.min(this.round, WAVE_HINT.length) - 1][1]));
     this.showWave();
   }
 
@@ -555,7 +562,7 @@ export class Trial {
     hud.bigText(this.bossName(), BOSS_INK[cfg.type][0], 1600);
     fx.sound?.play('roar', { type: cfg.type, phase: 1 });
     hud.setWave(`试炼 ${n}/${BOSS_COUNT}`, PHASE_NAME[1]);
-    hud.setHint(BOSS_HINT[cfg.type][this.d.mobile ? 0 : 1]);
+    hud.setHint(this.d.mobile ? BOSS_HINT[cfg.type][0] : this.pcHint(BOSS_HINT[cfg.type][1]));
     this.shown = '';
     this.showBoss();
   }

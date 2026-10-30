@@ -55,7 +55,8 @@ import { Hud, preloadFonts } from './ui/hud.js';
 import { makeReport, topNames } from './ui/report.js';
 import { asrRemote, inspireRemote, parseRemote, warmUp } from './net.js';
 import { ASR_TIMEOUT_MS, MAX_SEC, Recorder } from './voice.js';
-import { pickQuality } from './quality.js';
+import { pickQuality, QUALITY_KEY } from './quality.js';
+import { ACTIONS, ACTION_NAMES, DEFAULT_KEYS, actionOf, bindKey, keyLabel, readKeys } from './rules/keymap.js';
 import { mountLab } from './ui/lab.js';
 
 /**
@@ -117,7 +118,9 @@ const TRIAL_VOICE_SLOW = 0.1;
  */
 export function start(root, opts = {}) {
   const mobile = window.matchMedia('(pointer: coarse)').matches;
-  const quality = pickQuality(location.search, mobile);   // 电脑电影档、手机流畅档（?q= 可强制）
+  /** 设置里选的画质档（没选过 = 自动） */
+  const qualityPref = (() => { try { return localStorage.getItem(QUALITY_KEY); } catch { return null; } })();
+  const quality = pickQuality(location.search, mobile, qualityPref);   // 电脑电影档、手机流畅档（?q= 可强制，设置里选过的次之）
 
   // ---------------------------------------------------------------- 渲染
   const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
@@ -238,13 +241,18 @@ export function start(root, opts = {}) {
   const view = { mode: (() => { try { return readView(localStorage.getItem(VIEW_KEY)); } catch { return readView(null); } })(),
     dir: viewDir(FOLLOW.pitch, FOLLOW.yaw).negate().setY(0).normalize(), fromPos: new THREE.Vector3(), fromLook: new THREE.Vector3(), sw: 1, hid: false,
     low: 0 };
-  function cycleView() {
-    view.mode = nextView(view.mode);
+  /** 换到某一档（按钮、快捷键轮着切；设置里直接点）：存下来，从现在的机位滑过去 @param {import('./world/trialcam.js').View} m */
+  function setViewMode(m) {
+    if (m === view.mode) return;
+    view.mode = m;
     try { localStorage.setItem(VIEW_KEY, view.mode); } catch { /* 存不进去就只记在这次打开里 */ }
     view.fromPos.copy(camPos); view.fromLook.copy(camLook); view.sw = 0;
     view.dir.copy(steer.dir).setY(0).normalize();   // 从现在的"往前"开始转向目标，不一下子扭过去
-    hud.setView(VIEW_NAMES[view.mode], true);
     sound.play('tick');
+  }
+  function cycleView() {
+    setViewMode(nextView(view.mode));
+    hud.setView(VIEW_NAMES[view.mode], true);
   }
   hud.onView = cycleView;
   function layoutCamera() {
@@ -403,6 +411,7 @@ export function start(root, opts = {}) {
     barrier.reset();
     S.talents = [...S.talents].sort((a, b) => TALENTS.indexOf(a) - TALENTS.indexOf(b));
     S.binds = Object.fromEntries(Object.entries(S.binds).filter(([k, b]) => S.talents.includes(k) && !b.auto));
+    applyKeys();   // 按钮下面写哪个键：试炼按设置里绑的，守关是数字
     hud.setSkills(S.talents.map((el) => ({ el, ...skillLabel(el) })),
       { cast: pressTalent, pen: openWrite, summon: pressSummon, dash: mode === 'trial' ? () => trial.dash() : undefined });
     hud.setCore(S.core, CORE_HP);
@@ -715,8 +724,107 @@ export function start(root, opts = {}) {
     if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const t = input.value; input.value = ''; onInput(); submit(t); }
     else if (e.key === 'Escape') input.blur();
   };
+  // ---------------------------------------------------------------- 键位与设置（设计文档第 4 节"10-30 改：键位与设置"）
+  /** 试炼的电脑键位（rules/keymap.js）：存在本机，设置里改 */
+  const KEYS_KEY = 'yc-keys';
+  let keys = (() => { try { return readKeys(localStorage.getItem(KEYS_KEY)); } catch { return readKeys(null); } })();
+  /** 按钮下面、视角按钮、试炼提示里写的键名：试炼按绑的键，守关是数字（守关要打字，字母键归输入框） */
+  function applyKeys() {
+    const L = (/** @type {import('./rules/keymap.js').Action} */ a) => keyLabel(keys[a]);
+    hud.setKeyLabels(S.mode === 'trial'
+      ? { dash: L('dash'), skills: [L('skill1'), L('skill2'), L('skill3')], ult: L('ult'), view: L('view') }
+      : { dash: L('dash'), skills: ['1', '2', '3'], ult: '4', view: L('view') });
+    trial.keyText = { skills: [L('skill1'), L('skill2'), L('skill3')].join('、'), ult: L('ult'), dash: L('dash') };
+  }
+  /** 试炼里按下绑了动作的键：放招可以按住连发（同原来的数字键），闪避、大招、切视角按一下算一下 @param {import('./rules/keymap.js').Action} a @param {boolean} repeat */
+  function doAction(a, repeat) {
+    if (a === 'skill1' || a === 'skill2' || a === 'skill3') { const el = S.talents[+a.slice(5) - 1]; if (el) pressTalent(el); return; }
+    if (repeat) return;
+    if (a === 'dash') trial.dash();
+    else if (a === 'ult') pressSummon();
+    else cycleView();
+  }
+
+  /** 设置面板开着：游戏停住（同写咒对话框，画面照画）；wait：正在等哪一项按新键；confirm：哪个按钮等着再点一次 */
+  const setUi = { paused: false, wait: /** @type {import('./rules/keymap.js').Action | null} */ (null), confirm: /** @type {string | null} */ (null),
+    qnote: '', knote: '' };
+  const inGame = () => S.phase === 'playing' || S.phase === 'rest' || S.phase === 'pick';
+  function renderSettings() {
+    const g = inGame();
+    const sticky = keys.dash === 'ShiftLeft' ? '闪避用 Shift 时，Windows 连按 5 下会问要不要开粘滞键，选"否"就好（或换个键）。' : '';
+    hud.renderSettings({
+      quality: qualityPref === 'cinema' || qualityPref === 'smooth' ? qualityPref : 'auto', qualityNow: quality.label,
+      qnote: setUi.qnote || `现在是${quality.label}${mobile ? '（手机默认）' : ''}。画面卡就换流畅档；换档会重新载入页面${g ? '，这一局会结束' : ''}。`,
+      warn: !!setUi.qnote, view: view.mode, sfx: sound.vol.sfx, music: sound.vol.music,
+      keys: mobile ? null : ACTIONS.map((a) => ({ act: a, name: ACTION_NAMES[a], label: keyLabel(keys[a]) })),
+      knote: setUi.knote || `WASD / 方向键走位，回车开战，数字 1～4 也能放招；守关要打字，仍用数字 1～4。${sticky}`,
+      wait: setUi.wait, inGame: g, mode: S.mode, confirm: setUi.confirm,
+    });
+  }
+  function openSettings() {
+    if (hud.settingsOn) return;
+    Object.assign(setUi, { paused: true, wait: null, confirm: null, qnote: '', knote: '' });
+    trial.keys.clear();   // 按着走位键打开的，关掉后别一直往那边走
+    hud.openSettings({
+      quality: (v) => {
+        const cur = qualityPref === 'cinema' || qualityPref === 'smooth' ? qualityPref : 'auto';
+        if (v === cur) return;
+        const name = { auto: '自动', cinema: '电影档', smooth: '流畅档' }[v] ?? v;
+        if (inGame() && setUi.confirm !== `q:${v}`) {
+          setUi.confirm = `q:${v}`; setUi.qnote = `换档要重新载入页面，这一局会结束——再点一次「${name}」确认`;
+          renderSettings(); return;
+        }
+        let saved = false;
+        try { if (v === 'auto') localStorage.removeItem(QUALITY_KEY); else localStorage.setItem(QUALITY_KEY, v); saved = true; } catch { /* 存不进去就写进地址 */ }
+        if (!/^https?:$/.test(location.protocol)) { location.reload(); return; }
+        const u = new URL(location.href);
+        u.searchParams.delete('q');   // 地址里的 ?q= 优先，不去掉就换不了
+        if (!saved && v !== 'auto') u.searchParams.set('q', v);
+        if (u.href === location.href) location.reload(); else location.replace(u.href);
+      },
+      view: (v) => { setViewMode(readView(v)); renderSettings(); },
+      volume: (k, v) => sound.setVolume(k, v),
+      key: (a) => { setUi.wait = setUi.wait === a ? null : /** @type {import('./rules/keymap.js').Action} */ (a); setUi.knote = ''; renderSettings(); },
+      keyReset: () => { keys = { ...DEFAULT_KEYS }; saveKeys(); setUi.wait = null; setUi.knote = ''; renderSettings(); },
+      restart: () => {
+        if (setUi.confirm !== 'restart') { setUi.confirm = 'restart'; renderSettings(); return; }
+        closeSettings(); startGame(/** @type {'defense' | 'trial'} */ (S.mode));
+      },
+      quit: () => {
+        if (setUi.confirm !== 'quit') { setUi.confirm = 'quit'; renderSettings(); return; }
+        closeSettings(); backToTitle();
+      },
+      close: closeSettings,
+    });
+    renderSettings();
+  }
+  function closeSettings() {
+    Object.assign(setUi, { paused: false, wait: null, confirm: null });
+    hud.closeSettings();
+  }
+  function saveKeys() {
+    try { localStorage.setItem(KEYS_KEY, JSON.stringify(keys)); } catch { /* 存不进去就只管这次打开 */ }
+    applyKeys();
+  }
+  /** 设置面板开着时的按键：等新键时这一下就是新键（Esc 取消），不然 Esc 关面板；别的键都不给游戏 @param {KeyboardEvent} e */
+  function settingsKey(e) {
+    if (setUi.wait) {
+      e.preventDefault();
+      if (e.key === 'Escape') { setUi.wait = null; renderSettings(); return; }
+      const next = bindKey(keys, setUi.wait, e.code);
+      if (!next) { setUi.knote = `「${e.key === ' ' ? '空格' : e.key}」不能用：走位键、方向键、Esc、回车、Tab、Ctrl / Alt / Win、功能键留作别用。换一个键，或按 Esc 取消。`; renderSettings(); return; }
+      keys = next; setUi.wait = null; setUi.knote = ''; saveKeys(); renderSettings();
+      return;
+    }
+    if (e.key === 'Escape') { e.preventDefault(); closeSettings(); }
+  }
+  hud.onGear = () => { if (hud.settingsOn) closeSettings(); else openSettings(); };
+
   const onGlobalKey = (e) => {
+    if (hud.settingsOn) { settingsKey(e); return; }
     if (e.key === '`') { hud.debug.hidden = !hud.debug.hidden; return; }
+    // Esc 打开设置；在输入框里按的 Esc 是收起输入（写咒对话框里是取消），不算
+    if (e.key === 'Escape' && !(e.target instanceof HTMLInputElement) && !e.repeat) { e.preventDefault(); openSettings(); return; }
     if (hud.pickOn) {   // 三选一开着：1～3 拿那一张，别的键不管
       const k = '123'.indexOf(e.key);
       if (k >= 0) { e.preventDefault(); hud.pickOn.pick(k); }
@@ -724,8 +832,9 @@ export function start(root, opts = {}) {
     }
     if (document.activeElement instanceof HTMLInputElement) return;   // 在打字（主输入框或写咒对话框）
     if (S.mode === 'trial' && S.phase === 'playing' && hud.write.hidden) {
-      // 试炼：走位、闪避；V 切视角；战前按回车开战。不打字，所以不抢焦点
-      if (e.code === 'KeyV' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); cycleView(); return; }
+      // 试炼：设置里绑的键（闪避、三招、大招、切视角），WASD / 方向键走位；战前按回车开战。不打字，所以不抢焦点
+      const a = e.ctrlKey || e.metaKey || e.altKey ? null : actionOf(keys, e.code);
+      if (a) { e.preventDefault(); doAction(a, e.repeat); return; }
       if (trial.key(e.code, true)) { e.preventDefault(); return; }
       if (e.key === 'Enter' && !trial.fighting) { e.preventDefault(); trial.engage(); return; }
     }
@@ -1945,9 +2054,10 @@ export function start(root, opts = {}) {
     // 麦克风：录着、听写着的时候这一局结束了就收掉；按钮按能不能开口显示（试炼开战后气势满了才出来）
     if (mic !== 'idle' && S.phase !== 'playing') { if (mic === 'on' || mic === 'tap') recorder?.stop(); micReset(); }
     hud.setMicShown(micAllowed() || mic !== 'idle');
-    let dt = frozen ? 0 : realDt * timeScale * lab.speed;   // 写咒对话框开着：游戏停住，画面照画；试验场可放慢、定格
+    const stop = frozen || setUi.paused;   // 写咒对话框、设置面板开着：游戏停住，画面照画
+    let dt = stop ? 0 : realDt * timeScale * lab.speed;   // 试验场可放慢、定格
     // 施法者自己的钟：开口慢放时世界慢、人照常（不然 0.8 秒的咏唱里手还没抬起来）；顿帧照样顿
-    let cdt = frozen ? 0 : realDt * lab.speed;
+    let cdt = stop ? 0 : realDt * lab.speed;
     if (fx.hitStop > 0) { fx.hitStop -= realDt; dt *= 0.06; cdt *= 0.06; }
     // 心法刹那：完美闪避后全场慢下来，玩家自己照常快。pdt 是玩家的时间：走位、闪避冷却、回法力、心法窗口都按它走
     const pdt = dt;

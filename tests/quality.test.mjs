@@ -14,6 +14,14 @@ test('?q= 强制某一档；不认识的值不理', () => {
   assert.equal(pickQuality('?q=ultra', true).name, 'smooth');
 });
 
+test('设置里选的档：没有 ?q= 时用它，认不出当自动；?q= 仍然优先', () => {
+  assert.equal(pickQuality('', false, 'smooth').name, 'smooth');
+  assert.equal(pickQuality('', true, 'cinema').name, 'cinema');
+  assert.equal(pickQuality('', true, 'auto').name, 'smooth');
+  assert.equal(pickQuality('', false, null).name, 'cinema');
+  assert.equal(pickQuality('?q=cinema', true, 'smooth').name, 'cinema');
+});
+
 test('水洼平面反射只给电影档；?refl=0 关掉，别的不变', () => {
   assert.ok(pickQuality('', false).reflect > 0);
   assert.equal(pickQuality('', true).reflect, 0);
