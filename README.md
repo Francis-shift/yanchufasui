@@ -46,7 +46,7 @@
 | `server/` | 解析接口的核心（`parse-core.ts`，两条线路共用：解析、求灵感、预热、诊断、语音识别）、语音识别（`asr.ts`，连火山引擎流式语音识别 2.0）、提示词、防刷计数 |
 | `tests/` | 单元测试（`npm test`）；`tests/eval/` 封存的评测集与攻击句、勘误、各模型跑分结果 |
 | `tools/` | `build_preview.py` 打离线单文件页面验画面（`props` 打物件材质检查页，`dragons` 打五条龙的动作检查页，`rigs` 打小傀儡模型的动作检查页，`casters` 打施法者模型的动作检查页，`bosses` 打 boss 的动作检查页（一次一个，看内嵌的是哪个模型）——正式模型放不下，先用 `lite_rig.py` 合并顶点做一份减面版；本地模块经 `strip-comments.mjs` 去掉注释、压掉空白和局部变量名，整包 gzip 后用 base85 内联，省体积）；`pack_prop.py` 把 Tripo 导出的场景物件打包成网页用的模型与贴图；`pack_rig.py` 把 Tripo 绑了骨骼的人形模型打包成网页用的骨骼模型（去掉手指骨、权重压成一字节、走跑动作改成原地踏步并记下原本的前进速度；导出时已经是原地的，按支撑脚往后滑多快估原本的速度）；`build-cn-func.mjs` 打包北京线路的函数；`bench-parse.mjs` 测解析延迟；`eval-parse.mjs` 跑评测集；`subset_font.py` 按字表裁书法字体；`name-charset.mjs` 查模型起的名字有多少落在字表里 |
-| `docs/` | 设计文档、出题说明、试玩记录 |
+| `docs/` | 说明文档（提交用）、AI 使用声明、设计文档、出题说明、试玩记录 |
 
 ## 本地运行
 
@@ -85,4 +85,4 @@ python tools/build_preview.py  # 生成 preview/index.html（离线单文件，�
 
 ## 开发说明
 
-开发过程中使用了 AI 辅助编程，具体分工与使用情况见提交材料里的 AI 使用声明。
+开发过程中使用了 AI 辅助编程，具体分工与使用情况见 [说明文档](docs/说明文档.md) 与 [AI 使用声明](docs/AI使用声明.md)。
