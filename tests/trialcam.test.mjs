@@ -2,8 +2,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { FOLLOW, LOCK, SHOT, VIEWS, followPose, kickAt, lockPose, lockTarget, nextView, offscreenArrow, readView, shoulderPose, turnToward,
-  viewDir } from '../game/world/trialcam.js';
+import { FOLLOW, LOCK, ORBIT, SHOT, VIEWS, clearDist, followPose, kickAt, lockPose, lockTarget, nextView, offscreenArrow, orbitDrag, orbitHome,
+  orbitIsHome, orbitOpts, orbitZoom, readView, shoulderPose, turnToward, viewDir } from '../game/world/trialcam.js';
+import { CAMERA_BLOCKERS, SOLIDS } from '../game/world/layout.js';
 
 const lens = (aspect = 16 / 9) => new THREE.PerspectiveCamera(50, aspect, 0.1, 500);
 
@@ -74,6 +75,100 @@ test('框不下的极端情况（竖屏人和 boss 分在两头、镜头压得�
     assert.equal(pose.look.y, FOLLOW.y);
     assert.ok(Math.hypot(pose.look.x - p.x, pose.look.z - p.z) <= FOLLOW.lead + span * FOLLOW.bias + span + 1e-6);
     assert.ok(pose.look.y + pose.dir.y * pose.dist > 3);
+  }
+});
+
+test('自己摆镜头：没动过就是默认机位；往右拖镜头往左绕、往下拖俯得更多，俯角夹在上下限里，转多少圈都收在 ±π', () => {
+  const o = orbitHome();
+  assert.ok(orbitIsHome(o));
+  assert.deepEqual(orbitOpts(o), { yaw: FOLLOW.yaw, pitch: FOLLOW.pitch, dist: FOLLOW.dist, maxDist: FOLLOW.maxDist });
+  orbitDrag(o, 100, 0);
+  assert.ok(o.yaw < 0 && Math.abs(o.yaw + 100 * ORBIT.sens) < 1e-12);
+  orbitDrag(o, 0, 40);
+  assert.ok(o.pitch > 0);
+  orbitDrag(o, 0, 1e4);
+  assert.ok(Math.abs(FOLLOW.pitch + o.pitch - ORBIT.pitchMax) < 1e-12);
+  orbitDrag(o, 0, -1e5);
+  assert.ok(Math.abs(FOLLOW.pitch + o.pitch - ORBIT.pitchMin) < 1e-12);
+  for (let i = 0; i < 50; i++) orbitDrag(o, 997, 0);
+  assert.ok(Math.abs(o.yaw) <= Math.PI + 1e-12);
+  assert.ok(!orbitIsHome(o));
+});
+
+test('滚轮：往下滚拉远、往上滚推近，夹在最近最远之间；拉远超过原来的最远时，最远跟着放宽', () => {
+  const o = orbitHome();
+  orbitZoom(o, 100);
+  assert.ok(o.zoom > 1);
+  orbitZoom(o, -300);
+  assert.ok(o.zoom < 1);
+  orbitZoom(o, 1e5);
+  assert.equal(o.zoom, ORBIT.zoomMax);
+  const opts = orbitOpts(o);
+  assert.ok(Math.abs(opts.dist - FOLLOW.dist * ORBIT.zoomMax) < 1e-12);
+  assert.ok(opts.maxDist >= opts.dist);
+  orbitZoom(o, -1e5);
+  assert.equal(o.zoom, ORBIT.zoomMin);
+  assert.equal(orbitOpts(o).maxDist, FOLLOW.maxDist, '拉近了，boss 跑远时照旧能自动拉到原来的最远');
+});
+
+test('转过的镜头：方向跟着转，走位的"往前"（镜头方向反过来）也跟着转；人和 boss 照样框在安全框里', () => {
+  const p = { x: 3, z: 4 }, boss = { x: -6, z: -5, h: 3.2 };
+  for (const yaw of [Math.PI / 2, Math.PI, -2.2]) {
+    for (const dy of [0, -400, 400]) {
+      const o = orbitHome();
+      o.yaw = yaw;
+      orbitDrag(o, 0, dy);
+      const opts = orbitOpts(o);
+      for (const aspect of [16 / 9, 740 / 360]) {
+        const camera = lens(aspect);
+        const pose = followPose(camera, p, boss, opts);
+        const want = viewDir(FOLLOW.pitch + o.pitch, FOLLOW.yaw + yaw);   // 照拖过的量自己算，不拿 orbitOpts 的结果当标尺
+        assert.ok(pose.dir.distanceTo(want) < 1e-9);
+        const fwd = pose.dir.clone().negate().setY(0).normalize();
+        assert.ok(Math.abs(Math.atan2(-fwd.x, -fwd.z) - Math.atan2(Math.sin(opts.yaw), Math.cos(opts.yaw))) < 1e-9, '往前正对着镜头朝的方向');
+        if (pose.dist < opts.maxDist) {
+          place(camera, pose);
+          for (const [x, y, z] of [[p.x, 0, p.z], [p.x, 1.9, p.z], [boss.x, 0, boss.z], [boss.x, boss.h, boss.z]]) {
+            assert.ok(inside(camera, x, y, z), `${x},${y},${z} yaw ${yaw} dy ${dy} @ ${aspect}`);
+          }
+        }
+      }
+    }
+  }
+});
+
+test('镜头被实心盒子挡住：挪到盒子跟前；盒子在镜头后面、看的点在盒子里都不管；最近不近过 3 米', () => {
+  const look = new THREE.Vector3(0, 1, 0), up = new THREE.Vector3(0, 0, 1);
+  const wall = { min: [-2, 0, 5], max: [2, 4, 6] };
+  assert.equal(clearDist(look, up, 11, []), 11);
+  assert.ok(Math.abs(clearDist(look, up, 11, [wall]) - 4.6) < 1e-9, '盒子前面 5 米，放宽 0.4');
+  assert.equal(clearDist(look, up, 4, [wall]), 4, '镜头本来就在盒子前面');
+  assert.equal(clearDist(look, up, 11, [{ min: [-2, 0, 1], max: [2, 4, 2] }]), 3, '挡得太近也留 3 米');
+  assert.equal(clearDist(look, up, 11, [{ min: [-1, 0, -1], max: [1, 4, 1] }]), 11, '贴着柱子站（看的点在盒子里）');
+  assert.equal(clearDist(look, up, 11, [{ min: [3, 0, 5], max: [5, 4, 6] }]), 11, '盒子在旁边');
+});
+
+test('转到牌坊那一侧、人站在牌坊跟前：镜头挪到牌坊里面；默认朝向在广场上哪儿都不被牌坊挡、镜头不乱推', () => {
+  assert.ok(CAMERA_BLOCKERS.length >= 3 && CAMERA_BLOCKERS.every((b) => SOLIDS.includes(b)), '牌坊两组柱子、屋顶（还有镇山石）');
+  assert.ok(CAMERA_BLOCKERS.every((b) => b.min[2] < -6), '都在牌坊那一带');
+  const lineHits = (a, b) => CAMERA_BLOCKERS.some((s) => {
+    for (let k = 0; k <= 200; k++) {
+      const p = a.clone().lerp(b, k / 200);
+      if (p.x > s.min[0] && p.x < s.max[0] && p.y > s.min[1] && p.y < s.max[1] && p.z > s.min[2] && p.z < s.max[2]) return true;
+    }
+    return false;
+  });
+  const o = orbitHome();
+  o.yaw = Math.PI;   // 镜头转到 -z 那一侧（牌坊在 z -8.6）
+  const pose = followPose(lens(), { x: 2, z: -5 }, null, orbitOpts(o));
+  const far = pose.look.clone().addScaledVector(pose.dir, pose.dist);
+  assert.ok(lineHits(pose.look, far), '这个站位本来会被挡（试题本身有效）');
+  const d = clearDist(pose.look, pose.dir, pose.dist, CAMERA_BLOCKERS);
+  assert.ok(d < pose.dist && d >= 3);
+  assert.ok(!lineHits(pose.look, pose.look.clone().addScaledVector(pose.dir, d)));
+  for (let x = -8; x <= 8; x += 2) for (let z = -6; z <= 8; z += 2) {
+    const q = followPose(lens(), { x, z }, null);
+    assert.equal(clearDist(q.look, q.dir, q.dist, CAMERA_BLOCKERS), q.dist, `${x},${z}`);
   }
 });
 

@@ -42,6 +42,20 @@ test('读存下来的：好的照用，认不出的那项回默认，撞键整�
   assert.deepEqual(readKeys('{坏的'), DEFAULT_KEYS);
 });
 
+test('镜头回正默认 C；10-30 存的旧键位里没有它：C 空着就用 C，被玩家占了就挑个空键，玩家改过的不冲掉', () => {
+  assert.equal(actionOf(readKeys(null), 'KeyC'), 'home');
+  const old = { dash: 'ShiftLeft', skill1: 'KeyQ', skill2: 'KeyE', skill3: 'KeyR', ult: 'KeyV', view: 'KeyB' };
+  assert.deepEqual(readKeys(JSON.stringify(old)), DEFAULT_KEYS);
+  const taken = readKeys(JSON.stringify({ ...old, skill1: 'KeyC', dash: 'Space' }));
+  assert.equal(taken.skill1, 'KeyC', '玩家把第一招改到 C，照旧');
+  assert.equal(taken.dash, 'Space');
+  assert.equal(taken.home, 'KeyF', '回正挑第一个空着的');
+  assert.equal(new Set(ACTIONS.map((a) => taken[a])).size, ACTIONS.length);
+  const busy = readKeys(JSON.stringify({ ...old, skill1: 'KeyC', skill2: 'KeyF' }));
+  assert.equal(busy.home, 'KeyG');
+  assert.deepEqual(readKeys(JSON.stringify({ ...old, home: 'KeyQ' })), DEFAULT_KEYS, '存了回正又撞键：还是整套回默认');
+});
+
 test('键名：字母、数字、Shift、空格、标点写成玩家认得的样子', () => {
   assert.deepEqual(['KeyQ', 'Digit3', 'ShiftLeft', 'ShiftRight', 'Space', 'Numpad2', 'Comma'].map(keyLabel), ['Q', '3', 'Shift', 'Shift', '空格', '小键盘2', ',']);
 });

@@ -1,7 +1,7 @@
 // @ts-check
 /**
  * 试炼的镜头（设计文档第 4 节"10-29 定：试炼的镜头与三档视角"）。这里只算"镜头该在哪、看哪"，平滑、推镜在 main 里。
- * 俯视跟随：方向定死（和守关的镜头同一侧，俯得更多），位置跟着人走，所以摇杆往上永远是往画面里面走；
+ * 俯视跟随：方向默认和守关的镜头同一侧（俯得更多），玩家可以自己转（ORBIT）；位置跟着人走，摇杆往上永远是往画面里面走；
  * 看的点往 boss 那边偏，人和 boss 离远了就往后拉，把两边都框进来。
  */
 import * as THREE from 'three';
@@ -22,6 +22,73 @@ export const FOLLOW = {
   /** 人（脚到头顶）和 boss（脚到头顶）要落在投影后的这个范围里：左右、上（顶上是 boss 血条，矮屏幕上 main 按血条下沿再压低）、下（底下一排技能按钮） */
   safe: { x: 0.82, top: 0.7, bottom: -0.42 },
 };
+
+/**
+ * 俯视跟随时玩家自己摆镜头（11-01 做：本人 10-30 嫌视角卡得太死）：电脑上按住右键拖动——横着拖绕着人转、竖着拖改俯角，
+ * 滚轮拉远拉近，按 C（设置里可改）回正。记的是相对默认机位的偏移，followPose 照它算；走位的"往前"跟着转过后的画面走。
+ * 人和 boss 框不进来时照旧自动往后拉
+ */
+export const ORBIT = {
+  /** 拖 1 像素转几弧度 */
+  sens: 0.005,
+  /** 俯角压到多低、抬到多高：低了天边和太阳进画，高了远处的红圈看不见 */
+  pitchMin: THREE.MathUtils.degToRad(25), pitchMax: THREE.MathUtils.degToRad(65),
+  /** 离多远是默认的几倍：最近、最远 */
+  zoomMin: 0.6, zoomMax: 1.7,
+  /** 滚轮每滚 1（deltaY 的像素）远近变几成：一格约 100，就是一成多 */
+  wheel: 0.0012,
+};
+/** @typedef {{ yaw: number, pitch: number, zoom: number }} Orbit */
+
+/** 默认机位（没转过） @returns {Orbit} */
+export function orbitHome() { return { yaw: 0, pitch: 0, zoom: 1 }; }
+
+/** 是不是默认机位 @param {Orbit} o */
+export function orbitIsHome(o) { return o.yaw === 0 && o.pitch === 0 && o.zoom === 1; }
+
+/**
+ * 右键拖了 dx、dy 像素：往右拖镜头往左绕（画面跟着手往右转），往下拖镜头抬高、往下看得更多；俯角夹在上下限里
+ * @param {Orbit} o 会被改掉 @param {number} dx @param {number} dy
+ */
+export function orbitDrag(o, dx, dy) {
+  o.yaw = Math.atan2(Math.sin(o.yaw - dx * ORBIT.sens), Math.cos(o.yaw - dx * ORBIT.sens));   // 收到 ±π，转多少圈都不漂
+  o.pitch = THREE.MathUtils.clamp(FOLLOW.pitch + o.pitch + dy * ORBIT.sens, ORBIT.pitchMin, ORBIT.pitchMax) - FOLLOW.pitch;
+  return o;
+}
+
+/** 滚轮滚了 dy（往下滚为正 = 拉远） @param {Orbit} o 会被改掉 @param {number} dy */
+export function orbitZoom(o, dy) {
+  o.zoom = THREE.MathUtils.clamp(o.zoom * Math.exp(dy * ORBIT.wheel), ORBIT.zoomMin, ORBIT.zoomMax);
+  return o;
+}
+
+/** 交给 followPose 的那几项：转过的方向、俯角、默认距离（最远照旧，拉近了也能自动拉回来框 boss） @param {Orbit} o */
+export function orbitOpts(o) {
+  return { yaw: FOLLOW.yaw + o.yaw, pitch: FOLLOW.pitch + o.pitch, dist: FOLLOW.dist * o.zoom, maxDist: Math.max(FOLLOW.maxDist, FOLLOW.dist * o.zoom) };
+}
+
+/**
+ * 镜头别被实心的东西挡住：从看的点往镜头那条线上，要是穿过哪个实心盒子（main 给的是牌坊：layout.js CAMERA_BLOCKERS；四面各放宽 pad 米），
+ * 镜头就挪到它跟前；最近不近过 min 米。看的点本身在盒子里（贴着柱子站）的那个不管
+ * @param {THREE.Vector3} look 看的点 @param {THREE.Vector3} dir 从看的点指向镜头（长度 1） @param {number} dist 本来离多远
+ * @param {{ min: number[], max: number[] }[]} solids @param {number} [pad] @param {number} [min]
+ * @returns {number} 镜头最远放多远
+ */
+export function clearDist(look, dir, dist, solids, pad = 0.4, min = 3) {
+  const o = [look.x, look.y, look.z], d = [dir.x, dir.y, dir.z];
+  let best = dist;
+  for (const b of solids) {
+    let t0 = -Infinity, t1 = Infinity;
+    for (let i = 0; i < 3 && t0 <= t1; i++) {
+      const lo = b.min[i] - pad, hi = b.max[i] + pad;
+      if (Math.abs(d[i]) < 1e-9) { if (o[i] < lo || o[i] > hi) t0 = Infinity; continue; }
+      const a = (lo - o[i]) / d[i], c = (hi - o[i]) / d[i];
+      t0 = Math.max(t0, Math.min(a, c)); t1 = Math.min(t1, Math.max(a, c));
+    }
+    if (t0 <= t1 && t0 > 0 && t0 < best) best = t0;
+  }
+  return Math.max(Math.min(best, dist), Math.min(min, dist));
+}
 
 const _cam = new THREE.PerspectiveCamera();
 const _p = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3();

@@ -81,6 +81,12 @@ export const SOLIDS = [
   ...[-1, 1].map((s) => box(s * HUABIAO_X - 0.81, s * HUABIAO_X + 0.81, 0, 4.6, HUABIAO_Z - 0.57, HUABIAO_Z + 0.57)),
 ];
 
+/**
+ * 试炼俯视镜头要躲的（挡在人和镜头中间就把镜头挪到跟前，world/trialcam.js clearDist）：只算牌坊——柱子、屋顶、镇山石。
+ * 石兽、华表又细又矮，挡一下比镜头猛地推近好受（11-01 量：默认朝向站到华表背后，躲它会从 11 米一下推到 4 米）
+ */
+export const CAMERA_BLOCKERS = SOLIDS.filter((b) => b.max[1] > 5);
+
 /** 模型摆放的位置（props.js 用）：牌坊、两只石兽（右边那只镜像）、镇山石（模型原点在底面中心） */
 export const PROP_SPOTS = {
   gate: { x: 0, y: 0, z: GATE.z, rotY: 0, mirror: false },

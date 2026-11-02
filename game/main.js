@@ -43,14 +43,14 @@ import { GradePass } from './fx/grade.js';
 import { Particles } from './fx/particles.js';
 import { SpellFx } from './fx/spells.js';
 import { Sound } from './fx/sound.js';
-import { buildEnvironment } from './world/environment.js';
+import { SUN_DIR, buildEnvironment } from './world/environment.js';
 import { invasionTarget, stepInvasion } from './world/invasion.js';
 import { buildBarrier } from './world/barrier.js';
 import { fitFrame } from './world/framing.js';
-import { FOLLOW, LOCK, SHOT, VIEW_NAMES, followPose, kickAt, lockPose, lockTarget, nextView, offscreenArrow, readView, shoulderPose, turnToward,
-  viewDir } from './world/trialcam.js';
+import { FOLLOW, LOCK, SHOT, VIEW_NAMES, clearDist, followPose, kickAt, lockPose, lockTarget, nextView, offscreenArrow, orbitDrag, orbitHome,
+  orbitIsHome, orbitOpts, orbitZoom, readView, shoulderPose, turnToward, viewDir } from './world/trialcam.js';
 import { loadProps } from './world/props.js';
-import { buildLayout, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS, OBSTACLES } from './world/layout.js';
+import { buildLayout, CAMERA_BLOCKERS, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS, OBSTACLES } from './world/layout.js';
 import { Hud, preloadFonts } from './ui/hud.js';
 import { makeReport, topNames } from './ui/report.js';
 import { asrRemote, inspireRemote, parseRemote, warmUp } from './net.js';
@@ -227,9 +227,9 @@ export function start(root, opts = {}) {
   /**
    * 试炼的跟随镜头（world/trialcam.js）：平滑后的看的点、离多远；on 为 false 时下一帧直接跳到位。
    * perfects、kickT：上一帧数到的完美闪避次数、推近开始后几秒；shot：正在演的召龙肩后镜头（跟哪条龙、龙开飞后几秒、召了几秒），
-   * w：肩后镜头占几成（拉回时 shot 已清掉，照最后的机位退回来），pos / at：肩后机位和看的点
+   * w：肩后镜头占几成（拉回时 shot 已清掉，照最后的机位退回来），pos / at：肩后机位和看的点；cap：被牌坊这些挡住时镜头最远放多远（平滑过的）
    */
-  const tcam = { look: new THREE.Vector3(), dist: 0, on: false, perfects: 0, kickT: Infinity,
+  const tcam = { look: new THREE.Vector3(), dist: 0, on: false, perfects: 0, kickT: Infinity, cap: Infinity,
     /** @type {{ f: any, t: number, wait: number } | null} */ shot: null, w: 0, pos: new THREE.Vector3(), at: new THREE.Vector3(), aimed: false };
   /** 试炼里"往前"是哪个方向（trial.update 按它算摇杆和按键）：跟俯视跟随的朝向走，演肩后镜头时不跟着转 */
   const steer = { dir: viewDir(FOLLOW.pitch, FOLLOW.yaw).negate(), getWorldDirection: (/** @type {THREE.Vector3} */ v) => v.copy(steer.dir) };
@@ -256,6 +256,50 @@ export function start(root, opts = {}) {
     hud.setView(VIEW_NAMES[view.mode], true);
   }
   hud.onView = cycleView;
+  /**
+   * 俯视跟随时自己摆镜头（world/trialcam.js ORBIT）：电脑上按住右键拖动转、滚轮远近、C 回正；只记在这次打开里。
+   * drag：正在拖的那根指针；moved：转过还没重取雾色；zooming：滚轮停下后还有几秒让远近跟手；homing：正在滑回默认机位
+   */
+  const orbit = { ...orbitHome(), drag: /** @type {{ id: number, x: number, y: number } | null} */ (null), moved: false, zooming: 0, homing: false };
+  const orbitOn = () => !mobile && S.mode === 'trial' && trial.on && view.mode === 'follow' && !setUi.paused;
+  function orbitReset() {
+    if (orbitIsHome(orbit) || orbit.homing) return;
+    orbit.homing = true;
+    sound.play('tick');
+  }
+  /** 回正：约 0.3 秒滑回默认机位（一下子跳回去会晕） @param {number} rdt */
+  function orbitHoming(rdt) {
+    if (!orbit.homing) return;
+    const k = 1 - Math.exp(-rdt * 10);
+    orbit.yaw -= orbit.yaw * k; orbit.pitch -= orbit.pitch * k; orbit.zoom += (1 - orbit.zoom) * k;
+    orbit.moved = true; orbit.zooming = 0.4;
+    if (Math.abs(orbit.yaw) + Math.abs(orbit.pitch) + Math.abs(orbit.zoom - 1) < 2e-3) Object.assign(orbit, orbitHome(), { homing: false });
+  }
+  {
+    const cv = renderer.domElement;
+    cv.addEventListener('contextmenu', (e) => { if (S.mode === 'trial') e.preventDefault(); });   // 右键拿来拖镜头，不弹菜单
+    cv.addEventListener('pointerdown', (e) => {
+      if (e.button !== 2 || orbit.drag || !orbitOn()) return;
+      orbit.drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      orbit.homing = false;
+      cv.setPointerCapture?.(e.pointerId);
+    });
+    cv.addEventListener('pointermove', (e) => {
+      const g = orbit.drag;
+      if (!g || e.pointerId !== g.id) return;
+      if (orbitOn()) { orbitDrag(orbit, e.clientX - g.x, e.clientY - g.y); orbit.moved = true; }
+      g.x = e.clientX; g.y = e.clientY;
+    });
+    const release = (/** @type {PointerEvent} */ e) => { if (orbit.drag && e.pointerId === orbit.drag.id) orbit.drag = null; };
+    cv.addEventListener('pointerup', release);
+    cv.addEventListener('pointercancel', release);
+    cv.addEventListener('wheel', (e) => {
+      if (!orbitOn()) return;
+      e.preventDefault();
+      orbitZoom(orbit, e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY);   // 按行滚的鼠标：一行约 33 像素
+      orbit.zooming = 0.4; orbit.homing = false;
+    }, { passive: false });
+  }
   function layoutCamera() {
     const w = root.clientWidth || window.innerWidth, h = root.clientHeight || window.innerHeight;
     camera.aspect = w / h;
@@ -737,14 +781,15 @@ export function start(root, opts = {}) {
     hud.setKeyLabels(S.mode === 'trial'
       ? { dash: L('dash'), skills: [L('skill1'), L('skill2'), L('skill3')], ult: L('ult'), view: L('view') }
       : { dash: L('dash'), skills: ['1', '2', '3'], ult: '4', view: L('view') });
-    trial.keyText = { skills: [L('skill1'), L('skill2'), L('skill3')].join('、'), ult: L('ult'), dash: L('dash') };
+    trial.keyText = { skills: [L('skill1'), L('skill2'), L('skill3')].join('、'), ult: L('ult'), dash: L('dash'), home: L('home') };
   }
-  /** 试炼里按下绑了动作的键：放招可以按住连发（同原来的数字键），闪避、大招、切视角按一下算一下 @param {import('./rules/keymap.js').Action} a @param {boolean} repeat */
+  /** 试炼里按下绑了动作的键：放招可以按住连发（同原来的数字键），闪避、大招、切视角、镜头回正按一下算一下 @param {import('./rules/keymap.js').Action} a @param {boolean} repeat */
   function doAction(a, repeat) {
     if (a === 'skill1' || a === 'skill2' || a === 'skill3') { const el = S.talents[+a.slice(5) - 1]; if (el) pressTalent(el); return; }
     if (repeat) return;
     if (a === 'dash') trial.dash();
     else if (a === 'ult') pressSummon();
+    else if (a === 'home') orbitReset();
     else cycleView();
   }
 
@@ -760,7 +805,7 @@ export function start(root, opts = {}) {
       qnote: setUi.qnote || `现在是${quality.label}${mobile ? '（手机默认）' : ''}。画面卡就换流畅档；换档会重新载入页面${g ? '，这一局会结束' : ''}。`,
       warn: !!setUi.qnote, view: view.mode, sfx: sound.vol.sfx, music: sound.vol.music,
       keys: mobile ? null : ACTIONS.map((a) => ({ act: a, name: ACTION_NAMES[a], label: keyLabel(keys[a]) })),
-      knote: setUi.knote || `WASD / 方向键走位，回车开战，数字 1～4 也能放招；守关要打字，仍用数字 1～4。${sticky}`,
+      knote: setUi.knote || `WASD / 方向键走位，回车开战，数字 1～4 也能放招；俯视时按住右键拖动转镜头、滚轮拉远拉近；守关要打字，仍用数字 1～4。${sticky}`,
       wait: setUi.wait, inGame: g, mode: S.mode, confirm: setUi.confirm,
     });
   }
@@ -1941,6 +1986,8 @@ export function start(root, opts = {}) {
   }
   let coverT = 0;
   const UP = new THREE.Vector3(0, 1, 0), _side = new THREE.Vector3();
+  /** 太阳在地面上的方向（俯视转到正对它时压台面反光） */
+  const SUN_FLAT = new THREE.Vector3(SUN_DIR.x, 0, SUN_DIR.z).normalize();
 
   /**
    * 试炼的镜头（设计文档第 4 节"10-29 定：试炼的镜头与三档视角"）：按现在是哪一档算机位；刚切档时从切的那一刻的机位滑过去
@@ -1985,25 +2032,35 @@ export function start(root, opts = {}) {
 
   /**
    * 俯视跟随：看的点跟得快、离多远拉远快推近慢（boss 冲过来时先把它框进来，走近了再慢慢推回去）；
+   * 玩家自己转过、拉过的（orbit）照着算，转的那一下直接跟手，走位方向跟着变；
    * 开口时推近一点；完美闪避推近一下；召龙时推到肩后（ultShot）
    * @param {number} rdt
    */
   function followCamera(rdt) {
     const b = trial.boss;
     const safe = { ...FOLLOW.safe, top: Math.min(FOLLOW.safe.top, hud.safeTop()) };   // 矮屏幕上 boss 血条占得多，量着它来
-    const pose = followPose(camera, trial.p, b ? { x: b.pos.x, z: b.pos.z, h: BOSS_H } : null, { safe });
+    orbitHoming(rdt);
+    const pose = followPose(camera, trial.p, b ? { x: b.pos.x, z: b.pos.z, h: BOSS_H } : null, { safe, ...orbitOpts(orbit) });
     steer.dir.copy(pose.dir).negate();
     if (!tcam.on) {
-      tcam.on = true; tcam.look.copy(pose.look); tcam.dist = pose.dist;
+      tcam.on = true; tcam.look.copy(pose.look); tcam.dist = pose.dist; tcam.cap = Infinity;
       tcam.perfects = trial.perfects; tcam.kickT = Infinity; tcam.shot = null; tcam.w = 0;
       env.aim(steer.dir);
-    }
+    } else if (orbit.moved && tcam.w === 0) env.aim(steer.dir);   // 转了方向：雾色换成新朝向那段天边的
+    orbit.moved = false;
     if (trial.perfects !== tcam.perfects) { tcam.perfects = trial.perfects; tcam.kickT = 0; }
     tcam.kickT += rdt;
     tcam.look.lerp(pose.look, 1 - Math.exp(-rdt * 6));
-    tcam.dist += (pose.dist - tcam.dist) * (1 - Math.exp(-rdt * (pose.dist > tcam.dist ? 4 : 1.2)));
+    // 刚滚过滚轮：远近跟手（8），不然推近要慢慢来
+    orbit.zooming = Math.max(0, orbit.zooming - rdt);
+    tcam.dist += (pose.dist - tcam.dist) * (1 - Math.exp(-rdt * (orbit.zooming > 0 ? 8 : pose.dist > tcam.dist ? 4 : 1.2)));
     camLook.copy(tcam.look);
-    camPos.copy(tcam.look).addScaledVector(pose.dir, tcam.dist * (1 - 0.25 * cam.focus) * (1 - SHOT.kick.push * kickAt(tcam.kickT)));
+    // 牌坊挡在看的点和镜头中间（自己转到牌坊那一侧时）：镜头挪到它跟前，挡上了很快挪过去、挡开了慢慢退回去
+    const want = tcam.dist * (1 - 0.25 * cam.focus) * (1 - SHOT.kick.push * kickAt(tcam.kickT));
+    const cap = clearDist(tcam.look, pose.dir, want, CAMERA_BLOCKERS);
+    tcam.cap = Math.min(tcam.cap, want);
+    tcam.cap += (cap - tcam.cap) * (1 - Math.exp(-rdt * (cap < tcam.cap ? 20 : 2)));
+    camPos.copy(tcam.look).addScaledVector(pose.dir, Math.min(want, tcam.cap));
     ultShot(rdt);
   }
 
@@ -2148,7 +2205,9 @@ export function start(root, opts = {}) {
     // 肩后、第一人称平着看：太阳本体会进画（压到两成），台面也会把太阳镜面反射过来，泛光晕成半屏白、盖住敌人（压到 5%，留一小点夕阳反光）
     view.low += ((inTrial && view.mode !== 'follow' ? 1 : 0) - view.low) * Math.min(1, realDt * 4);
     env.setGlare(1 - 0.8 * view.low);
-    layout.plaza.setGlint(1 - 0.95 * view.low);
+    // 俯视跟随自己转到正对太阳时，台面反光一样晕白（11-01 量：镜头和太阳水平方向夹角余弦过 0.9，一成上下的画面发白；默认朝向是 0.64，不发白），按朝向压
+    const sunFace = inTrial && view.mode === 'follow' ? THREE.MathUtils.smoothstep(_v.copy(steer.dir).setY(0).normalize().dot(SUN_FLAT), 0.75, 0.95) : 0;
+    layout.plaza.setGlint(1 - 0.95 * Math.max(view.low, sunFace));
     hud.setView(VIEW_NAMES[view.mode], inTrial && S.phase === 'playing');
     shakeOff.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(fx.shake * 0.5);
     camera.position.copy(camPos).add(shakeOff);
@@ -2301,7 +2360,9 @@ export function start(root, opts = {}) {
       const at = (/** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ z) => { const p = _v.set(x, y, z).project(camera); return [+p.x.toFixed(2), +p.y.toFixed(2)]; };
       const b = trial.boss;
       return { dist: +tcam.dist.toFixed(2), feet: at(trial.p.x, 0, trial.p.z), head: at(trial.p.x, 1.9, trial.p.z),
-        boss: b && [at(b.pos.x, 0, b.pos.z), at(b.pos.x, BOSS_H, b.pos.z)] };
+        boss: b && [at(b.pos.x, 0, b.pos.z), at(b.pos.x, BOSS_H, b.pos.z)],
+        orbit: { yaw: +orbit.yaw.toFixed(3), pitch: +orbit.pitch.toFixed(3), zoom: +orbit.zoom.toFixed(3) },
+        steer: steer.dir.toArray().map((x) => +x.toFixed(2)) };
     },
     dragon: (el = 'ice') => dragon.preload(el),
     flight: () => {
