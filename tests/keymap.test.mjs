@@ -59,7 +59,7 @@ test('镜头回正默认 C；10-30 存的旧键位里没有它：C 空着就用 
 test('锁定开关默认 F；旧键位里没有它：F 空着就用 F，被占了挑个空键（回正先挑过的不算空），玩家改过的不冲掉', () => {
   assert.equal(actionOf(readKeys(null), 'KeyF'), 'lock');
   const old = { dash: 'ShiftLeft', skill1: 'KeyQ', skill2: 'KeyE', skill3: 'KeyR', ult: 'KeyV', view: 'KeyB' };
-  assert.deepEqual(readKeys(JSON.stringify({ ...old, home: 'KeyC' })), DEFAULT_KEYS, '11-01 存的（有回正、没锁定）');
+  assert.deepEqual(readKeys(JSON.stringify({ ...old, home: 'KeyC' })), DEFAULT_KEYS, '11-02 存的（有回正、没锁定）');
   const a = readKeys(JSON.stringify({ ...old, home: 'KeyC', ult: 'KeyF' }));
   assert.equal(a.ult, 'KeyF');
   assert.equal(a.lock, 'KeyG', 'C 是回正的、F 是大招的');

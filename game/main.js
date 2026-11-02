@@ -2256,7 +2256,7 @@ export function start(root, opts = {}) {
     // 肩后、第一人称平着看：太阳本体会进画（压到两成），台面也会把太阳镜面反射过来，泛光晕成半屏白、盖住敌人（压到 5%，留一小点夕阳反光）
     view.low += ((inTrial && view.mode !== 'follow' ? 1 : 0) - view.low) * Math.min(1, realDt * 4);
     env.setGlare(1 - 0.8 * view.low);
-    // 俯视跟随自己转到正对太阳时，台面反光一样晕白（11-01 量：镜头和太阳水平方向夹角余弦过 0.9，一成上下的画面发白；默认朝向是 0.64，不发白），按朝向压
+    // 俯视跟随自己转到正对太阳时，台面反光一样晕白（11-02 量：镜头和太阳水平方向夹角余弦过 0.9，一成上下的画面发白；默认朝向是 0.64，不发白），按朝向压
     const sunFace = inTrial && view.mode === 'follow' ? THREE.MathUtils.smoothstep(_v.copy(steer.dir).setY(0).normalize().dot(SUN_FLAT), 0.75, 0.95) : 0;
     layout.plaza.setGlint(1 - 0.95 * Math.max(view.low, sunFace));
     hud.setView(VIEW_NAMES[view.mode], inTrial && S.phase === 'playing');
