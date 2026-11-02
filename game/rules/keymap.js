@@ -1,23 +1,24 @@
 // @ts-check
 /**
  * 试炼的电脑键位（设计文档第 4 节"10-30 改：键位与设置"）：动作 → 按键（KeyboardEvent.code）。
- * 默认是本人定的 Shift 闪避、Q / E / R 三招、V 大招、B 切视角，11-01 加 C 镜头回正；设置里可以改，存在这台设备的浏览器里。
+ * 默认是本人定的 Shift 闪避、Q / E / R 三招、V 大招、B 切视角，11-01 加 C 镜头回正、F 锁定开关；设置里可以改，存在这台设备的浏览器里。
  * 走位（WASD、方向键）、Esc（设置）、回车（开战）、`（调试）不让占；Ctrl、Alt、Win 也不让占（按住它再按 W 会关掉网页之类）。
  * 守关要打字，不走这套，照旧用数字 1～4。
  */
 
-export const ACTIONS = /** @type {const} */ (['dash', 'skill1', 'skill2', 'skill3', 'ult', 'view', 'home']);
+export const ACTIONS = /** @type {const} */ (['dash', 'skill1', 'skill2', 'skill3', 'ult', 'view', 'home', 'lock']);
 /** @typedef {typeof ACTIONS[number]} Action */
 /** @typedef {Record<Action, string>} KeyMap */
 
 /** @type {Record<Action, string>} */
-export const ACTION_NAMES = { dash: '闪避', skill1: '第一招', skill2: '第二招', skill3: '第三招', ult: '大招（召龙）', view: '切换视角', home: '镜头回正' };
+export const ACTION_NAMES = { dash: '闪避', skill1: '第一招', skill2: '第二招', skill3: '第三招', ult: '大招（召龙）', view: '切换视角', home: '镜头回正',
+  lock: '锁定开关' };
 
 /** @type {KeyMap} */
-export const DEFAULT_KEYS = { dash: 'ShiftLeft', skill1: 'KeyQ', skill2: 'KeyE', skill3: 'KeyR', ult: 'KeyV', view: 'KeyB', home: 'KeyC' };
+export const DEFAULT_KEYS = { dash: 'ShiftLeft', skill1: 'KeyQ', skill2: 'KeyE', skill3: 'KeyR', ult: 'KeyV', view: 'KeyB', home: 'KeyC', lock: 'KeyF' };
 
 /** 第一版（10-30）之后才加的动作：存的键位里可能还没有它们 */
-const LATER = new Set(['home']);
+const LATER = new Set(['home', 'lock']);
 /** 后加的动作默认键已经被别的动作占了，就从这里挑第一个空着的 */
 const SPARE =['KeyC', 'KeyF', 'KeyG', 'KeyX', 'KeyZ', 'KeyT', 'KeyY', 'KeyU', 'KeyI', 'KeyO', 'KeyP', 'KeyH', 'KeyJ', 'KeyK', 'KeyL', 'KeyN', 'KeyM'];
 
@@ -34,7 +35,7 @@ export function bindable(code) { const c = normCode(code); return BINDABLE.test(
 
 /**
  * 读存下来的键位：认不出、不能绑的那一项用默认的；读出来有两个动作撞了同一个键，整套回默认（不猜哪个是对的）。
- * 例外是后来才加的动作（存的时候还没有它，比如"镜头回正"）：它的默认键被玩家拿去绑了别的，不能因此把玩家改过的整套冲掉，给它挑个空着的键
+ * 例外是后来才加的动作（存的时候还没有它，比如"镜头回正""锁定开关"）：它的默认键被玩家拿去绑了别的，不能因此把玩家改过的整套冲掉，给它挑个空着的键
  * @param {string | null} s @returns {KeyMap}
  */
 export function readKeys(s) {

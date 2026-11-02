@@ -2,7 +2,7 @@
 
 - 库（three、cannon-es、后期处理）取 jsdelivr 的压缩版，缓存在 preview/vendor-min/；
 - game/ 下的本地模块逐个收进来，相对引用改写成内部名字；
-- 全部模块合成一份、gzip + base85 内联，页面启动时用浏览器自带的 DecompressionStream 解开，动态写 importmap 再启动。
+- 全部模块合成一份、deflate 压缩后用 94 个可见字符编码内联，页面启动时用浏览器自带的 DecompressionStream 解开，动态写 importmap 再启动。
 预览页没有服务器，解析只走关键词（等同断网模式）。
 用法：python tools/build_preview.py          → preview/index.html（游戏）
       python tools/build_preview.py check    → preview/check.html（手机检查页）
@@ -28,6 +28,7 @@ import pathlib
 import posixpath
 import re
 import subprocess
+import zlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / "preview"
@@ -89,40 +90,49 @@ def collect_local(rel: str, out: dict):
     out[rel] = REL_IMPORT.sub(rewrite, src)
 
 
-# 模块包用 base85（4 字节编 5 个字，base64 是 3 字节编 4 个）：同样的内容小 6%，10-29 加语音时超了 512 KB。
-# Python 的 base85 字母表里有 < > &，换成表里没有的 . , :，页面里就不会被当成标签或注释。BOOT 里的 B85 与此对应
-B85_SWAP = str.maketrans("<>&", ".,:")
+# 模块包压成 deflate 流后用 94 个字编码：空格到 ~ 这 95 个可见 ASCII 去掉 <（页面里就不会被当成标签或注释），
+# 9 字节编 11 个字（94^11 > 2^72）。10-29 从 base64 换成 base85（小 6%），11-01 再换成这个（又小 2%），都是因为超了 512 KB。
+# 最后一组不满 9 字节就补 0，页面按 data-n 记的字节数截掉。BOOT 里的 B94 与此对应
+B94 = "".join(chr(c) for c in range(0x20, 0x7F) if chr(c) != "<")
+assert len(B94) == 94
 
 
-def gz_b85(s: str) -> str:
-    out = base64.b85encode(gzip.compress(s.encode("utf-8"), 9)).decode().translate(B85_SWAP)
-    assert "<" not in out
-    return out
+def deflate_b94(s: str) -> tuple[str, int]:
+    c = zlib.compressobj(9, zlib.DEFLATED, -15, 9)
+    raw = c.compress(s.encode("utf-8")) + c.flush()
+    pad = raw + b"\0" * (-len(raw) % 9)
+    out = []
+    for i in range(0, len(pad), 9):
+        v, chunk = int.from_bytes(pad[i:i + 9], "big"), []
+        for _ in range(11):
+            v, r = divmod(v, 94)
+            chunk.append(B94[r])
+        out.append("".join(reversed(chunk)))
+    return "".join(out), len(raw)
 
 
 BOOT = """<script>
 (async () => {
   try {
-    const B85 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%%:()*+-;.=,?@^_`{|}~';
     const T = new Uint8Array(128);
-    for (let i = 0; i < 85; i++) T[B85.charCodeAt(i)] = i;
-    const unb85 = (s) => {   // 末尾不满 5 个字的一组用最大的字补齐，只取前几个字节（同 Python 的 b85decode）
-      const n = s.length, out = new Uint8Array(Math.floor(n / 5) * 4 + (n %% 5 ? n %% 5 - 1 : 0));
-      for (let i = 0, o = 0; i < n; i += 5) {
-        let acc = 0;
-        for (let j = 0; j < 5; j++) acc = acc * 85 + (i + j < n ? T[s.charCodeAt(i + j)] : 84);
-        const b = [acc / 16777216 & 255, acc / 65536 & 255, acc / 256 & 255, acc & 255];
-        for (let j = 0; j < 4 && o < out.length; j++) out[o++] = b[j];
+    for (let c = 32, i = 0; c < 127; c++) if (c !== 60) T[c] = i++;   // 空格到 ~ 去掉 <（同 build_preview.py 的 B94）
+    const unb94 = (s, n) => {   // 11 个字一组还原成 9 个字节，截到 n 个
+      const out = new Uint8Array(s.length / 11 * 9);
+      for (let i = 0, o = 0; i < s.length; i += 11) {
+        let v = 0n;
+        for (let j = 0; j < 11; j++) v = v * 94n + BigInt(T[s.charCodeAt(i + j)]);
+        for (let j = 8; j >= 0; j--) { out[o + j] = Number(v & 255n); v >>= 8n; }
+        o += 9;
       }
-      return out;
+      return out.subarray(0, n);
     };
-    const unzip = async (txt) => {
-      const bin = unb85(txt.trim());
-      return new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+    const unzip = async (s) => {   // 不能 trim：空格也是编码里的字
+      const bin = unb94(s.textContent, +s.dataset.n);
+      return new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
     };
     const urls = {};
     for (const s of document.querySelectorAll('script[data-bundle]')) {
-      for (const [name, src] of Object.entries(JSON.parse(await unzip(s.textContent)))) {
+      for (const [name, src] of Object.entries(JSON.parse(await unzip(s)))) {
         urls[name] = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
       }
     }
@@ -217,7 +227,8 @@ def main():
             collect_pkg(p, pkgs)
     # 所有模块压成一个 gzip 流（模块之间重复的写法能互相引用，比逐个压小几十 KB；10-27 逐个压时超了 512 KB）
     mods = {f"@pkg/{p}": c for p, c in pkgs.items()} | {f"@local/{p}": c for p, c in locs.items()}
-    blocks = [f'<script type="application/octet-stream" data-bundle>{gz_b85(json.dumps(mods, ensure_ascii=False))}</script>']
+    packed, n = deflate_b94(json.dumps(mods, ensure_ascii=False))
+    blocks = [f'<script type="application/octet-stream" data-bundle data-n="{n}">{packed}</script>']
     if dragon:   # 模型数据 gzip 后内联，游戏里按开头两个字节自己判断要不要解压
         blocks.append(f'<script type="application/octet-stream" id="asset-dragon">{base64.b64encode(gzip.compress(dragon, 9)).decode()}</script>')
     blocks += [f'<script type="application/octet-stream" data-asset="{a.name}">{base64.b64encode(a.read_bytes()).decode()}</script>' for a in assets]

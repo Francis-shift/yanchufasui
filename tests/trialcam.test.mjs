@@ -2,8 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { FOLLOW, LOCK, ORBIT, SHOT, VIEWS, clearDist, followPose, kickAt, lockPose, lockTarget, nextView, offscreenArrow, orbitDrag, orbitHome,
-  orbitIsHome, orbitOpts, orbitZoom, readView, shoulderPose, turnToward, viewDir } from '../game/world/trialcam.js';
+import { FOLLOW, LOCK, LOOK, ORBIT, SENS, SHOT, VIEWS, clearDist, followPose, kickAt, lockPose, lockTarget, lookDrag, nextView, offscreenArrow,
+  orbitDrag, orbitHome, orbitIsHome, orbitOpts, orbitPinch, orbitZoom, readSens, readView, shoulderPose, turnBy, turnToward, viewDir } from '../game/world/trialcam.js';
 import { CAMERA_BLOCKERS, SOLIDS } from '../game/world/layout.js';
 
 const lens = (aspect = 16 / 9) => new THREE.PerspectiveCamera(50, aspect, 0.1, 500);
@@ -348,4 +348,76 @@ test('召龙的肩后镜头：目标就在脚下时朝俯视跟随的"往前"看
   for (const v of [pos.x, pos.y, pos.z, look.x, look.y, look.z]) assert.ok(Number.isFinite(v));
   const f = new THREE.Vector3(fwd.x, 0, fwd.z).normalize();
   assert.ok(Math.abs((pos.x - 1) * f.x + (pos.z - 1) * f.z + SHOT.back) < 1e-9);
+});
+
+test('肩后 / 第一人称自己转：往右拖"往前"往画面右边转、转的角度按像素算；往下拖低头，抬低头夹在上下限里；和俯视往右拖转的是同一边', () => {
+  const UP = new THREE.Vector3(0, 1, 0);
+  for (const a of [0, 1.3, -2.6]) {
+    const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a)), right = new THREE.Vector3().crossVectors(dir, UP);   // 镜头朝 dir 看时画面的右边
+    const before = dir.clone(), look = { tilt: 0 };
+    lookDrag(dir, look, 40, 0);
+    assert.ok(dir.dot(right) > 0, '往右拖往右转');
+    assert.ok(Math.abs(dir.angleTo(before) - 40 * ORBIT.sens) < 1e-9);
+    assert.ok(Math.abs(dir.length() - 1) < 1e-9 && dir.y === 0);
+    lookDrag(dir, look, 0, 30);
+    assert.ok(Math.abs(look.tilt + 30 * ORBIT.sens) < 1e-12, '往下拖低头');
+    lookDrag(dir, look, 0, 1e5);
+    assert.equal(look.tilt, LOOK.tiltMin);
+    lookDrag(dir, look, 0, -1e5);
+    assert.equal(look.tilt, LOOK.tiltMax);
+  }
+  // 俯视：往右拖后走位的"往前"（镜头方向反过来）也往画面右边转
+  const o = orbitHome(), f0 = viewDir(orbitOpts(o).pitch, orbitOpts(o).yaw).negate().setY(0).normalize();
+  orbitDrag(o, 40, 0);
+  const f1 = viewDir(orbitOpts(o).pitch, orbitOpts(o).yaw).negate().setY(0).normalize();
+  assert.ok(f1.dot(new THREE.Vector3().crossVectors(f0, UP)) > 0);
+  assert.equal(turnBy(new THREE.Vector3(0, 0, 1), Math.PI / 2).x.toFixed(9), '1.000000000', '正的往左（从 +z 转到 +x）');
+});
+
+test('抬头低头：不抬时机位同原来；第一人称绕眼睛转，俯仰正好加上 tilt；肩后绕视线经过人那一处转，抬到头镜头不入地、人一直在画面里', () => {
+  const p = { x: 1.5, z: -2 }, dir = new THREE.Vector3(0.6, 0, -0.8);
+  for (const v of /** @type {const} */ (['first', 'shoulder'])) assert.deepEqual(lockPose(v, p, dir, 16 / 9, 0), lockPose(v, p, dir, 16 / 9));
+  const pitch = (/** @type {{ pos: THREE.Vector3, look: THREE.Vector3 }} */ r) =>
+    Math.atan2(r.look.y - r.pos.y, Math.hypot(r.look.x - r.pos.x, r.look.z - r.pos.z));
+  const f0 = lockPose('first', p, dir);
+  for (const t of [LOOK.tiltMin, -0.2, 0.25, LOOK.tiltMax]) {
+    const f = lockPose('first', p, dir, 16 / 9, t);
+    assert.ok(f.pos.distanceTo(f0.pos) < 1e-9, '眼睛不动');
+    assert.ok(Math.abs(pitch(f) - (pitch(f0) + t)) < 1e-9, `${t}`);
+    assert.ok(Math.abs(f.pos.distanceTo(f.look) - f0.pos.distanceTo(f0.look)) < 1e-9);
+  }
+  const s0 = lockPose('shoulder', p, dir);
+  // 视线经过人那一处：沿视线走到人的前后位置时的那个点（不抬头时算出来的），抬头低头都还在视线上
+  const k = LOCK.back / (LOCK.back + LOCK.ahead), pivot = s0.pos.clone().lerp(s0.look, k);
+  let last = -Infinity;
+  for (const t of [LOOK.tiltMin, -0.3, 0, 0.2, LOOK.tiltMax]) {
+    const s = lockPose('shoulder', p, dir, 16 / 9, t);
+    const ray = s.look.clone().sub(s.pos).normalize(), q = pivot.clone().sub(s.pos);
+    assert.ok(q.clone().cross(ray).length() < 1e-9, `绕的那一点在视线上 ${t}`);
+    assert.ok(s.pos.y > 0.5, `镜头不入地 ${s.pos.y}`);
+    assert.ok(pitch(s) > last, '越抬越往上看'); last = pitch(s);
+    const cam = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 500);
+    cam.position.copy(s.pos); cam.lookAt(s.look); cam.updateMatrixWorld();
+    const chest = new THREE.Vector3(p.x, 1.2, p.z).project(cam);
+    assert.ok(Math.abs(chest.x) < 1 && Math.abs(chest.y) < 1 && chest.z < 1, `人在画面里 ${t} ${JSON.stringify(chest)}`);
+  }
+});
+
+test('双指捏合：张开推近、捏拢拉远，按两指距离的比例，夹在最近最远之间；距离为 0 不动', () => {
+  const o = orbitHome();
+  orbitPinch(o, 100, 125);
+  assert.ok(Math.abs(o.zoom - 0.8) < 1e-12, '张开推近');
+  orbitPinch(o, 100, 50);
+  assert.ok(Math.abs(o.zoom - 1.6) < 1e-12, '捏拢拉远');
+  orbitPinch(o, 100, 10);
+  assert.equal(o.zoom, ORBIT.zoomMax);
+  orbitPinch(o, 10, 1000);
+  assert.equal(o.zoom, ORBIT.zoomMin);
+  orbitPinch(o, 0, 50); orbitPinch(o, 50, 0);
+  assert.equal(o.zoom, ORBIT.zoomMin);
+});
+
+test('镜头灵敏度：存的不认识就是 1 倍，夹在上下限里', () => {
+  assert.deepEqual([null, undefined, '', ' ', 'abc', 'NaN', 1.5].map(readSens), [1, 1, 1, 1, 1, 1, 1]);
+  assert.deepEqual(['1.5', '0.3', '5', '0.1', '-2'].map(readSens), [1.5, 0.3, SENS.max, SENS.min, SENS.min]);
 });

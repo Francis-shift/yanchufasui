@@ -47,8 +47,8 @@ import { SUN_DIR, buildEnvironment } from './world/environment.js';
 import { invasionTarget, stepInvasion } from './world/invasion.js';
 import { buildBarrier } from './world/barrier.js';
 import { fitFrame } from './world/framing.js';
-import { FOLLOW, LOCK, SHOT, VIEW_NAMES, clearDist, followPose, kickAt, lockPose, lockTarget, nextView, offscreenArrow, orbitDrag, orbitHome,
-  orbitIsHome, orbitOpts, orbitZoom, readView, shoulderPose, turnToward, viewDir } from './world/trialcam.js';
+import { FOLLOW, LOCK, LOOK, SHOT, VIEW_NAMES, clearDist, followPose, kickAt, lockPose, lockTarget, lookDrag, nextView, offscreenArrow, orbitDrag,
+  orbitHome, orbitIsHome, orbitOpts, orbitPinch, orbitZoom, readSens, readView, shoulderPose, turnToward, viewDir } from './world/trialcam.js';
 import { loadProps } from './world/props.js';
 import { buildLayout, CAMERA_BLOCKERS, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS, OBSTACLES } from './world/layout.js';
 import { Hud, preloadFonts } from './ui/hud.js';
@@ -236,12 +236,13 @@ export function start(root, opts = {}) {
   /**
    * 试炼的视角（三档，world/trialcam.js VIEWS）：存在这台设备的浏览器里，下次打开还是这一档。
    * dir：肩后、第一人称锁着目标转的"往前"；fromPos / fromLook、sw：切档时从哪个机位滑过来、滑到几成；hid：上一帧藏没藏施法者；
-   * low：平视了几成（俯视 0、肩后 / 第一人称 1，切档时慢慢变），太阳和台面反光按它压暗
+   * low：平视了几成（俯视 0、肩后 / 第一人称 1，切档时慢慢变），太阳和台面反光按它压暗；
+   * locked：肩后、第一人称锁不锁目标（同样存在浏览器里，默认锁）；tilt：抬头低头（world/trialcam.js LOOK）；homing：按了回正还要快转几秒
    */
-  const VIEW_KEY = 'yc-view';
+  const VIEW_KEY = 'yc-view', LOCK_KEY = 'yc-lock';
   const view = { mode: (() => { try { return readView(localStorage.getItem(VIEW_KEY)); } catch { return readView(null); } })(),
     dir: viewDir(FOLLOW.pitch, FOLLOW.yaw).negate().setY(0).normalize(), fromPos: new THREE.Vector3(), fromLook: new THREE.Vector3(), sw: 1, hid: false,
-    low: 0 };
+    low: 0, locked: (() => { try { return localStorage.getItem(LOCK_KEY) !== 'off'; } catch { return true; } })(), tilt: 0, homing: 0 };
   /** 换到某一档（按钮、快捷键轮着切；设置里直接点）：存下来，从现在的机位滑过去 @param {import('./world/trialcam.js').View} m */
   function setViewMode(m) {
     if (m === view.mode) return;
@@ -249,6 +250,7 @@ export function start(root, opts = {}) {
     try { localStorage.setItem(VIEW_KEY, view.mode); } catch { /* 存不进去就只记在这次打开里 */ }
     view.fromPos.copy(camPos); view.fromLook.copy(camLook); view.sw = 0;
     view.dir.copy(steer.dir).setY(0).normalize();   // 从现在的"往前"开始转向目标，不一下子扭过去
+    view.tilt = 0; view.homing = 0;
     sound.play('tick');
   }
   function cycleView() {
@@ -257,15 +259,37 @@ export function start(root, opts = {}) {
   }
   hud.onView = cycleView;
   /**
-   * 俯视跟随时自己摆镜头（world/trialcam.js ORBIT）：电脑上按住右键拖动转、滚轮远近、C 回正；只记在这次打开里。
-   * drag：正在拖的那根指针；moved：转过还没重取雾色；zooming：滚轮停下后还有几秒让远近跟手；homing：正在滑回默认机位
+   * 俯视跟随时自己摆镜头（world/trialcam.js ORBIT）：电脑上按住右键拖动转、滚轮远近、C 回正；手机上右边空处单指拖动转、双指捏合远近；只记在这次打开里。
+   * moved：转过还没重取雾色；zooming：滚轮、捏合停下后还有几秒让远近跟手；homing：正在滑回默认机位
    */
-  const orbit = { ...orbitHome(), drag: /** @type {{ id: number, x: number, y: number } | null} */ (null), moved: false, zooming: 0, homing: false };
-  const orbitOn = () => !mobile && S.mode === 'trial' && trial.on && view.mode === 'follow' && !setUi.paused;
-  function orbitReset() {
+  const orbit = { ...orbitHome(), moved: false, zooming: 0, homing: false };
+  /** 正在拖镜头的指针（界面坐标）：电脑上右键那一根，手机上右边空处按下的最多两根（两根时捏合） @type {Map<number, { x: number, y: number }>} */
+  const drags = new Map();
+  const camOn = () => S.mode === 'trial' && trial.on && !setUi.paused;
+  const orbitOn = () => !mobile && camOn() && view.mode === 'follow';   // 滚轮
+  /** 镜头灵敏度（设置里调，存在浏览器里）：拖动的像素先乘它 */
+  const SENS_KEY = 'yc-cam-sens';
+  let camSens = (() => { try { return readSens(localStorage.getItem(SENS_KEY)); } catch { return 1; } })();
+  /** 回正：俯视滑回默认机位；肩后、第一人称快些转回目标、抬低头回平（解锁着也转回去，之后照旧自己转） */
+  function camHome() {
+    if (view.mode !== 'follow') { view.homing = 0.6; sound.play('tick'); return; }
     if (orbitIsHome(orbit) || orbit.homing) return;
     orbit.homing = true;
     sound.play('tick');
+  }
+  /** 肩后、第一人称的锁定开关（F、鼠标中键、锁定按钮） */
+  function toggleLock() {
+    if (view.mode === 'follow') return;
+    view.locked = !view.locked;
+    try { localStorage.setItem(LOCK_KEY, view.locked ? 'on' : 'off'); } catch { /* 存不进去就只记在这次打开里 */ }
+    sound.play('tick');
+  }
+  hud.onLock = toggleLock;
+  /** 拖了 dx、dy 界面像素：俯视绕着人转、改俯角；肩后、第一人称转"往前"、抬头低头 @param {number} dx @param {number} dy */
+  function camDrag(dx, dy) {
+    dx *= camSens; dy *= camSens;
+    if (view.mode === 'follow') { orbitDrag(orbit, dx, dy); orbit.moved = true; }
+    else lookDrag(view.dir, view, dx, dy);
   }
   /** 回正：约 0.3 秒滑回默认机位（一下子跳回去会晕） @param {number} rdt */
   function orbitHoming(rdt) {
@@ -278,19 +302,33 @@ export function start(root, opts = {}) {
   {
     const cv = renderer.domElement;
     cv.addEventListener('contextmenu', (e) => { if (S.mode === 'trial') e.preventDefault(); });   // 右键拿来拖镜头，不弹菜单
+    cv.addEventListener('mousedown', (e) => { if (e.button === 1 && S.mode === 'trial') e.preventDefault(); });   // 中键是锁定开关，不出自动滚动
     cv.addEventListener('pointerdown', (e) => {
-      if (e.button !== 2 || orbit.drag || !orbitOn()) return;
-      orbit.drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
-      orbit.homing = false;
+      if (!camOn()) return;
+      const q = toLocal(e.clientX, e.clientY);   // 手机竖着拿时画面转了 90°，一律按界面坐标算
+      if (mobile) {   // 左边是摇杆（trial.js），右边空处归镜头
+        if (q.x <= cv.clientWidth * 0.55 || drags.size >= 2) return;
+      } else {
+        if (e.button === 1) { e.preventDefault(); toggleLock(); return; }
+        if (e.button !== 2 || drags.size) return;
+      }
+      drags.set(e.pointerId, q);
+      orbit.homing = false; view.homing = 0;
       cv.setPointerCapture?.(e.pointerId);
     });
     cv.addEventListener('pointermove', (e) => {
-      const g = orbit.drag;
-      if (!g || e.pointerId !== g.id) return;
-      if (orbitOn()) { orbitDrag(orbit, e.clientX - g.x, e.clientY - g.y); orbit.moved = true; }
-      g.x = e.clientX; g.y = e.clientY;
+      const g = drags.get(e.pointerId);
+      if (!g) return;
+      const q = toLocal(e.clientX, e.clientY);
+      if (camOn()) {
+        if (drags.size === 2) {   // 两根手指：只管远近（俯视才有），不转
+          const o = [...drags].find(([id]) => id !== e.pointerId)?.[1];
+          if (o && view.mode === 'follow') { orbitPinch(orbit, Math.hypot(g.x - o.x, g.y - o.y), Math.hypot(q.x - o.x, q.y - o.y)); orbit.zooming = 0.4; }
+        } else camDrag(q.x - g.x, q.y - g.y);
+      }
+      g.x = q.x; g.y = q.y;
     });
-    const release = (/** @type {PointerEvent} */ e) => { if (orbit.drag && e.pointerId === orbit.drag.id) orbit.drag = null; };
+    const release = (/** @type {PointerEvent} */ e) => { drags.delete(e.pointerId); };
     cv.addEventListener('pointerup', release);
     cv.addEventListener('pointercancel', release);
     cv.addEventListener('wheel', (e) => {
@@ -779,17 +817,18 @@ export function start(root, opts = {}) {
   function applyKeys() {
     const L = (/** @type {import('./rules/keymap.js').Action} */ a) => keyLabel(keys[a]);
     hud.setKeyLabels(S.mode === 'trial'
-      ? { dash: L('dash'), skills: [L('skill1'), L('skill2'), L('skill3')], ult: L('ult'), view: L('view') }
-      : { dash: L('dash'), skills: ['1', '2', '3'], ult: '4', view: L('view') });
-    trial.keyText = { skills: [L('skill1'), L('skill2'), L('skill3')].join('、'), ult: L('ult'), dash: L('dash'), home: L('home') };
+      ? { dash: L('dash'), skills: [L('skill1'), L('skill2'), L('skill3')], ult: L('ult'), view: L('view'), lock: L('lock') }
+      : { dash: L('dash'), skills: ['1', '2', '3'], ult: '4', view: L('view'), lock: L('lock') });
+    trial.keyText = { skills: [L('skill1'), L('skill2'), L('skill3')].join('、'), ult: L('ult'), dash: L('dash'), home: L('home'), lock: L('lock') };
   }
-  /** 试炼里按下绑了动作的键：放招可以按住连发（同原来的数字键），闪避、大招、切视角、镜头回正按一下算一下 @param {import('./rules/keymap.js').Action} a @param {boolean} repeat */
+  /** 试炼里按下绑了动作的键：放招可以按住连发（同原来的数字键），闪避、大招、切视角、镜头回正、锁定开关按一下算一下 @param {import('./rules/keymap.js').Action} a @param {boolean} repeat */
   function doAction(a, repeat) {
     if (a === 'skill1' || a === 'skill2' || a === 'skill3') { const el = S.talents[+a.slice(5) - 1]; if (el) pressTalent(el); return; }
     if (repeat) return;
     if (a === 'dash') trial.dash();
     else if (a === 'ult') pressSummon();
-    else if (a === 'home') orbitReset();
+    else if (a === 'home') camHome();
+    else if (a === 'lock') toggleLock();
     else cycleView();
   }
 
@@ -803,9 +842,9 @@ export function start(root, opts = {}) {
     hud.renderSettings({
       quality: qualityPref === 'cinema' || qualityPref === 'smooth' ? qualityPref : 'auto', qualityNow: quality.label,
       qnote: setUi.qnote || `现在是${quality.label}${mobile ? '（手机默认）' : ''}。画面卡就换流畅档；换档会重新载入页面${g ? '，这一局会结束' : ''}。`,
-      warn: !!setUi.qnote, view: view.mode, sfx: sound.vol.sfx, music: sound.vol.music,
+      warn: !!setUi.qnote, view: view.mode, sfx: sound.vol.sfx, music: sound.vol.music, sens: camSens,
       keys: mobile ? null : ACTIONS.map((a) => ({ act: a, name: ACTION_NAMES[a], label: keyLabel(keys[a]) })),
-      knote: setUi.knote || `WASD / 方向键走位，回车开战，数字 1～4 也能放招；俯视时按住右键拖动转镜头、滚轮拉远拉近；守关要打字，仍用数字 1～4。${sticky}`,
+      knote: setUi.knote || `WASD / 方向键走位，回车开战，数字 1～4 也能放招；按住右键拖动转镜头（俯视时滚轮拉远拉近，肩后与第一人称按鼠标中键也能开关锁定）；守关要打字，仍用数字 1～4。${sticky}`,
       wait: setUi.wait, inGame: g, mode: S.mode, confirm: setUi.confirm,
     });
   }
@@ -832,6 +871,10 @@ export function start(root, opts = {}) {
       },
       view: (v) => { setViewMode(readView(v)); renderSettings(); },
       volume: (k, v) => sound.setVolume(k, v),
+      sens: (v) => {
+        camSens = readSens(String(v));
+        try { localStorage.setItem(SENS_KEY, String(camSens)); } catch { /* 存不进去就只管这次打开 */ }
+      },
       key: (a) => { setUi.wait = setUi.wait === a ? null : /** @type {import('./rules/keymap.js').Action} */ (a); setUi.knote = ''; renderSettings(); },
       keyReset: () => { keys = { ...DEFAULT_KEYS }; saveKeys(); setUi.wait = null; setUi.knote = ''; renderSettings(); },
       restart: () => {
@@ -2011,14 +2054,22 @@ export function start(root, opts = {}) {
   function lockCamera(rdt) {
     const b = trial.boss;
     const t = lockTarget(trial.p, b && b.pos, b ? [] : enemies.list.filter((e) => e.mode !== 'fall').map((e) => e.pos));
-    if (!tcam.on) {   // 开局、换了窗口大小：直接朝着目标
+    if (!tcam.on) {   // 开局、换了窗口大小：锁着就直接朝着目标
       tcam.on = true; tcam.shot = null; tcam.w = 0; tcam.kickT = Infinity; tcam.perfects = trial.perfects;
-      turnToward(view.dir, trial.p, t, 1e3);
+      if (view.locked) turnToward(view.dir, trial.p, t, 1e3);
     }
     tcam.shot = null; tcam.perfects = trial.perfects;   // 切回俯视时不补演
-    turnToward(view.dir, trial.p, t, rdt);
-    steer.dir.copy(view.dir);
-    const pose = lockPose(view.mode === 'first' ? 'first' : 'shoulder', trial.p, view.dir, camera.aspect);
+    if (view.homing > 0) {   // 按了回正：快些转回目标、抬低头回平
+      view.homing = Math.max(0, view.homing - rdt);
+      turnToward(view.dir, trial.p, t, rdt, LOCK.turn * 2.5);
+      view.tilt *= Math.exp(-rdt * 10);
+    } else if (view.locked && !drags.size) {   // 锁着、没在拖：照锁定的转速转回目标，抬低头慢慢回平（拖开是"看一眼"）
+      turnToward(view.dir, trial.p, t, rdt);
+      view.tilt *= Math.exp(-rdt * LOOK.back);
+    }
+    if (Math.abs(view.tilt) < 1e-4) view.tilt = 0;
+    steer.dir.copy(view.dir);   // 走位跟着眼前的方向（看一眼时也是）
+    const pose = lockPose(view.mode === 'first' ? 'first' : 'shoulder', trial.p, view.dir, camera.aspect, view.tilt);
     camPos.copy(pose.pos); camLook.copy(pose.look);
     if (view.mode === 'shoulder') camPos.lerp(camLook, 0.18 * cam.focus);
     env.aim(_v.subVectors(camLook, camPos).normalize());   // 雾取镜头朝向那段天边的颜色
@@ -2209,6 +2260,7 @@ export function start(root, opts = {}) {
     const sunFace = inTrial && view.mode === 'follow' ? THREE.MathUtils.smoothstep(_v.copy(steer.dir).setY(0).normalize().dot(SUN_FLAT), 0.75, 0.95) : 0;
     layout.plaza.setGlint(1 - 0.95 * Math.max(view.low, sunFace));
     hud.setView(VIEW_NAMES[view.mode], inTrial && S.phase === 'playing');
+    hud.setLock(view.locked, inTrial && S.phase === 'playing' && view.mode !== 'follow');
     shakeOff.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(fx.shake * 0.5);
     camera.position.copy(camPos).add(shakeOff);
     camera.lookAt(camLook);
@@ -2362,6 +2414,7 @@ export function start(root, opts = {}) {
       return { dist: +tcam.dist.toFixed(2), feet: at(trial.p.x, 0, trial.p.z), head: at(trial.p.x, 1.9, trial.p.z),
         boss: b && [at(b.pos.x, 0, b.pos.z), at(b.pos.x, BOSS_H, b.pos.z)],
         orbit: { yaw: +orbit.yaw.toFixed(3), pitch: +orbit.pitch.toFixed(3), zoom: +orbit.zoom.toFixed(3) },
+        look: { mode: view.mode, locked: view.locked, tilt: +view.tilt.toFixed(3), dir: view.dir.toArray().map((x) => +x.toFixed(3)), drags: drags.size, sens: camSens },
         steer: steer.dir.toArray().map((x) => +x.toFixed(2)) };
     },
     dragon: (el = 'ice') => dragon.preload(el),

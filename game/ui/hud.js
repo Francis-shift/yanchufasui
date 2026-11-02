@@ -56,11 +56,13 @@ const CSS = FONT_CSS + `
   pointer-events: auto; backdrop-filter: blur(6px); }
 .yc-mute svg { width: 20px; height: 20px; } .yc-mute.off { color: var(--muted); }
 /* 试炼的视角按钮（俯视 / 肩后 / 第一人称轮着切）：在声音开关下面 */
-.yc-view { position: absolute; right: 12px; top: calc(56px + env(safe-area-inset-top, 0px)); height: 30px; padding: 0 11px; border-radius: 15px;
+.yc-view, .yc-lock { position: absolute; right: 12px; top: calc(56px + env(safe-area-inset-top, 0px)); height: 30px; padding: 0 11px; border-radius: 15px;
   border: 1px solid var(--line); background: var(--panel); color: var(--ink); font: 13px ${KAI}; white-space: nowrap; cursor: pointer;
   pointer-events: auto; backdrop-filter: blur(6px); }
-.yc-view[hidden] { display: none; }
-.yc-view small { margin-left: 6px; color: var(--muted); font-size: 11px; }
+.yc-view[hidden], .yc-lock[hidden] { display: none; }
+.yc-view small, .yc-lock small { margin-left: 6px; color: var(--muted); font-size: 11px; }
+/* 锁定开关（肩后、第一人称才有）：在视角按钮下面；关着时字发灰 */
+.yc-lock { top: calc(92px + env(safe-area-inset-top, 0px)); } .yc-lock.off { color: var(--muted); }
 /* 设置（10-30）：齿轮在声音开关左边，点开是一张纸面板；开着时游戏停住（main.js） */
 .yc-gear { position: absolute; right: 56px; top: calc(12px + env(safe-area-inset-top, 0px)); width: 36px; height: 36px; padding: 0; border-radius: 50%;
   display: grid; place-items: center; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer;
@@ -326,6 +328,7 @@ const CSS = FONT_CSS + `
 .yc-narrow .yc-card { width: calc(100% - 20px); }
 .yc-narrow .yc-mute { right: 10px; top: calc(60px + env(safe-area-inset-top, 0px)); }   /* 顶上一行占满了宽，挪到它下面 */
 .yc-narrow .yc-view { right: 10px; top: calc(138px + env(safe-area-inset-top, 0px)); }   /* 落在 boss 血条下面（血条约到 129） */
+.yc-narrow .yc-lock { right: 10px; top: calc(174px + env(safe-area-inset-top, 0px)); }
 .yc-narrow .yc-boss { left: 10px; right: 100px; width: auto; transform: none; }   /* boss 血条也在那一行下面：右边让出设置与声音开关 */
 /* 矮（手机键盘弹起来了）：咒语卡只留名字、原话、一行结果，提示语不显示 */
 .yc-short .yc-hint, .yc-short .yc-tags { display: none; }
@@ -362,7 +365,7 @@ const CSS = FONT_CSS + `
 .yc-pad .yc-bottom { left: auto; right: 14px; bottom: 10px; transform: none; width: 232px; pointer-events: none; }
 .yc-pad .yc-bottom button { pointer-events: auto; }
 .yc-pad .yc-skills:not([hidden]) { order: 5; display: block; position: relative; width: 232px; height: 200px; margin: 4px 0 0; }
-.yc-pad .yc-key, .yc-pad .yc-view small { display: none; }
+.yc-pad .yc-key, .yc-pad .yc-view small, .yc-pad .yc-lock small { display: none; }
 .yc-pad .yc-dash { position: absolute; right: 0; bottom: 0; width: 80px; height: 80px; font-size: 36px; }
 .yc-pad .yc-skill { position: absolute; }
 .yc-pad .yc-cast { width: 58px; height: 58px; }
@@ -556,10 +559,11 @@ const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>
  * 设置面板画成什么样（main.js 每次有变化重画一遍）。
  * quality：设置里选的档（auto 跟设备走），qualityNow：现在实际是哪档；qnote：画质那行下面的说明（warn 时标红）；
  * keys：试炼键位（触屏上不给 = 不显示这一节），wait：正在等哪一项按新键；inGame：在一局里（才有重新开始、回首页）；
- * confirm：哪个按钮等着再点一次确认
- * @typedef {{ quality: string, qualityNow: string, qnote: string, warn: boolean, view: string, sfx: number, music: number,
+ * confirm：哪个按钮等着再点一次确认；sens：镜头灵敏度（倍数）
+ * @typedef {{ quality: string, qualityNow: string, qnote: string, warn: boolean, view: string, sfx: number, music: number, sens: number,
  *   keys: { act: string, name: string, label: string }[] | null, knote: string, wait: string | null, inGame: boolean, mode: string, confirm: string | null }} SettingsState
- * @typedef {{ quality: (v: string) => void, view: (v: string) => void, volume: (kind: 'sfx' | 'music', v: number) => void, key: (act: string) => void,
+ * @typedef {{ quality: (v: string) => void, view: (v: string) => void, volume: (kind: 'sfx' | 'music', v: number) => void, sens: (v: number) => void,
+ *   key: (act: string) => void,
  *   keyReset: () => void, restart: () => void, quit: () => void, close: () => void }} SettingsHandlers
  */
 
@@ -646,8 +650,14 @@ export class Hud {
     this.onView = null;
     this.viewShown = '';
     this.viewBtn.addEventListener('click', () => { this.viewBtn.blur(); this.onView?.(); });
-    /** 按钮下面、视角按钮上写的键名（setKeyLabels；守关是数字） */
-    this.keyLabels = { dash: '空格', skills: ['1', '2', '3'], ult: '4', view: 'V' };
+    // 锁定开关（setLock 写开关、管出不出）
+    this.lockBtn = el(`<button class="yc-lock" type="button" hidden></button>`);
+    /** @type {(() => void) | null} */
+    this.onLock = null;
+    this.lockShown = '';
+    this.lockBtn.addEventListener('click', () => { this.lockBtn.blur(); this.onLock?.(); });
+    /** 按钮下面、视角与锁定按钮上写的键名（setKeyLabels；守关是数字） */
+    this.keyLabels = { dash: '空格', skills: ['1', '2', '3'], ult: '4', view: 'V', lock: 'F' };
     // 设置：齿轮 + 纸面板（openSettings / renderSettings）；各项点了调 setOn 里对应的
     const tooth = (/** @type {number} */ a) => `<rect x="10.5" y="1.6" width="3" height="4.2" rx="0.8" transform="rotate(${a} 12 12)"/>`;
     this.gear = el(`<button class="yc-gear" type="button" title="设置（Esc）" aria-label="设置"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="currentColor">
@@ -666,6 +676,7 @@ export class Hud {
         <div class="yc-set-row"><span class="yc-set-k">画质</span>${seg('quality', [['auto', '自动'], ['cinema', '电影档'], ['smooth', '流畅档']])}</div>
         <div class="yc-set-row"><span class="yc-set-k">视角</span>${seg('view', [['follow', '俯视'], ['shoulder', '肩后'], ['first', '第一人称']])}</div>
         ${vol('sfx', '音效')}${vol('music', '音乐')}
+        <div class="yc-set-row" title="拖动转镜头的快慢"><span class="yc-set-k">镜头</span><input type="range" min="30" max="200" step="10" data-sens aria-label="镜头灵敏度"><span class="yc-set-v" data-sensv style="width:3em"></span></div>
       </div>
       <p class="yc-set-note" data-qnote></p>
       <div class="yc-set-keys" data-keys><div class="yc-set-sub">试炼键位<small>点一项，再按新的键；撞了别的就互换</small></div>
@@ -687,6 +698,8 @@ export class Hud {
       const inp = /** @type {HTMLInputElement} */ (r), k = /** @type {'sfx' | 'music'} */ (inp.dataset.vol);
       inp.addEventListener('input', () => { this.q(`[data-volv="${k}"]`).textContent = inp.value; this.setOn?.volume(k, +inp.value / 100); });
     }
+    const sens = /** @type {HTMLInputElement} */ (this.set.querySelector('[data-sens]'));
+    sens.addEventListener('input', () => { this.q('[data-sensv]').textContent = `${sens.value}%`; this.setOn?.sens(+sens.value / 100); });
     this.set.querySelector('.yc-keygrid')?.addEventListener('click', (e) => {
       const b = /** @type {HTMLElement} */ (e.target).closest('[data-act]');
       if (b) this.setOn?.key(/** @type {string} */ (/** @type {HTMLElement} */ (b).dataset.act));
@@ -709,7 +722,7 @@ export class Hud {
     this.arrow = el(`<div class="yc-arrow" hidden><i></i></div>`);
     /** boss 血条下沿（界面坐标，没有血条为 0），placeBoss 量 */
     this.bossEdge = 0;
-    this.root.append(this.floats, this.stick, this.arrow, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay, this.cover, this.report, this.mute, this.viewBtn, this.gear, this.set);
+    this.root.append(this.floats, this.stick, this.arrow, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay, this.cover, this.report, this.mute, this.viewBtn, this.lockBtn, this.gear, this.set);
     root.append(this.root);
     this.input = /** @type {HTMLInputElement} */ (this.bottom.querySelector('input'));
     this.go = /** @type {HTMLButtonElement} */ (this.bottom.querySelector('[data-go]'));
@@ -1206,6 +1219,19 @@ export class Hud {
     this.viewBtn.setAttribute('aria-label', `视角：${name}，点了换下一档`);
   }
 
+  /** 锁定开关：写开着还是关着、出不出（每帧调，没变就不动） @param {boolean} locked @param {boolean} shown */
+  setLock(locked, shown) {
+    const key = shown ? `${locked}|${this.keyLabels.lock}` : '';
+    if (key === this.lockShown) return;
+    this.lockShown = key;
+    this.lockBtn.hidden = !shown;
+    if (!shown) return;
+    this.lockBtn.innerHTML = `锁定：${locked ? '开' : '关'}<small>${esc(this.keyLabels.lock)}</small>`;
+    this.lockBtn.classList.toggle('off', !locked);
+    this.lockBtn.title = locked ? '锁着：镜头自己转向 boss（小怪潮里是最近的一只），拖动只能看一眼' : '关着：拖动自己转镜头';
+    this.lockBtn.setAttribute('aria-label', `锁定目标：${locked ? '开' : '关'}，点了换`);
+  }
+
   /** 打开设置面板（画成什么样由调用方接着 renderSettings） @param {SettingsHandlers} on */
   openSettings(on) { this.setOn = on; this.set.hidden = false; }
   closeSettings() { this.set.hidden = true; this.setOn = null; }
@@ -1224,6 +1250,9 @@ export class Hud {
       /** @type {HTMLInputElement} */ (this.q(`[data-vol="${k}"]`)).value = v;
       this.q(`[data-volv="${k}"]`).textContent = v;
     }
+    const sv = String(Math.round(s.sens * 100));
+    /** @type {HTMLInputElement} */ (this.q('[data-sens]')).value = sv;
+    this.q('[data-sensv]').textContent = `${sv}%`;
     const qn = this.q('[data-qnote]');
     qn.textContent = s.qnote; qn.classList.toggle('warn', s.warn);
     const keys = /** @type {HTMLElement} */ (this.set.querySelector('[data-keys]'));
@@ -1241,8 +1270,8 @@ export class Hud {
   }
 
   /**
-   * 按钮下面、视角按钮上写的键名：试炼电脑上按设置里绑的，守关是数字（触屏上 .yc-pad 不显示）
-   * @param {{ dash: string, skills: string[], ult: string, view: string }} k
+   * 按钮下面、视角与锁定按钮上写的键名：试炼电脑上按设置里绑的，守关是数字（触屏上 .yc-pad 不显示）
+   * @param {{ dash: string, skills: string[], ult: string, view: string, lock: string }} k
    */
   setKeyLabels(k) {
     this.keyLabels = k;
@@ -1252,6 +1281,7 @@ export class Hud {
     const u = this.root.querySelector('.yc-summon .yc-key');
     if (u) u.textContent = k.ult;
     if (this.viewShown) this.setView(this.viewShown.split('|')[0], true);
+    if (this.lockShown) this.setLock(this.lockShown.startsWith('true'), true);
   }
 
   /** 声音开关画成开着还是关着；toggle 给了就换成点它时调的 @param {boolean} muted @param {() => void} [toggle] */

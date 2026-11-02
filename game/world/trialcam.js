@@ -25,8 +25,8 @@ export const FOLLOW = {
 
 /**
  * 俯视跟随时玩家自己摆镜头（11-01 做：本人 10-30 嫌视角卡得太死）：电脑上按住右键拖动——横着拖绕着人转、竖着拖改俯角，
- * 滚轮拉远拉近，按 C（设置里可改）回正。记的是相对默认机位的偏移，followPose 照它算；走位的"往前"跟着转过后的画面走。
- * 人和 boss 框不进来时照旧自动往后拉
+ * 滚轮拉远拉近，按 C（设置里可改）回正；手机上在右边空处单指拖动转、双指捏合远近。记的是相对默认机位的偏移，followPose 照它算；
+ * 走位的"往前"跟着转过后的画面走。人和 boss 框不进来时照旧自动往后拉
  */
 export const ORBIT = {
   /** 拖 1 像素转几弧度 */
@@ -62,9 +62,23 @@ export function orbitZoom(o, dy) {
   return o;
 }
 
+/** 手机上双指捏合：两指距离从 d0 变成 d1，张开（d1 更大）推近、捏拢拉远 @param {Orbit} o 会被改掉 @param {number} d0 @param {number} d1 */
+export function orbitPinch(o, d0, d1) {
+  if (d0 > 0 && d1 > 0) o.zoom = THREE.MathUtils.clamp(o.zoom * (d0 / d1), ORBIT.zoomMin, ORBIT.zoomMax);
+  return o;
+}
+
 /** 交给 followPose 的那几项：转过的方向、俯角、默认距离（最远照旧，拉近了也能自动拉回来框 boss） @param {Orbit} o */
 export function orbitOpts(o) {
   return { yaw: FOLLOW.yaw + o.yaw, pitch: FOLLOW.pitch + o.pitch, dist: FOLLOW.dist * o.zoom, maxDist: Math.max(FOLLOW.maxDist, FOLLOW.dist * o.zoom) };
+}
+
+/** 设置里的镜头灵敏度：拖动的像素先乘它再交给 orbitDrag / lookDrag；存的东西不认识就是 1 倍 */
+export const SENS = { min: 0.3, max: 2 };
+/** @param {unknown} s 存在浏览器里的那一串 */
+export function readSens(s) {
+  const v = typeof s === 'string' && s.trim() ? Number(s) : NaN;
+  return Number.isFinite(v) ? THREE.MathUtils.clamp(v, SENS.min, SENS.max) : 1;
 }
 
 /**
@@ -203,7 +217,7 @@ export function shoulderPose(p, target, head, fwd, aspect = 16 / 9) {
 /**
  * 三档视角（设计文档第 4 节"10-29 定"）：俯视跟随（默认）/ 肩后 / 第一人称，一个按钮轮着切（电脑上按 V）。
  * 后两档用同一套锁定："往前"朝着目标，镜头跟着往前转，转速有上限（boss 冲撞擦身而过时不甩半圈）；
- * 摇杆上 = 朝目标走、左右 = 绕着它转。
+ * 摇杆上 = 朝目标走、左右 = 绕着它转。锁定可以关（F、鼠标中键或按钮），关了以后自己拖着转（LOOK）。
  */
 export const VIEWS = /** @type {const} */ (['follow', 'shoulder', 'first']);
 /** @typedef {typeof VIEWS[number]} View */
@@ -262,20 +276,62 @@ export function turnToward(dir, p, target, dt, rate = LOCK.turn) {
 }
 
 /**
+ * 肩后 / 第一人称自己转（11-01 做，方案 A 第二步）：锁着时拖动是"看一眼"——松手后照锁定的转速转回目标，抬头低头也慢慢回平；
+ * 解锁后拖到哪停在哪，"往前"跟着转。横着拖转"往前"，竖着拖抬头低头（tilt，正 = 抬头）。
+ * 方向同俯视的 orbitDrag：往右拖往右看，往下拖往下看
+ */
+export const LOOK = {
+  /** 抬头、低头最多偏几弧度：肩后抬到头镜头还在地面以上，第一人称低到头看得见脚边 */
+  tiltMin: THREE.MathUtils.degToRad(-35), tiltMax: THREE.MathUtils.degToRad(30),
+  /** 锁着时松手后抬低头每秒回平几成（指数）；左右照锁定的转速（LOCK.turn）转回去 */
+  back: 3,
+};
+/** @typedef {{ tilt: number }} Look */
+
+/** "往前"水平转 a 弧度（正 = 往左） @param {THREE.Vector3} dir 会被改掉 @param {number} a */
+export function turnBy(dir, a) {
+  const c = Math.atan2(dir.x, dir.z) + a;
+  return dir.set(Math.sin(c), 0, Math.cos(c));
+}
+
+/** 肩后 / 第一人称拖了 dx、dy 像素（已乘灵敏度） @param {THREE.Vector3} dir 会被改掉 @param {Look} look 会被改掉 @param {number} dx @param {number} dy */
+export function lookDrag(dir, look, dx, dy) {
+  turnBy(dir, -dx * ORBIT.sens);
+  look.tilt = THREE.MathUtils.clamp(look.tilt - dy * ORBIT.sens, LOOK.tiltMin, LOOK.tiltMax);
+}
+
+/**
  * 肩后 / 第一人称的机位和看的点
+ * tilt：抬头低头。第一人称绕眼睛转；肩后绕视线经过人那一处（胸口高）转——抬头时镜头往下沉，人一直在画面里
  * @param {'shoulder' | 'first'} view @param {{ x: number, z: number }} p 人 @param {THREE.Vector3} dir "往前"（水平、长度 1）
- * @param {number} [aspect] 画面宽高比
+ * @param {number} [aspect] 画面宽高比 @param {number} [tilt]
  * @returns {{ pos: THREE.Vector3, look: THREE.Vector3 }}
  */
-export function lockPose(view, p, dir, aspect = 16 / 9) {
+export function lockPose(view, p, dir, aspect = 16 / 9, tilt = 0) {
   const L = LOCK, rx = -dir.z, rz = dir.x;   // 右手方向
+  /** @type {{ pos: THREE.Vector3, look: THREE.Vector3 }} */
+  let r;
+  /** 绕哪一点抬头低头 @type {THREE.Vector3} */
+  let pivot;
   if (view === 'first') {
-    return { pos: new THREE.Vector3(p.x + dir.x * L.nose, L.eye, p.z + dir.z * L.nose),
+    r = { pos: new THREE.Vector3(p.x + dir.x * L.nose, L.eye, p.z + dir.z * L.nose),
       look: new THREE.Vector3(p.x + dir.x * L.far, L.farY, p.z + dir.z * L.far) };
+    pivot = r.pos.clone();
+  } else {
+    const side = L.side * THREE.MathUtils.clamp(aspect / 1.7, 0.25, 1);
+    r = { pos: new THREE.Vector3(p.x - dir.x * L.back + rx * side, L.up, p.z - dir.z * L.back + rz * side),
+      look: new THREE.Vector3(p.x + dir.x * L.ahead + rx * side, L.lookY, p.z + dir.z * L.ahead + rz * side) };
+    pivot = new THREE.Vector3(p.x + rx * side, L.up + (L.lookY - L.up) * L.back / (L.back + L.ahead), p.z + rz * side);
   }
-  const side = L.side * THREE.MathUtils.clamp(aspect / 1.7, 0.25, 1);
-  return { pos: new THREE.Vector3(p.x - dir.x * L.back + rx * side, L.up, p.z - dir.z * L.back + rz * side),
-    look: new THREE.Vector3(p.x + dir.x * L.ahead + rx * side, L.lookY, p.z + dir.z * L.ahead + rz * side) };
+  if (tilt) {
+    const c = Math.cos(tilt), s = Math.sin(tilt);
+    for (const q of [r.pos, r.look]) {   // 在含"往前"的竖直面里绕 pivot 转
+      const u = (q.x - pivot.x) * dir.x + (q.z - pivot.z) * dir.z, w = q.y - pivot.y;
+      const u2 = u * c - w * s, w2 = u * s + w * c;
+      q.set(q.x + dir.x * (u2 - u), pivot.y + w2, q.z + dir.z * (u2 - u));
+    }
+  }
+  return r;
 }
 
 /**

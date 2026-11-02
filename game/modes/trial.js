@@ -111,7 +111,7 @@ export class Trial {
     /** @type {Set<string>} */
     this.keys = new Set();
     /** 电脑版提示里写的键名（main.js 按设置里绑的键给；pcHint 换进 {招} {召} {闪} {正}） */
-    this.keyText = { skills: 'Q、E、R', ult: 'V', dash: 'Shift', home: 'C' };
+    this.keyText = { skills: 'Q、E、R', ult: 'V', dash: 'Shift', home: 'C', lock: 'F' };
     this.stick = { x: 0, y: 0 };
     /** @type {{ id: number, x: number, y: number, t: number, moved: boolean } | null} */
     this.ptr = null;
@@ -235,7 +235,7 @@ export class Trial {
 
   /**
    * 触屏走位。手机（mobile）：左半边是浮动摇杆——按在哪儿底座就在哪儿，拖出底座半径时底座跟着手指走；右半边留给按钮，点空处不算。
-   * 电脑上用鼠标：在画面上（左键）拖动走位、轻点闪避；右键拖动是转镜头，归 main.js 管。
+   * 电脑上用鼠标：在画面上（左键）拖动走位、轻点闪避；右键拖动是转镜头，归 main.js 管（手机上右半边空处拖动转镜头也归它）。
    * 坐标一律先换成界面坐标（d.local）：手机竖着拿时整个画面转了 90°，屏幕上的"往上拖"在画面里是"往右"。
    * @param {HTMLElement} canvas
    */
@@ -283,10 +283,10 @@ export class Trial {
     };
   }
 
-  /** 电脑版提示里的 {招} {召} {闪} {正} 换成现在绑的键 @param {string} s */
+  /** 电脑版提示里的 {招} {召} {闪} {正} {锁} 换成现在绑的键 @param {string} s */
   pcHint(s) {
     const k = this.keyText;
-    return s.replace(/\{招\}/g, k.skills).replace(/\{召\}/g, k.ult).replace(/\{闪\}/g, k.dash).replace(/\{正\}/g, k.home);
+    return s.replace(/\{招\}/g, k.skills).replace(/\{召\}/g, k.ult).replace(/\{闪\}/g, k.dash).replace(/\{正\}/g, k.home).replace(/\{锁\}/g, k.lock);
   }
 
   /** 键盘：走位键按下 / 松开（闪避、放招按设置里绑的键，由 main.js 管）。处理了就返回 true（调用方据此 preventDefault） @param {string} code @param {boolean} down */
@@ -312,8 +312,8 @@ export class Trial {
     hud.setCore(this.hp, TRIAL.hp);
     hud.setWave('试炼', '战前准备');
     hud.setHint(this.d.mobile
-      ? `一局：小怪潮与 ${BOSS_COUNT} 个 boss 交替；开局只会本命招，每打完一段三选一学字。战前点按钮右上角的笔写一句咒（开战后不能写）；左手拖动走位，右手点「闪」闪避；准备好了点「开战」`
-      : this.pcHint(`一局：小怪潮与 ${BOSS_COUNT} 个 boss 交替；开局只会本命招，每打完一段三选一学字。战前点按钮右上角的笔写一句咒（开战后不能写）；WASD / 方向键走位，{闪} 闪避，{招} 放天赋；按住右键拖动转镜头、滚轮拉远拉近、{正} 回正；Esc 打开设置可以改键；准备好了点「开战」或按回车`));
+      ? `一局：小怪潮与 ${BOSS_COUNT} 个 boss 交替；开局只会本命招，每打完一段三选一学字。战前点按钮右上角的笔写一句咒（开战后不能写）；左手拖动走位，右手点「闪」闪避，在右边空处拖动转镜头、双指捏合拉远拉近；准备好了点「开战」`
+      : this.pcHint(`一局：小怪潮与 ${BOSS_COUNT} 个 boss 交替；开局只会本命招，每打完一段三选一学字。战前点按钮右上角的笔写一句咒（开战后不能写）；WASD / 方向键走位，{闪} 闪避，{招} 放天赋；按住右键拖动转镜头、滚轮拉远拉近、{正} 回正，肩后与第一人称按 {锁} 开关锁定；Esc 打开设置可以改键；准备好了点「开战」或按回车`));
     this.showStamina();
   }
 
