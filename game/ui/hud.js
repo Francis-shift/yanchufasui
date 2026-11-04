@@ -456,6 +456,19 @@ const CSS = FONT_CSS + `
 .yc-cover-step .yc-ink::before { right: -14px; }   /* 后面紧跟着"返回"，飞白别伸过去 */
 .yc-cback { font: inherit; font-size: 14px; color: #5a4d3e; background: none; border: 0; cursor: pointer; padding: 6px 8px;
   text-decoration: underline; text-underline-offset: 4px; }
+.yc-cover [data-auto] { pointer-events: auto; color: #26313d; padding: 6px 2px; text-shadow: 0 0 8px rgba(250,246,236,0.95), 0 0 3px rgba(250,246,236,0.9); }
+.yc-cover.step2 [data-auto] { display: none; }
+/* 演示模式的字幕（setAutoplay）：要在展台几步外读得清，所以字大；不挡点击，碰到哪里都算退出 */
+.yc-auto { position: absolute; left: 50%; bottom: 25%; transform: translateX(-50%); width: max-content; max-width: min(86%, 900px); pointer-events: none;
+  padding: 8px 26px 9px; text-align: center; background: var(--grain), var(--panel); border: 1px solid rgba(52,40,28,0.5); border-radius: 2px; font-family: ${KAI}; }
+.yc-auto[hidden] { display: none; }
+.yc-auto b { display: block; font: normal clamp(20px, 3.2vh, 30px)/1.35 ${KAI}; color: #1b160f; }
+.yc-auto b:empty { display: none; }
+.yc-auto span { display: block; margin-top: 2px; font-size: 13px; color: #5a4d3e; }
+.yc-narrow .yc-auto { bottom: 30%; padding: 6px 12px 7px; }
+.yc-narrow .yc-auto b { font-size: 19px; } .yc-narrow .yc-auto span { font-size: 11px; }
+.yc-short .yc-auto { top: 64px; bottom: auto; left: 60%; max-width: 62%; padding: 4px 14px 5px; }   /* 手机横屏：下半截全是按钮和输入框，放到 boss 血条下面 */
+.yc-short .yc-auto b { font-size: 18px; } .yc-short .yc-auto span { font-size: 11px; }
 /* 手机竖屏：标题在左上，按钮并排压在最下面，中间留给画面；第二步是底部的纸面板 */
 .yc-narrow .yc-cover::before { background: linear-gradient(180deg, rgba(246,241,231,0.55), rgba(246,241,231,0.18) 38%, rgba(246,241,231,0) 55%,
   rgba(246,241,231,0) 72%, rgba(246,241,231,0.4)); }
@@ -605,7 +618,8 @@ export class Hud {
       <div class="yc-cover-head"><div class="yc-cover-tcol"><h1 class="yc-cover-title">言出法随</h1><i class="yc-seal">敕令</i></div>
         <p class="yc-cover-tag">打一句中文，法术就是什么<br>说得越有画面感，气势越足</p></div>
       <div class="yc-cover-best" hidden></div>
-      <div class="yc-cover-modes"><button class="yc-ink" data-mode="trial"></button><button class="yc-ink" data-mode="defense"></button></div></div>
+      <div class="yc-cover-modes"><button class="yc-ink" data-mode="trial"></button><button class="yc-ink" data-mode="defense"></button></div>
+      <button class="yc-cback" data-auto>看演示</button></div>
       <div class="yc-cover-step yc-paper" hidden><h2></h2><p></p>
         <div class="yc-btns"><button class="yc-ink" data-cgo><b>开始</b></button><button class="yc-cback" data-back>返回</button></div></div></div>`);
     this.picker = /** @type {HTMLElement} */ (this.overlay.querySelector('.yc-picker'));
@@ -620,6 +634,11 @@ export class Hud {
     }
     /** @type {HTMLElement} */ (this.cover.querySelector('[data-back]')).addEventListener('click', () => this.coverStep(null));
     /** @type {HTMLElement} */ (this.cover.querySelector('[data-cgo]')).addEventListener('click', () => this.coverGo?.(this.coverMode));
+    // 演示模式：封面上的入口、放的时候的字幕（setAutoplay）
+    /** @type {(() => void) | null} */
+    this.onAutoplay = null;
+    /** @type {HTMLElement} */ (this.cover.querySelector('[data-auto]')).addEventListener('click', () => this.onAutoplay?.());
+    this.autoBar = el(`<div class="yc-auto" hidden><b></b><span>演示中 · 不联网、不调模型 · 按任意键或点屏幕退出</span></div>`);
     this.write = el(`<div class="yc-write" hidden><div class="yc-box">
       <div class="yc-write-title"></div>
       <input class="yc-input" maxlength="${INPUT_MAX_CHARS}" enterkeyhint="done" autocomplete="off" aria-label="给按钮写的咒" placeholder="写一句咒……（例：三颗火球从天而降）">
@@ -722,7 +741,7 @@ export class Hud {
     this.arrow = el(`<div class="yc-arrow" hidden><i></i></div>`);
     /** boss 血条下沿（界面坐标，没有血条为 0），placeBoss 量 */
     this.bossEdge = 0;
-    this.root.append(this.floats, this.stick, this.arrow, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay, this.cover, this.report, this.mute, this.viewBtn, this.lockBtn, this.gear, this.set);
+    this.root.append(this.floats, this.stick, this.arrow, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay, this.cover, this.autoBar, this.report, this.mute, this.viewBtn, this.lockBtn, this.gear, this.set);
     root.append(this.root);
     this.input = /** @type {HTMLInputElement} */ (this.bottom.querySelector('input'));
     this.go = /** @type {HTMLButtonElement} */ (this.bottom.querySelector('[data-go]'));
@@ -1173,6 +1192,11 @@ export class Hud {
     /** @type {HTMLElement} */ (step.querySelector('.yc-btns')).before(this.picker);
   }
   hideCover() { this.cover.hidden = true; this.root.classList.remove('yc-on-cover'); }
+  /** 演示模式的字幕：null 收起 @param {string | null} text */
+  setAutoplay(text) {
+    this.autoBar.hidden = text === null;
+    /** @type {HTMLElement} */ (this.autoBar.firstElementChild).textContent = text ?? '';
+  }
   /** 封面开着没有 */
   get onCover() { return !this.cover.hidden; }
 

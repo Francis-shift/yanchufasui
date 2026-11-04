@@ -27,7 +27,7 @@ import { FLAME_SHELL_K } from '../actors/enemies.js';
 
 /** 守关时施法者站的地方（开局就记下，试炼结束放回这里） */
 const HOME = CASTER_POS.clone();
-const ARENA_R = PLAZA_R - 0.9;
+export const ARENA_R = PLAZA_R - 0.9;
 const BODY = 0.35;
 /** 玩家走不进去的：场景障碍加阵眼那一圈石桩 */
 const BLOCK = OBSTACLES;   // 阵眼在试炼里整组藏起来了（10-30），不再挡路
@@ -104,6 +104,10 @@ export class Trial {
     this.hp = TRIAL.hp;
     /** 这一局拿过的心法合成的加成（main.js 选完卡写进来） */
     this.mods = runMods(newRun());
+    /** 演示模式替人走位：世界坐标的方向（长度 0～1），有它就不听键盘和摇杆，人也不掉血 @type {{ x: number, y: number, z: number } | null} */
+    this.auto = null;
+    /** 演示模式：boss 的血打到这里就不再掉（留给龙），0 是不管 */
+    this.floor = 0;
     // 一局走到第几段（RUN_STAGES 的下标）、第几段小怪潮 / 第几个 boss、这段小怪还要冒几只、多久冒下一只；用时、完美闪避几次（结算用）
     this.stage = -1; this.round = 0; this.waveLeft = 0; this.waveN = 1; this.spawnT = 0; this.runT = 0; this.perfects = 0;
     this.p = HOME.clone();
@@ -616,7 +620,7 @@ export class Trial {
 
   /** 收场（回守关、重开）：玩家放回原处，预警收起 */
   stop() {
-    this.on = false; this.fighting = false; this.boss = null;
+    this.on = false; this.fighting = false; this.boss = null; this.auto = null; this.floor = 0;
     this.hideTele();
     this.spikes.length = 0; this.spikeFx.count = 0;
     this.clearBullets();
@@ -667,13 +671,28 @@ export class Trial {
       this.ghost.quaternion.copy(this.d.caster.quaternion);
       this.ghost.visible = true;
     }
-    // 冰锥眼看就要撞上（正朝人飞、window 秒内到）才闪：当场算完美闪避
-    const W = this.mods.perfectWindow;
-    for (const b of this.bullets) {
-      if (b.friendly) continue;
+    if (this.shotIn(this.mods.perfectWindow)) this.perfect();   // 冰锥眼看就要撞上才闪：当场算完美闪避
+  }
+
+  /** 有冰锥 W 秒内就要撞上（正朝人飞）没有 @param {number} W */
+  shotIn(W) {
+    return this.bullets.some((b) => {
+      if (b.friendly) return false;
       const rx = this.p.x - b.x, rz = this.p.z - b.z, d = Math.hypot(rx, rz), sp = Math.hypot(b.vx, b.vz);
-      if (d < b.r + BODY + sp * W && rx * b.vx + rz * b.vz > 0.7 * d * sp) { this.perfect(); break; }
-    }
+      return d < b.r + BODY + sp * W && rx * b.vx + rz * b.vz > 0.7 * d * sp;
+    });
+  }
+
+  /**
+   * 演示模式的自动走位看的：现在亮着的红圈、红扇，还有几秒落下。演示只打寒甲傀儡王，只认它这两种
+   * @returns {{ t: number, inside: (q: { x: number, z: number }) => boolean } | null}
+   */
+  threat() {
+    const b = this.boss;
+    if (!b || this.state !== 'tele') return null;
+    if (this.move === 'slam') return { t: this.t, inside: (q) => inCircle(q, this.target, BOSS.slam.r, BODY) };
+    if (this.move === 'sweep') return { t: this.t, inside: (q) => inSector(q, b.pos, this.sweepDir, SWEEP_HALF, BOSS.sweep.r, BODY) };
+    return null;
   }
 
   /** 完美闪避：周身爆一圈白光、顿帧；回法力、加气势、回精力 */
@@ -707,6 +726,7 @@ export class Trial {
 
   /** 这一帧想往哪走（世界坐标，长度 0～1）：键盘和拖动按屏幕方向算，W / 往上拖是朝屏幕里走 */
   input() {
+    if (this.auto) return this._m.copy(this.auto);
     let ix = this.stick.x, iy = this.stick.y;
     for (const k of this.keys) { ix += MOVE_KEYS[k][0]; iy += MOVE_KEYS[k][1]; }
     const l = Math.hypot(ix, iy);
@@ -781,7 +801,7 @@ export class Trial {
     if (!this.fighting || this.hp <= 0) return false;
     const at = new THREE.Vector3(this.p.x, 2.2, this.p.z);
     if (this.dashT > 0) { this.perfect(); return false; }   // 冲刺中硬吃过去：也是完美闪避
-    if (this.hurtT > 0) return false;
+    if (this.hurtT > 0 || this.auto) return false;
     this.hp = Math.max(0, this.hp - dmg);
     this.hurtT = TRIAL.hurtGrace; this.flash = 1;
     this.d.fx.shake = Math.max(this.d.fx.shake, 0.45);
@@ -815,6 +835,7 @@ export class Trial {
     }
     if (this.state === 'stagger') h.r.dmg *= STONE.charge.staggerMult;
     else if (this.state === 'tele' && this.move === 'charge' && (this.chargeDmg += h.r.dmg) >= STONE.charge.breakDmg) this.interrupt();
+    if (this.floor > 0) h.r.dmg = Math.min(h.r.dmg, Math.max(0, e.hp - this.floor));
     return h.r;
   }
 

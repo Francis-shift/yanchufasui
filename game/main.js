@@ -34,7 +34,8 @@ import {
 import { Caster } from './actors/caster.js';
 import { Enemies } from './actors/enemies.js';
 import { loadRig } from './actors/rig.js';
-import { Trial } from './modes/trial.js';
+import { ARENA_R, Trial } from './modes/trial.js';
+import { Autoplay, autoMove } from './modes/autoplay.js';
 import { DragonFx } from './fx/dragon.js';
 import { Locks } from './fx/locks.js';
 import { distToSegment, Walls } from './fx/walls.js';
@@ -97,7 +98,7 @@ const FRAME_NEAR = [V(0, 2.2, 5.2), V(0, 0, 6.4), V(0, 0, -10.4), V(-9.2, 0, -5.
 /** 解析失败的原因，显示在咒语卡上（方便现场判断是哪一段出了问题） */
 const FAIL_TEXT = {
   timeout: '超时', model_error: '模型出错', network: '网络不通', no_key: '服务器未配置密钥', rate: '说得太快', daily: '今日额度已满',
-  too_long: '太长', empty: '空', bad_request: '请求有误', warm_failed: '预热失败',
+  too_long: '太长', empty: '空', bad_request: '请求有误', warm_failed: '预热失败', autoplay: '演示不调模型',
 };
 /** 语音没识别成的原因，写在提示行（说一次没成，玩家要知道是再说一次还是改打字） */
 const ASR_FAIL = {
@@ -243,11 +244,14 @@ export function start(root, opts = {}) {
   const view = { mode: (() => { try { return readView(localStorage.getItem(VIEW_KEY)); } catch { return readView(null); } })(),
     dir: viewDir(FOLLOW.pitch, FOLLOW.yaw).negate().setY(0).normalize(), fromPos: new THREE.Vector3(), fromLook: new THREE.Vector3(), sw: 1, hid: false,
     low: 0, locked: (() => { try { return localStorage.getItem(LOCK_KEY) !== 'off'; } catch { return true; } })(), tilt: 0, homing: 0 };
-  /** 换到某一档（按钮、快捷键轮着切；设置里直接点）：存下来，从现在的机位滑过去 @param {import('./world/trialcam.js').View} m */
-  function setViewMode(m) {
+  /**
+   * 换到某一档（按钮、快捷键轮着切；设置里直接点）：存下来，从现在的机位滑过去
+   * @param {import('./world/trialcam.js').View} m @param {boolean} [save] 演示模式换的不存，放完换回来
+   */
+  function setViewMode(m, save = true) {
     if (m === view.mode) return;
     view.mode = m;
-    try { localStorage.setItem(VIEW_KEY, view.mode); } catch { /* 存不进去就只记在这次打开里 */ }
+    if (save) try { localStorage.setItem(VIEW_KEY, view.mode); } catch { /* 存不进去就只记在这次打开里 */ }
     view.fromPos.copy(camPos); view.fromLook.copy(camLook); view.sw = 0;
     view.dir.copy(steer.dir).setY(0).normalize();   // 从现在的"往前"开始转向目标，不一下子扭过去
     view.tilt = 0; view.homing = 0;
@@ -505,7 +509,7 @@ export function start(root, opts = {}) {
     hud.hideOverlay();
     if (mobile) landscape(mode === 'trial');
     onResize();   // 试炼要不要转过来；按钮栏出现后，底下被挡住的高度也变了
-    if (mode === 'defense') hud.input.focus();
+    if (mode === 'defense' && !play.on) hud.input.focus();
   }
 
   /**
@@ -946,6 +950,99 @@ export function start(root, opts = {}) {
   hud.go.addEventListener('click', () => trial.engage());
   warmUp(opts.parseUrl);   // 玩家看标题的这几秒，把连接先建好
 
+  // ---------------------------------------------------------------- 演示模式（modes/autoplay.js，设计文档第 4 节"11-04 做：演示模式"）
+  /** 省时间的地方（字幕和设计文档都写明了）：小怪潮冒几只、boss 打到几成血就不再掉（留给龙）、龙的伤害翻几倍（一下打死） */
+  const AUTO = { wave: 6, floor: 0.15, dragon: 20 };
+  /**
+   * side、sideT：绕敌人转的方向、还有几秒换向；castT、i：还有几秒放下一招、轮到第几个天赋；pickT：三选一看几秒再点；
+   * dragon：正等着放龙；kept：放之前的镜头设置，放完还回去
+   */
+  const auto = { side: 1, sideT: 0, castT: 0, i: 0, pickT: 0, dragon: false, kept: { view: view.mode, locked: view.locked } };
+  /** 试炼：这一段的小怪不冒了，场上的打碎 */
+  function clearWave() {
+    trial.waveLeft = 0; trial.pending.length = 0;
+    for (const e of [...enemies.list]) if (e.chase) enemies.kill(e, e.pos);
+  }
+  /** 脚本里 call 的事 @type {Record<string, () => void>} */
+  const autoCalls = {
+    gauge: () => setGauge(S.mods.ult, 'ice'),
+    engage: () => { trial.engage(); trial.waveLeft = AUTO.wave; },
+    clearWave,
+    shoulder: () => { view.locked = true; setViewMode('shoulder', false); },
+    follow: () => setViewMode('follow', false),
+    dragon: () => {   // 气势直接给满；小怪清掉（不然龙扑它们去了），甲剥掉
+      clearWave();
+      trial.armor = 0; trial.floor = 0;
+      setGauge(S.mods.ult, 'ice');
+      auto.dragon = true;
+    },
+  };
+  /** 脚本里 until 等的事 @type {Record<string, () => boolean>} */
+  const autoTests = {
+    waveDone: () => trial.state !== 'wave',
+    bossUp: () => !!trial.boss,
+    bossGone: () => !trial.boss,
+  };
+  const play = new Autoplay({
+    say: (t) => hud.setAutoplay(t),
+    go: (m) => { auto.dragon = false; if (m === 'cover') backToTitle(); else startGame(m); },
+    typed: (t) => { if (input.value !== t) { input.value = t; onInput(); } },
+    cast: (t) => { input.value = ''; onInput(); submit(t); },
+    ready: () => S.phase === 'playing' && !S.busy,
+    call: (c) => autoCalls[c]?.(),
+    test: (c) => !!autoTests[c]?.(),
+  });
+  function startAuto() {
+    auto.kept = { view: view.mode, locked: view.locked };
+    setViewMode('follow', false);
+    play.start();
+  }
+  function stopAuto() {
+    play.stop();
+    setViewMode(auto.kept.view, false);
+    view.locked = auto.kept.locked;
+    backToTitle();
+  }
+  hud.onAutoplay = startAuto;
+  /** 放着的时候碰一下键盘或屏幕就退（声音开关除外：展台上要能调）；这一下不再往下传 @param {Event} e */
+  const onAutoExit = (e) => {
+    if (!play.on || (e.target instanceof Element && e.target.closest('.yc-mute'))) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    stopAuto();
+  };
+  window.addEventListener('keydown', onAutoExit, true);
+  window.addEventListener('pointerdown', onAutoExit, true);
+  /** 演示的这一帧：推脚本；守关一直补敌人；试炼替人选卡、走位、放招 @param {number} rdt 现实时间 */
+  function autoDrive(rdt) {
+    play.update(rdt);
+    if (!play.on) return;
+    if (S.mode === 'defense') {
+      if (S.phase === 'playing' && S.queue.length < 2) S.queue.push('grunt');
+      return;
+    }
+    if (hud.pickOn) {   // 看两秒拿第一张；招式字、字诀还要选按钮，同样拿第一个
+      if ((auto.pickT -= rdt) <= 0) { auto.pickT = 1.6; hud.pickOn.pick(0); }
+      return;
+    }
+    auto.pickT = 2;
+    if (!trial.fighting) return;
+    const b = trial.boss;
+    if (b && !auto.dragon) trial.floor = b.maxHp * AUTO.floor;
+    /** @type {any} */
+    let foe = b;
+    if (!foe) for (const e of enemies.list) if (e.chase && (!foe || e.pos.distanceTo(trial.p) < foe.pos.distanceTo(trial.p))) foe = e;
+    if ((auto.sideT -= rdt) <= 0) { auto.sideT = 4 + Math.random() * 4; auto.side = -auto.side; }
+    const m = autoMove({ p: trial.p, foe: foe?.pos ?? null, threat: trial.threat(), shot: trial.shotIn(0.25), side: auto.side, keep: b ? 4.5 : 5,
+      inArena: (q) => Math.hypot(q.x, q.z) < ARENA_R });
+    trial.auto = { x: m.x, y: 0, z: m.z };
+    if (m.dash) trial.dash();
+    if (auto.dragon) { if (!dragon.flights.length) pressSummon(); return; }
+    if ((auto.castT -= rdt) > 0 || !foe) return;
+    auto.castT = 1.1;
+    pressTalent(S.talents[auto.i++ % S.talents.length]);
+  }
+
   // ---------------------------------------------------------------- 语音施法：按住说话，松开后识别成文字，再照打字那样施法
   /** 录音与听写；预览页没有麦克风，demo.voice.fake 换成假的 @type {Pick<Recorder, 'start' | 'stop' | 'dispose'> | null} */
   let recorder = Recorder.supported() ? new Recorder() : null;
@@ -1097,7 +1194,8 @@ export function start(root, opts = {}) {
     beginChant(guessElement(text) || 'arcane');          // 回车 0.1 秒内先给反应
     const kwRaw = parseKeywords(text);
     locks.show(castId, lockSteps(sanitizeIntent(kwRaw, text).steps).marks);   // 先按关键词亮锁定，模型回来再更正
-    const remoteP = parseRemote(opts.parseUrl, text, PARSE_TIMEOUT_MS);
+    /** @type {any} */
+    const remoteP = play.on ? { fail: 'autoplay' } : parseRemote(opts.parseUrl, text, PARSE_TIMEOUT_MS);   // 演示模式不调模型，直接走关键词
     await new Promise((r) => setTimeout(r, CHANT_MIN_MS));
     const remote = await remoteP;
     // ms 是玩家实际等的总时间；括号里是服务器调模型花的时间，两者之差就是网络路上的时间
@@ -1398,6 +1496,7 @@ export function start(root, opts = {}) {
   function runSummon(sm, castId) {
     const views = enemies.views();
     const res = resolveTarget(sm.target, views, { count: 3, caster: CASTER_POS, objects: OBJECTS });
+    if (play.on) sm.dmg *= AUTO.dragon;
     const el = /** @type {keyof typeof SUMMONS} */ (sm.el), k = sm.dmg / SUMMONS[el].dmg;
     const twin = S.mods.twin, guard = S.mods.guard && S.mode === 'trial';
     hud.bigText(`${sm.name}现世`, SUMMON_INK[el] ?? SUMMON_INK.ice, 1400);
@@ -2175,6 +2274,7 @@ export function start(root, opts = {}) {
     if (S.slowT > 0) { S.slowT -= pdt; dt *= RUN.arts.slow.scale; }
     S.counterT = Math.max(0, S.counterT - pdt); S.afterT = Math.max(0, S.afterT - pdt);
     idleT += dt;
+    if (play.on) autoDrive(realDt);
 
     for (let i = timers.length - 1; i >= 0; i--) { timers[i].t -= dt; if (timers[i].t <= 0) { const t = timers.splice(i, 1)[0]; t.fn(); } }
     if (S.phase === 'playing' || S.phase === 'rest') {
@@ -2227,7 +2327,7 @@ export function start(root, opts = {}) {
     const cm = layout.crystal.material;
     cm.emissiveIntensity += (0.8 - cm.emissiveIntensity) * Math.min(1, dt * 3);
     hud.setMana(S.mana, MANA_MAX);
-    if (lab.on) {   // 试验场：法力、阵眼一直满
+    if (lab.on || play.on) {   // 试验场、演示：法力、阵眼一直满
       S.mana = MANA_MAX;
       if (S.core < CORE_HP) { S.core = CORE_HP; hud.setCore(S.core, CORE_HP); if (lab.shield < 0) barrier.setDamage(0); }
       labT += realDt;
@@ -2333,10 +2433,12 @@ export function start(root, opts = {}) {
     hp: (n = TRIAL.hp) => { trial.hp = n; hud.setCore(n, TRIAL.hp); },
     /** 试炼：跳过这一段（小怪潮清场 / boss 直接碎），看下一段 */
     skipStage: () => {
-      trial.waveLeft = 0; trial.pending.length = 0;
-      for (const e of [...enemies.list]) if (e.chase) enemies.kill(e, e.pos);
+      clearWave();
       if (trial.boss) enemies.kill(trial.boss, trial.boss.pos);
     },
+    /** 演示模式：start 放、stop 退、at 跳到第几步（看某一段用）、state 看放到哪了 */
+    auto: { start: startAuto, stop: stopAuto, at: (/** @type {number} */ i) => play.enter(i),
+      state: () => ({ on: play.on, i: play.i, t: +play.t.toFixed(1), step: play.script[play.i], dragon: auto.dragon, perfects: trial.perfects }) },
     /** 试炼：在 (x, z) 放一只小怪潮里的小怪（'grunt' | 'archer' | 'charger'） */
     minion: (/** @type {string} */ kind = 'archer', x = 0, z = -4) => { trial.spawnChaser({ x, z, kind }); },
     /** 试炼：在 (x, z) 放一颗不动、不伤人的冰锥，活 life 秒（看护身、字诀「引」打不打得碎） */
@@ -2445,6 +2547,8 @@ export function start(root, opts = {}) {
     vv?.removeEventListener('resize', onResize);
     vv?.removeEventListener('scroll', onResize);
     window.removeEventListener('keydown', onGlobalKey);
+    window.removeEventListener('keydown', onAutoExit, true);
+    window.removeEventListener('pointerdown', onAutoExit, true);
     window.removeEventListener('keyup', onGlobalKeyUp);
     window.removeEventListener('blur', onBlur);
     for (const ev of UNLOCK_ON) window.removeEventListener(ev, unlock, { capture: true });
