@@ -13,7 +13,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-import { chainTargets, damageTo, planCast, regenMana, resolveTarget, twinTarget } from './rules/arbiter.js';
+import { chainTargets, damageTo, fireReach, namesWall, planCast, regenMana, resolveTarget, rockRun, twinTarget, windReaches } from './rules/arbiter.js';
 import { inWave } from './rules/fusion.js';
 import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
@@ -29,7 +29,7 @@ import {
 } from './rules/talents.js';
 import {
   BEAM, BUTTON_CHANT_MS, CHANT_MIN_MS, CORE_HP, ELEMENTS, FORMS, INPUT_MAX_CHARS, MANA_MAX, MOMENTUM_FX, MOMENTUM_RANGE, PARSE_TIMEOUT_MS, RAIN,
-  RUN, SLOWMO_MAX_SEC, SLOWMO_SCALE, SUMMONS, TALENTS, TORNADO, TRIAL, WALL,
+  REACTIONS, RUN, SLOWMO_MAX_SEC, SLOWMO_SCALE, SUMMONS, TALENTS, TORNADO, TRIAL, WALL,
 } from './rules/numbers.js';
 import { Caster } from './actors/caster.js';
 import { Enemies } from './actors/enemies.js';
@@ -1276,7 +1276,7 @@ export function start(root, opts = {}) {
       return;
     }
     const tally = newTally(name || plan.summon?.name || '无名');   // 战报卡的账：之后这一招每打中一下都记上
-    for (const s of plan.steps) tallyOf.set(s, tally);
+    for (const s of plan.steps) { tallyOf.set(s, tally); s.wallNamed = s.el === 'wind' && namesWall(text); }
     if (plan.summon) tallyOf.set(plan.summon, tally);
     const m = plan.momentum;
     if (!c.button) { if (m >= 3) sound.play('surge'); else sound.play('card'); }   // 开口念成的咒"叮"一声；气势如虹换成锣鼓
@@ -1601,6 +1601,9 @@ export function start(root, opts = {}) {
     fx.groundFire(p, r, sec);
   }
 
+  /** 这里放不下一段土墙：悬空，或者压着柱子、石兽、香炉、石灯 @param {number} x @param {number} z */
+  const noWallAt = (x, z) => groundHeightAt(x, z) === null || OBSTACLES.some((o) => Math.hypot(x - o.x, z - o.z) < o.r + 0.5);
+
   /**
    * 土龙钻出来的地方围一圈土墙（一段一个点，各自顺着圈的切线立），把圈里的困住；
    * 落在柱子、石兽、香炉、石灯上，或者悬空的那几段不立。
@@ -1610,7 +1613,7 @@ export function start(root, opts = {}) {
     const { ring: R, wallSec } = SUMMONS.earth, n = Math.round((2 * Math.PI * R) / WALL.gap), pts = [];
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2, x = p.x + Math.cos(a) * R, z = p.z + Math.sin(a) * R;
-      if (groundHeightAt(x, z) === null || OBSTACLES.some((o) => Math.hypot(x - o.x, z - o.z) < o.r + 0.5)) continue;
+      if (noWallAt(x, z)) continue;
       pts.push({ x, z, yaw: Math.atan2(-Math.sin(a), Math.cos(a)) + Math.PI / 2 });
     }
     if (!pts.length) return;
@@ -1627,8 +1630,10 @@ export function start(root, opts = {}) {
   /** @param {THREE.Vector3} p @param {number} r @param {number} k @param {Tally} [tally] */
   function gale(p, r, k, tally) {
     const { sec, total } = SUMMONS.wind;
-    gales.push({ p: p.clone(), r, t: sec, tick: 0, dmg: (total * k * GALE_TICK) / sec, src: { el: 'wind', tally } });
+    const src = { el: 'wind', tally };
+    gales.push({ p: p.clone(), r, t: sec, tick: 0, dmg: (total * k * GALE_TICK) / sec, src });
     fusions.gale(p, r, sec);
+    blowWalls(src, p, r);
     if (S.mode === 'trial') {   // 风一起，boss 射出来的冰锥全吹散
       const n = trial.shatter(p, p, 999);
       if (n) floatAt(p.clone().setY(p.y + 1.5), `吹散冰锥 ×${n}`, '#2fbf86');
@@ -1771,7 +1776,17 @@ export function start(root, opts = {}) {
     if (S.phase !== 'playing') return;
     if (step.fusion) { runFusion(step, res); return; }
     const range = (MOMENTUM_RANGE[m] ?? 1) * (step.wide ?? 1), big = MOMENTUM_FX[m] ?? 1;   // wide：试炼里升过级的招式字
-    const boom = (p, R, scale) => { fx.burst(p, step.el, R, scale * big); if (m >= 3) fx.hitStop = Math.max(fx.hitStop, 0.12); };
+    const boom = (p, R, scale) => {
+      fx.burst(p, step.el, R, scale * big);
+      if (m >= 3) fx.hitStop = Math.max(fx.hitStop, 0.12);
+      if (step.el === 'wind') blowWalls(step, p, step.wallNamed ? Infinity : R);   // 落石：风刮到土墙，把墙掀出去
+    };
+    /** 火旋风：圈里有带风痕的敌人，这一下的范围放大、原地卷起一股火 @param {THREE.Vector3} p @param {number} R */
+    const fan = (p, R) => {
+      const R2 = fireReach(step.el, R, enemies.views(), p);
+      if (R2 > R) fusions.whirl(p, R2);
+      return R2;
+    };
     const dir = { fromAbove: step.path === 'sky', fromBehind: step.path === 'behind' };
     // 试炼里写进按钮的字诀（run.js applyRunes）：随——追着打；引——闪电劈碎冰锥；燎——落地留火；回——风飞回手上再打一下
     const rs = step.runes ?? [], sui = rs.includes('sui'), shatter = rs.includes('yin'), hui = rs.includes('hui');
@@ -1789,9 +1804,15 @@ export function start(root, opts = {}) {
             return last;
           },
           onHit: (p) => {
-            boom(p, 1.3, 0.45);
+            const R = fan(p, 1.3), whirl = R > 1.3;
+            boom(p, R, 0.45);
             const e = id ? enemies.get(id) : null;
-            if (e) hitEnemy(e, step, step.dmgEach, CASTER_POS, dir);
+            if (e) hitEnemy(e, step, step.dmgEach, CASTER_POS, { ...dir, whirl });
+            if (whirl) {   // 弹本来只打一只，火旋风把旁边的也卷进去
+              for (const o of [...enemies.list]) {
+                if (o !== e && Math.hypot(o.pos.x - p.x, o.pos.z - p.z) <= R) hitEnemy(o, step, step.dmgEach, p, { whirl });
+              }
+            }
             burn(p, RUN.runes.liao.r);
             if (hui) windBack(step, p);
           },
@@ -1808,9 +1829,10 @@ export function start(root, opts = {}) {
           el: step.el, path: 'sky', delay: (i * FORMS.rain.sec) / FORMS.rain.hits, shatter,
           target: () => { if (sui) { const q = center(); tp = groundPt({ x: q.x + ox, z: q.z + oz }); } return tp; },
           onHit: (p) => {
-            boom(p, RAIN.hitR * range, 0.4);
+            const R = fan(p, RAIN.hitR * range), whirl = R > RAIN.hitR * range;
+            boom(p, R, 0.4);
             for (const e of [...enemies.list]) {
-              if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) <= RAIN.hitR * range) hitEnemy(e, step, step.dmgEach, p, { fromAbove: true });
+              if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) <= R) hitEnemy(e, step, step.dmgEach, p, { fromAbove: true, whirl });
             }
             burn(p, RAIN.hitR * range * 0.6);
           },
@@ -1822,15 +1844,16 @@ export function start(root, opts = {}) {
     } else {
       const pt = res.point ? groundPt(res.point) : DEFAULT_AIM.clone();
       const aim = sui ? follow(res.ids[0] ?? null, pt) : () => pt;
-      const R = FORMS.burst.radius * range;
+      const R0 = FORMS.burst.radius * range;
       shoot({
         el: step.el, path: 'straight', big: true, target: aim, shatter,
         onHit: (p) => {
+          const R = fan(p, R0), whirl = R > R0;
           boom(p, R, 1);
           for (const e of [...enemies.list]) {
-            if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) <= R) hitEnemy(e, step, step.dmgEach, p, {});
+            if (Math.hypot(e.pos.x - p.x, e.pos.z - p.z) <= R) hitEnemy(e, step, step.dmgEach, p, { whirl });
           }
-          burn(p, R * 0.5);
+          burn(p, R0 * 0.5);
           if (hui) windBack(step, p);
         },
       });
@@ -1859,11 +1882,46 @@ export function start(root, opts = {}) {
     const w = walls.add(step.el, pts, Math.atan2(ux, uz) + Math.PI / 2, earth ? WALL.earthSec : WALL.curtainSec, step);
     fx.burst(groundPt(c), step.el, 1.6, 0.5);
     if (step.runes?.includes('hui')) after(0.3, () => windBack(step, groundPt(c)));   // 字诀「回」：风墙也飞回来一道
+    if (step.el === 'wind') blowWalls(step, c, step.wallNamed ? Infinity : half * WALL.gap);   // 「用风把石墙推出去」解析出来是一道风墙
     if (earth) {
       enemies.setObstacles(walls.obstacles());
       for (const e of [...enemies.list]) {
         if (distToSegment(e.pos, pts[0], pts[n - 1]) < 0.8) { w.hit.add(e.id); hitEnemy(e, step, step.dmgEach, e.pos.clone().add(new THREE.Vector3(0, 0, 1)), {}); }
       }
+    }
+  }
+
+  /**
+   * 落石：风刮到玩家立的土墙，整堵墙被掀起来往外飞（离施法者的方向），每一块飞到头、撞上柱子或到了台边就碎。
+   * 砸中敌人的伤害记在这一招风的账上。
+   * @param {any} step 哪一招风 @param {{ x: number, z: number }} p 风落在哪 @param {number} R 风刮多大
+   */
+  function blowWalls(step, p, R) {
+    const { dist, speed } = REACTIONS['earth+wind'], list = walls.blowable().filter((w) => windReaches(w.pts, p, R));
+    for (const w of list) {
+      const a = w.pts[0], b = w.pts[w.pts.length - 1], dx = (a.x + b.x) / 2 - CASTER_POS.x, dz = (a.z + b.z) / 2 - CASTER_POS.z, len = Math.hypot(dx, dz) || 1;
+      const to = { x: dx / len, z: dz / len }, rock = { el: 'earth', tally: step.tally ?? tallyOf.get(step) }, st = stepStats.get(step);
+      if (st) stepStats.set(rock, st);
+      walls.blow(w, to, w.pts.map((q) => rockRun(q, to, dist, noWallAt)), speed, rock);
+    }
+    if (list.length) enemies.setObstacles(walls.obstacles());
+  }
+
+  /** 每帧：飞着的石头撞到谁，砸一下（落石）并顺着往外推，每堵墙每个敌人只算一次；撞上 boss 整堵都碎 */
+  function rockContacts() {
+    for (const w of walls.flying()) {
+      const B = /** @type {NonNullable<typeof w.blown>} */ (w.blown);
+      w.pts.forEach((q, j) => {
+        if (B.left[j] <= 0) return;
+        for (const e of [...enemies.list]) {
+          const boss = e.mode === 'boss';
+          if (B.hit.has(e.id) || Math.hypot(e.pos.x - q.x, e.pos.z - q.z) > (boss ? 1.9 : 1.1)) continue;
+          B.hit.add(e.id);
+          hitEnemy(e, B.rock, REACTIONS['earth+wind'].rockDmg, groundPt(q).setY(0), { rock: true });
+          fx.shake = Math.max(fx.shake, 0.18);
+          if (boss) B.left.fill(0);
+        }
+      });
     }
   }
 
@@ -2291,6 +2349,7 @@ export function start(root, opts = {}) {
     updateCubes(dt);
     if (walls.update(dt)) enemies.setObstacles(walls.obstacles());   // 土墙沉下去了，流场重算
     curtainContacts();
+    rockContacts();
     if (S.phase === 'playing') { updateEmbers(dt); updateGales(dt); }
     fusions.update(dt, camera);
     fusionContacts();
@@ -2467,6 +2526,9 @@ export function start(root, opts = {}) {
     /** 单独炸一下看样子：boom(元素, [x,y,z], 半径, 规模)；shot(元素, [x,y,z]) 从施法者打一发飞弹过去（不结算伤害） */
     boom: (el = 'fire', at = [0, 0.4, -4], R = 2.5, scale = 1) => fx.burst(new THREE.Vector3(...at), el, R, scale),
     shot: (el = 'fire', to = [0, 1, -5], big = true) => fx.bolt({ el, path: 'straight', big, target: () => new THREE.Vector3(...to), onHit: (p) => fx.burst(p, el, 1.3, 0.45) }),
+    /** 单独卷一股火旋风看样子；flying() 看有几堵土墙在飞（落石） */
+    whirl: (x = 0, z = -4, r = 3) => fusions.whirl(new THREE.Vector3(x, 0, z), r),
+    flying: () => walls.flying().map((w) => ({ pts: w.pts.map((p) => [+p.x.toFixed(1), +p.z.toFixed(1)]), left: w.blown?.left.map((d) => +d.toFixed(1)), hit: w.blown?.hit.size })),
     /** 入侵程度锁在 k（0～1），不给就回到跟着波次走；flash 在黑雾里劈一道闪电 */
     invade: (k = -1) => { lab.inv = k; },
     /** 光罩裂到几成（0～1），不给就回到跟着阵眼血量走 */

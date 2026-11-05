@@ -36,7 +36,8 @@ export function totalCost(steps) {
  *   ult：召龙要几格气势（默认 ULT_GAUGE；试炼拿了心法「龙吟」变少，见 run.js runMods）
  *   fusions：能合成哪些融合（默认 FUSION_OPEN；试炼里只有领悟了的合字，见 run.js runFusions）
  * @typedef {Step & { cost: number, dmgTotal: number, dmgEach: number, first: boolean, repeat: number,
- *             fusion?: string, fusionName?: string, idiom?: string }} PlannedStep fusion 是融合的键（如 wind>fire）
+ *             fusion?: string, fusionName?: string, idiom?: string, wallNamed?: boolean }} PlannedStep
+ *   fusion 是融合的键（如 wind>fire）；wallNamed：这一招风是句子里点名吹土墙的（见 namesWall）
  * @typedef {{ el: string, name: string, target: string, dmg: number, radius: number, cast: boolean, ghost: boolean,
  *             first?: boolean }} SummonPlan cast = 真召出来了；ghost = 差一口气，只演龙影（法术已换成 steps 里的雨）
  * @typedef {{ ok: boolean, steps: PlannedStep[], cost: number, momentum: number, momentumHalved: boolean,
@@ -241,7 +242,8 @@ export function twinTarget(first, enemies, opt) {
 /**
  * 一次命中对一个敌人造成多少伤害、附加什么效果。反应只在这里判断。
  * @param {{ type: string, frozen: boolean, lastEl?: string }} enemy
- * @param {{ el: string, dmg: number, fromAbove?: boolean, fromBehind?: boolean }} hit
+ * @param {{ el: string, dmg: number, fromAbove?: boolean, fromBehind?: boolean, whirl?: boolean, rock?: boolean }} hit
+ *   whirl：这一下的范围被风放大了（火旋风，见 fireReach）；rock：被风掀出去的土墙砸的（落石），顺着往外推
  * @returns {{ dmg: number, reaction: string, freezeSec: number, burnSec: number, unfreeze: boolean, push: number, aoeBonus: number,
  *             stunSec: number }}
  */
@@ -256,12 +258,57 @@ export function damageTo(enemy, hit) {
     dmg *= ELEMENTS.ice.frozenTakenMult;
     if (hit.el === 'thunder') reaction = REACTIONS['ice+thunder'].name;   // 导电：连锁在冻住的之间不衰减（见 chainTargets）
   }
+  if (hit.whirl && !reaction) reaction = REACTIONS['wind+fire'].name;
+  if (hit.rock) reaction = REACTIONS['earth+wind'].name;
   if ('frontReduce' in spec && !hit.fromAbove && !hit.fromBehind) dmg *= 1 - spec.frontReduce;
   const freezeSec = hit.el === 'ice' ? ELEMENTS.ice.freezeSec * ('freezeMult' in spec ? spec.freezeMult : 1) : 0;
   const burnSec = hit.el === 'fire' ? ELEMENTS.fire.burnSec : 0;
-  const push = hit.el === 'wind' ? ELEMENTS.wind.push : 0;
+  const push = hit.el === 'wind' || hit.rock ? ELEMENTS.wind.push : 0;
   const stunSec = hit.el === 'thunder' ? ELEMENTS.thunder.stunSec : 0;
   return { dmg, reaction, freezeSec, burnSec, unfreeze, push, aoeBonus, stunSec };
+}
+
+/**
+ * 火旋风：火落下来的这一圈里有带风痕的敌人（刚被风吹过），这一下的作用范围放大。
+ * 弹本来只打一只，R 给它炸开的那一圈：放大以后圈里别的敌人也烧到。
+ * @param {string} el @param {number} R 平常的半径
+ * @param {{ x: number, z: number, windy?: number }[]} enemies @param {{ x: number, z: number }} p 落点
+ * @returns {number} 这一下的半径
+ */
+export function fireReach(el, R, enemies, p) {
+  const fanned = el === 'fire' && enemies.some((e) => (e.windy ?? 0) > 0 && Math.hypot(e.x - p.x, e.z - p.z) <= R);
+  return fanned ? R * REACTIONS['wind+fire'].radiusMult : R;
+}
+
+/**
+ * 落石：风落在 p、半径 R，刮得到这堵土墙吗（哪一段够得着都算，墙段自身算 0.6 米粗）。
+ * @param {{ x: number, z: number }[]} pts 墙的各段 @param {{ x: number, z: number }} p @param {number} R
+ */
+export function windReaches(pts, p, R) {
+  return pts.some((q) => Math.hypot(q.x - p.x, q.z - p.z) <= R + 0.6);
+}
+
+/**
+ * 落石：这句话点名了土墙（「用风把石墙推出去」），风不管落在哪都掀；只说「风墙」不算，那是要立一道风墙。
+ * 敌人绕着墙走，等这句打完，风落的地方往往离墙好几米，按距离算就掀不动（11-05 预览）。
+ * @param {string} text
+ */
+export function namesWall(text) {
+  return /(?<!风)[墙壁]/.test(text);
+}
+
+/**
+ * 落石：墙上的一块石头沿 dir 能飞多远，撞上东西（blocked 说了算：柱子、石兽、台边）就停在跟前。
+ * 一块一块算：整堵 5 米多宽，一起算的话牌坊前面的墙飞不到 2 米就全停了（11-05 预览）。
+ * @param {{ x: number, z: number }} q @param {{ x: number, z: number }} dir 水平单位向量 @param {number} max
+ * @param {(x: number, z: number) => boolean} blocked @returns {number}
+ */
+export function rockRun(q, dir, max, blocked) {
+  const STEP = 0.25;
+  for (let d = STEP; d <= max; d += STEP) {
+    if (blocked(q.x + dir.x * d, q.z + dir.z * d)) return d - STEP;
+  }
+  return max;
 }
 
 /**

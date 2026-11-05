@@ -30,8 +30,10 @@ const SEG = { w: 1.0, h: 1.6, d: 0.6 };
 /**
  * @typedef {{ el: string, pts: { x: number, z: number }[], t: number, sec: number, hit: Set<string>,
  *             meshes: THREE.Mesh[], bodies: CANNON.Body[], yaw: number, payload: any,
- *             mat?: THREE.MeshStandardMaterial, crumbled?: boolean, acc?: number }} Wall
- * mat：土墙这一堵的石块材质（熔纹各自冷却）；crumbled：土墙已经碎掉；acc：风墙往上卷的笔触攒的时间
+ *             mat?: THREE.MeshStandardMaterial, crumbled?: boolean, acc?: number,
+ *             blown?: { x: number, z: number, left: number[], speed: number, hit: Set<string>, rock: any } }} Wall
+ * mat：土墙这一堵的石块材质（熔纹各自冷却）；crumbled：土墙已经碎掉；acc：风墙往上卷的笔触攒的时间；
+ * blown：被风掀出去了（落石）：往哪飞、每一块还能飞几米、每秒几米、砸过谁、砸中时算哪一招
  */
 /** 土墙最后多久碎掉（碎了以后石块消失，挡路还算到时间到） */
 const CRUMBLE = 0.35;
@@ -99,19 +101,61 @@ export class Walls {
     return w;
   }
 
-  /** 土墙段的位置，给流场当障碍；bounce：这堵墙写了字诀「返」（payload 是那一步，见 run.js applyRunes），冰锥撞上弹回去 */
+  /** 土墙段的位置，给流场当障碍；bounce：这堵墙写了字诀「返」（payload 是那一步，见 run.js applyRunes），冰锥撞上弹回去；飞着的不挡 */
   obstacles() {
-    return this.list.filter((w) => w.el === 'earth')
+    return this.list.filter((w) => w.el === 'earth' && !w.blown)
       .flatMap((w) => w.pts.map((p) => ({ x: p.x, z: p.z, r: 0.6, bounce: !!w.payload?.runes?.includes('fan') })));
   }
 
-  /** 挡敌方弹幕的墙段：四种墙都算（10-30 本人：火冰风墙也该挡冰锥、火球），只是帘子不挡路；bounce 同上，只有土墙写得了「返」 */
+  /** 挡敌方弹幕的墙段：四种墙都算（10-30 本人：火冰风墙也该挡冰锥、火球），只是帘子不挡路；bounce 同上，只有土墙写得了「返」；飞着的不挡 */
   shields() {
-    return this.list.flatMap((w) => w.pts.map((p) => ({ x: p.x, z: p.z, r: 0.6, bounce: w.el === 'earth' && !!w.payload?.runes?.includes('fan') })));
+    return this.list.filter((w) => !w.blown)
+      .flatMap((w) => w.pts.map((p) => ({ x: p.x, z: p.z, r: 0.6, bounce: w.el === 'earth' && !!w.payload?.runes?.includes('fan') })));
   }
 
   /** 正在生效的帘子（火冰风墙） */
   curtains() { return this.list.filter((w) => w.el !== 'earth'); }
+
+  /** 风刮得动的土墙：玩家立的（土龙围的一圈没有 form，不算），没碎、没在飞 */
+  blowable() { return this.list.filter((w) => w.el === 'earth' && w.payload?.form && !w.crumbled && !w.blown); }
+
+  /** 被风掀出去、正在飞的土墙 */
+  flying() { return this.list.filter((w) => w.blown && !w.crumbled); }
+
+  /**
+   * 落石：风把土墙从地里掀出去，每一块石头沿 dir 飞自己那段路，飞到头碎掉；物理实体当场拿掉，流场由 main 重算。
+   * @param {Wall} w @param {{ x: number, z: number }} dir 水平单位向量 @param {number[]} runs 每一块飞几米 @param {number} speed
+   * @param {any} rock 砸中敌人时算哪一招
+   */
+  blow(w, dir, runs, speed, rock) {
+    w.blown = { x: dir.x, z: dir.z, left: runs, speed, hit: new Set(), rock };
+    for (const b of w.bodies) this.world.removeBody(b);
+    w.bodies.length = 0;
+    this.fx?.sound?.play('wall', { el: 'earth' });
+    if (this.fx) this.fx.shake = Math.max(this.fx.shake, 0.2);
+  }
+
+  /** 飞的这一帧：还在飞的石头往前挪，贴地拖一溜尘，飞到头碎成碎石；飞的路上不算寿命，全碎了这堵墙就没了 @param {Wall} w @param {number} dt */
+  fly(w, dt) {
+    const B = /** @type {NonNullable<Wall['blown']>} */ (w.blown);
+    w.pts.forEach((p, j) => {
+      const m = w.meshes[j];
+      if (!m.visible) return;
+      const d = Math.min(B.left[j], B.speed * dt);
+      B.left[j] -= d; p.x += B.x * d; p.z += B.z * d;
+      m.position.x = p.x; m.position.z = p.z;
+      for (let i = Math.round(70 * dt); i > 0; i--) {
+        this.p.emit(p.x + rand(-0.5, 0.5), (groundHeightAt(p.x, p.z) ?? 0) + 0.1, p.z + rand(-0.3, 0.3), -B.x * 3 + rand(-1, 1), rand(0.5, 2), -B.z * 3 + rand(-1, 1),
+          rand(0.4, 0.8), rand(0.1, 0.2), [0.75, 0.62, 0.45], [0.45, 0.38, 0.3], { grav: -2, drag: 1.2, alpha: 0.6 });
+      }
+      if (B.left[j] <= 0) {
+        m.visible = false;
+        this.fx?.rockDebris([m.position.clone()], 7, { speed: 3.5, spread: 0.45, size: 0.17, life: 1.3, heat: 0.2, up: 0.5 });
+      }
+    });
+    if (w.meshes.some((m) => m.visible)) w.t = Math.min(w.t, w.sec - CRUMBLE - 0.01);
+    else { w.crumbled = true; w.t = w.sec; }
+  }
 
   /**
    * @param {number} dt
@@ -122,6 +166,7 @@ export class Walls {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const w = this.list[i];
       w.t += dt;
+      if (w.blown && !w.crumbled) this.fly(w, dt);
       if (w.el === 'earth') {
         // 0.25 秒升起；到时间前碎成一把碎石（没接上法术画面就最后 0.6 秒沉回地下）
         const up = Math.min(1, w.t / 0.25), down = this.fx ? 0 : Math.max(0, (w.t - (w.sec - 0.6)) / 0.6);

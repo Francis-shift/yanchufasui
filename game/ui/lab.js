@@ -34,6 +34,7 @@ export const LAB_PRESETS = [
   ['蒸汽爆', { s: [{ e: 'ice', f: 'bolt', t: 'front' }, { e: 'fire', f: 'bolt', t: 'front' }], m: 1 }],
   ['碎冰', { s: [{ e: 'ice', f: 'bolt', t: 'front' }, { e: 'wind', f: 'bolt', t: 'front' }], m: 1 }],
   ['导电', { s: [{ e: 'ice', f: 'burst', t: 'densest' }, { e: 'thunder', f: 'bolt', t: 'densest' }], m: 1 }],
+  ['落石', { s: [{ e: 'earth', f: 'wall', t: 'front' }, { e: 'wind', f: 'burst', t: 'front' }], m: 1 }],
   ['召唤冰龙', { s: [], c: 'ice', m: 3 }],
   ['召唤火龙', { s: [], c: 'fire', m: 3 }],
   ['召唤雷龙', { s: [], c: 'thunder', m: 3 }],

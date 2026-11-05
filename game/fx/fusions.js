@@ -18,6 +18,8 @@ import { waveHalfW } from '../rules/fusion.js';
 const WAVE_LINGER = 1.3;
 /** 火卷风转多快（弧度/秒）：配上火团每秒升 5 米左右，螺旋一圈约 5 米高 */
 const SWIRL_W = 6;
+/** 火旋风（元素反应）一股烧几秒；同时最多几股（火雨一连落六下，不用股股都卷） */
+const WHIRL = { sec: 1.1, max: 3 };
 
 export class FusionFx {
   /**
@@ -34,6 +36,35 @@ export class FusionFx {
     this.waves = [];
     /** @type {{ pos: THREE.Vector3, r: number, sec: number, t: number, acc: number }[]} */
     this.gales = [];
+    /** @type {{ pos: THREE.Vector3, r: number, t: number, acc: number }[]} */
+    this.whirls = [];
+  }
+
+  /**
+   * 火旋风：火打到带风痕的敌人，落点原地卷起一股火——比火卷风矮小、不走、一秒就散，卷多大跟这一下的范围走。
+   * @param {THREE.Vector3} at @param {number} r 这一下的半径
+   */
+  whirl(at, r) {
+    if (this.whirls.length >= WHIRL.max) return;
+    this.whirls.push({ pos: at.clone().setY(groundHeightAt(at.x, at.z) ?? at.y), r, t: 0, acc: 0 });
+    this.fx.sound?.play('gale');
+  }
+
+  /** @param {{ pos: THREE.Vector3, r: number, t: number, acc: number }} w @param {number} dt @param {number} fade */
+  whirlFrame(w, dt, fade) {
+    const C = this.clouds, c = w.pos, R = w.r, fire = PALETTE.fire, s = Math.max(1, R / 2.5);
+    w.acc += dt * fade * this.k;
+    const n = (/** @type {number} */ perSec) => Math.floor(w.acc * perSec) - Math.floor((w.acc - dt * fade * this.k) * perSec);
+    for (let i = n(260); i > 0; i--) {   // 两股往上绕的火带：高度只有火卷风的一半，转快一倍才绕得够圈；团比圈小，不然糊成一团火球（11-05 截图）
+      const band = Math.random() < 0.5 ? 0 : Math.PI;
+      C.puff('fire', { x: c.x, y: c.y + rand(0, 0.3), z: c.z, vy: rand(3.8, 5), life: rand(0.6, 0.8), r0: rand(0.15, 0.22) * s, r1: rand(0.4, 0.58) * s, heat: 1.05, cool: 1.2,
+        aspect: 0.7, rot: rand(0.25, 0.45), spin: 0, orbit: { c, a: band + rand(-0.3, 0.3), r: R * rand(0.2, 0.28), w: SWIRL_W * 2, grow: 0.3 }, drag: 0.35, rise: 1.2 });
+    }
+    for (let i = n(120); i > 0; i--) {   // 甩出去的火星
+      const a = w.t * 9 + Math.random() * Math.PI * 2, r = R * 0.75;
+      this.p.emit(c.x + Math.cos(a) * r, c.y + rand(0, 2.2), c.z + Math.sin(a) * r, -Math.sin(a) * 6, rand(1, 3), Math.cos(a) * 6,
+        rand(0.35, 0.7), rand(0.04, 0.07), scaleArr(fire.core, 3), scaleArr(fire.primary, 1.3), { drag: 1.5, grav: 1 });
+    }
   }
 
   /**
@@ -214,6 +245,12 @@ export class FusionFx {
       fx.blastT = 0.15; fx.blastBoost = 0.4 * fade;   // 卷风照亮四周
       if (tw.t >= TORNADO.sec) this.tornadoes.splice(i, 1);
     }
+    for (let i = this.whirls.length - 1; i >= 0; i--) {
+      const w = this.whirls[i];
+      w.t += dt;
+      this.whirlFrame(w, dt, Math.min(1, w.t / 0.12) * Math.max(0, Math.min(1, (WHIRL.sec - w.t) / 0.35)));
+      if (w.t >= WHIRL.sec) this.whirls.splice(i, 1);
+    }
     for (let i = this.waves.length - 1; i >= 0; i--) {
       const wv = this.waves[i];
       wv.t += dt;
@@ -241,6 +278,7 @@ export class FusionFx {
 
   clear() {
     this.tornadoes.length = 0;
+    this.whirls.length = 0;
     this.waves.length = 0;
     this.gales.length = 0;
     this.clouds.clear();

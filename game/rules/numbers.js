@@ -245,12 +245,12 @@ export const RUN = {
 export const REACTIONS = {
   'ice+fire':   { name: '蒸汽爆', bonusAoe: 40 },   // 解除冻结，额外 40 点范围伤害
   'ice+wind':   { name: '碎冰', frozenMult: 2 },    // 被冻住的目标受 2 倍伤害
-  'wind+fire':  { name: '火旋风', radiusMult: 1.5 },// 火的作用范围 × 1.5
-  'earth+wind': { name: '落石', rockDmg: 30 },      // 石墙被风推出
+  'wind+fire':  { name: '火旋风', radiusMult: 1.5, sec: 10 },  // 被风吹过的敌人带 sec 秒风痕，火打到它时这一下的作用范围 × 1.5（打字施法要算上打字、咏唱和模型的时间）
+  'earth+wind': { name: '落石', rockDmg: 30, dist: 9, speed: 12 },   // 石墙被风推出：每秒 speed 米、最远飞 dist 米，砸中的敌人受 30 点伤害
   'ice+thunder': { name: '导电' },                  // 冻住的敌人之间连锁不衰减
 };
-/** 已经做好的反应（arbiter.js damageTo / chainTargets 里判断的）；火旋风、落石 10-20 顺延到第二批，选天赋的羁绊里先不列 */
-export const REACTION_OPEN = ['ice+fire', 'ice+wind', 'ice+thunder'];
+/** 已经做好的反应（判断在 arbiter.js：damageTo、chainTargets、fireReach、windReaches），选天赋的羁绊里只列这几种 */
+export const REACTION_OPEN = ['ice+fire', 'ice+wind', 'ice+thunder', 'wind+fire', 'earth+wind'];
 
 /**
  * 当前批次开放的原件。中期只开火 / 冰 / 风 × 弹 / 爆，第一批起火冰风土雷 × 弹爆墙雨全开；

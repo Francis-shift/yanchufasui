@@ -21,9 +21,9 @@ test('选天赋：最多 3 个，没开放的选不了，再点一下取消', ()
 
 test('羁绊：列出两两之间已开放的融合和反应', () => {
   const names = synergies(['ice', 'fire', 'wind']).map((s) => `${s.kind}:${s.name}`);
-  for (const n of ['反应:蒸汽爆', '反应:碎冰', '融合:火卷风', '融合:豪火灭却']) assert.ok(names.includes(n), `缺 ${n}`);
+  for (const n of ['反应:蒸汽爆', '反应:碎冰', '反应:火旋风', '融合:火卷风', '融合:豪火灭却']) assert.ok(names.includes(n), `缺 ${n}`);
   assert.ok(!names.some((n) => n.includes('暴风雪')), '暴风雪还没开放，不该列出');
-  assert.ok(!names.some((n) => n.includes('火旋风')), '火旋风这个反应还没做，不该列出');
+  assert.deepEqual(synergies(['earth', 'wind']).map((s) => `${s.a}>${s.b}:${s.name}`), ['earth>wind:落石'], '土在先、风在后才是落石');
   assert.deepEqual(synergies(['earth']), []);
 });
 

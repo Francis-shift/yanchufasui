@@ -8,7 +8,7 @@
  */
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
-import { BOSS, ELEMENTS, ENEMIES, FLAME, MINION, STONE } from '../rules/numbers.js';
+import { BOSS, ELEMENTS, ENEMIES, FLAME, MINION, REACTIONS, STONE } from '../rules/numbers.js';
 import { archerIntent, keepInArena } from '../rules/trial.js';
 import { attachToBone, makeRig, playRig } from './rig.js';
 import { CASTER_POS, CORE_POS, groundHeightAt, OBSTACLES, PATHS, PLAZA_R, SPAWN_FOG } from '../world/layout.js';
@@ -237,7 +237,7 @@ export class Enemies {
     const e = {
       id: `e${++seq}`, type, spec, hp: spec.hp, maxHp: spec.hp, group: g, mat, base, bar, fill, fillMat, scale,
       path: info, s: 0, lateral: rand(-0.7, 0.7), mode: 'walk', pos: new THREE.Vector3(), vel: new THREE.Vector3(),
-      dir: new THREE.Vector3(0, 0, 1), frozen: 0, burn: 0, stun: 0, hop: rand(0, Math.PI * 2), lastHitEl: '', squash: 0,
+      dir: new THREE.Vector3(0, 0, 1), frozen: 0, burn: 0, stun: 0, windy: 0, hop: rand(0, Math.PI * 2), lastHitEl: '', squash: 0,
       emerge: fromFog ? 0 : 1, armorMesh, lean: 0, moving: false, chase: false,
       // 试炼的小怪：act 是试炼模式摆的出招（符箓傀儡 'aim'，铁头傀儡 'tele' / 'rush' / 'daze'），cd 离下一次出招还有几秒；side 符箓傀儡横挪往哪边
       act: '', cd: 0, side: Math.random() < 0.5 ? 1 : -1,
@@ -343,7 +343,7 @@ export class Enemies {
   /** 给裁决器看的样子：位置、血量、离阵眼多远（试炼模式里阵眼就是施法者本人：离施法者多远） */
   views() {
     return this.list.map((e) => ({
-      id: e.id, x: e.pos.x, z: e.pos.z, hp: e.hp,
+      id: e.id, x: e.pos.x, z: e.pos.z, hp: e.hp, windy: e.windy,
       distToCore: e.mode === 'walk' ? e.path.total - e.s
         : e.mode === 'field' ? (this.field.distAt(e.pos.x, e.pos.z) ?? e.pos.distanceTo(CORE_POS))
         : e.mode === 'boss' || e.chase ? Math.hypot(e.pos.x - CASTER_POS.x, e.pos.z - CASTER_POS.z) : e.pos.distanceTo(CORE_FRONT),
@@ -367,6 +367,7 @@ export class Enemies {
     if (!this.list.includes(e)) return;
     e.hp -= r.dmg;
     e.lastHitEl = el;
+    if (el === 'wind') e.windy = REACTIONS['wind+fire'].sec;
     if (r.unfreeze) e.frozen = 0;
     if (r.freezeSec) e.frozen = Math.max(e.frozen, r.freezeSec);
     if (r.burnSec) e.burn = Math.max(e.burn, r.burnSec);
@@ -517,6 +518,15 @@ export class Enemies {
             rand(0.4, 0.7), rand(0.08, 0.14), [2.4, 1.1, 0.3], [0.9, 0.2, 0.05], { drag: 0.6 });
         }
         if (e.hp <= 0) { this.kill(e, e.pos); continue; }
+      }
+      // 风痕（火旋风）：刚被风吹过，身上绕着几缕青色的风
+      if (e.windy > 0) {
+        e.windy = Math.max(0, e.windy - dt);
+        if (Math.random() < dt * 22) {
+          const p = this.aimPoint(e, this._p), a = rand(0, Math.PI * 2), r = 0.45 * e.scale;
+          this.particles.emit(p.x + Math.cos(a) * r, p.y + rand(-0.6, 0.3), p.z + Math.sin(a) * r, -Math.sin(a) * 2.6, rand(0.8, 1.6), Math.cos(a) * 2.6,
+            rand(0.35, 0.55), rand(0.05, 0.09), [1.1, 2.2, 2], [0.3, 0.8, 0.7], { drag: 1.2, alpha: 0.7 });
+        }
       }
       // 麻痹（雷）：停下不动，身上紫白色一闪一闪
       if (e.stun > 0) {
