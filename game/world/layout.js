@@ -79,19 +79,30 @@ export const OBSTACLES = [
 export const fallenCircles = (p) => [0.7, 1.48, 2.26, 3.04, 3.82, 4.6].map((t) => ({ x: p.x + p.dir.x * t, z: p.z + p.dir.z * t, r: 0.55 }));
 
 const STANDING = [...OBSTACLES];
+/** @type {{ x: number, z: number, dir: { x: number, z: number } }[]} */
+let lying = [];
+/** @type {number[]} */
+let moved = [];
+/** @type {{ x: number, z: number, r: number }[]} */
+let dropped = [];
+const refreshObstacles = () => {
+  OBSTACLES.length = 0;
+  OBSTACLES.push(...STANDING.filter((_, i) => !moved.includes(i)), ...lying.flatMap(fallenCircles), ...dropped);
+};
 /**
  * 换上华表现在占的地：走位、弹幕、出怪点、土墙、飞石这些用 OBSTACLES 的地方都跟着认。敌人的流场要另外重算（enemies.setObstacles）。
- * @param {{ x: number, z: number, dir: { x: number, z: number } }[]} lying 躺在地上的几根
+ * @param {typeof lying} down 躺在地上的几根
  * @param {number[]} gone 不在原地的几根（PILLARS 的下标，也是 OBSTACLES 开头两个圆的下标）：倒了、碎了，柱脚那个圆拿掉
  */
-export function setFallen(lying, gone) {
-  OBSTACLES.length = 0;
-  OBSTACLES.push(...STANDING.filter((_, i) => !gone.includes(i)), ...lying.flatMap(fallenCircles));
+export function setFallen(down, gone) {
+  lying = down; moved = gone;
+  refreshObstacles();
 }
 
 /** @param {number} x0 @param {number} x1 @param {number} y0 @param {number} y1 @param {number} z0 @param {number} z1 */
 const box = (x0, x1, y0, y1, z0, z1) => ({ min: [x0, y0, z0], max: [x1, y1, z1] });
 const STONE_BOTTOM = STONE.ringTop - STONE.height;
+const STONE_SOLID = box(-0.9, 0.9, STONE_BOTTOM, STONE.ringTop, GATE.z - 0.9, GATE.z + 0.9);
 /**
  * 场景里实心的东西（轴对齐盒子，米；尺寸取自打包后的模型）：在空中飞的东西（冰龙）要绕开。
  * 两组柱子、横梁和屋顶、镇山石、两只石兽、两根华表。
@@ -99,7 +110,7 @@ const STONE_BOTTOM = STONE.ringTop - STONE.height;
 export const SOLIDS = [
   ...[-1, 1].map((s) => box(s > 0 ? 2.24 : -4.92, s > 0 ? 4.92 : -2.24, 0, GATE.openTop, GATE.z - 0.81, GATE.z + 0.81)),
   box(-6.5, 6.5, GATE.openTop, GATE.height, GATE.z - 1.39, GATE.z + 1.39),
-  box(-0.9, 0.9, STONE_BOTTOM, STONE.ringTop, GATE.z - 0.9, GATE.z + 0.9),
+  STONE_SOLID,
   ...[-1, 1].map((s) => box(s * LION.x - 1.04, s * LION.x + 1.04, 0, 3, LION.z - 1.03, LION.z + 1.03)),
   ...[-1, 1].map((s) => box(s * HUABIAO_X - 0.81, s * HUABIAO_X + 0.81, 0, 4.6, HUABIAO_Z - 0.57, HUABIAO_Z + 0.57)),
 ];
@@ -109,6 +120,17 @@ export const SOLIDS = [
  * 石兽、华表又细又矮，挡一下比镜头猛地推近好受（11-02 量：默认朝向站到华表背后，躲它会从 11 米一下推到 4 米）
  */
 export const CAMERA_BLOCKERS = SOLIDS.filter((b) => b.max[1] > 5);
+
+/**
+ * 换上镇山石现在占的地：落地了挡路（同 setFallen），飞的东西和镜头也改认地上那一块；吊回去就都还原。
+ * @param {{ x: number, z: number, r: number } | null} circle 落地占的圆，吊着给 null
+ */
+export function setDropped(circle) {
+  dropped = circle ? [circle] : [];
+  STONE_SOLID.min[1] = circle ? 0 : STONE_BOTTOM;
+  STONE_SOLID.max[1] = circle ? STONE.height : STONE.ringTop;
+  refreshObstacles();
+}
 
 /** 模型摆放的位置（props.js 用）：牌坊、两只石兽（右边那只镜像）、镇山石（模型原点在底面中心） */
 export const PROP_SPOTS = {
@@ -271,7 +293,8 @@ export function buildLayout(scene, opts = {}) {
   // 镇山石：两根铁链从门洞顶斜吊到石头顶上的铁环（铁链一直用代码画；石头先用多面体占位）
   const iron = new THREE.MeshStandardMaterial({ color: 0x3a3632, roughness: 0.45, metalness: 0.85 });
   const ring = new THREE.Vector3(0, STONE.ringTop, GATE.z);
-  scene.add(chains([-0.9, 0.9].map((sx) => [new THREE.Vector3(sx, GATE.openTop, GATE.z), ring]), iron));
+  const stoneChains = chains([-0.9, 0.9].map((sx) => [new THREE.Vector3(sx, GATE.openTop, GATE.z), ring]), iron);
+  scene.add(stoneChains);
   const stoneBox = shadowy(new THREE.Mesh(new THREE.IcosahedronGeometry(0.9, 1), darkStone));
   stoneBox.position.set(0, STONE.ringTop - STONE.height + 0.9, GATE.z);
   scene.add(stoneBox);
@@ -364,7 +387,7 @@ export function buildLayout(scene, opts = {}) {
   caster.position.copy(CASTER_POS);
   scene.add(caster);
 
-  return { core, coreSigil, crystal, caster, gateBox, stoneBox, huabiaoBox, censerBox, peakRock: peak, plaza, ambience };
+  return { core, coreSigil, crystal, caster, gateBox, stoneBox, stoneChains, huabiaoBox, censerBox, peakRock: peak, plaza, ambience };
 }
 
 /**

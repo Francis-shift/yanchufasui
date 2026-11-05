@@ -6,7 +6,7 @@
  */
 import {
   BOLT_COUNT_MAX, COMBO_DISCOUNT, ELEMENTS, ENEMIES, FIRST_DISCOVERY_MULT, FORMS, FUSION_DMG_MULT, FUSION_OPEN, FUSIONS,
-  MANA_MAX, MANA_REGEN, MOMENTUM_MULT, MOMENTUM_RANGE, POWER_DEFAULT, REACTIONS, REPEAT_DECAY, SUMMON_OPEN, SUMMONS, TOPPLE,
+  DROP, MANA_MAX, MANA_REGEN, MOMENTUM_MULT, MOMENTUM_RANGE, POWER_DEFAULT, REACTIONS, REPEAT_DECAY, SUMMON_OPEN, SUMMONS, TOPPLE,
   ULT_GAUGE, boltCostFactor, boltTotalDmgFactor, powerFactor,
 } from './numbers.js';
 
@@ -36,10 +36,10 @@ export function totalCost(steps) {
  *   ult：召龙要几格气势（默认 ULT_GAUGE；试炼拿了心法「龙吟」变少，见 run.js runMods）
  *   fusions：能合成哪些融合（默认 FUSION_OPEN；试炼里只有领悟了的合字，见 run.js runFusions）
  * @typedef {Step & { cost: number, dmgTotal: number, dmgEach: number, first: boolean, repeat: number,
- *             fusion?: string, fusionName?: string, idiom?: string, wallNamed?: boolean, pillars?: number[] }} PlannedStep
+ *             fusion?: string, fusionName?: string, idiom?: string, wallNamed?: boolean, pillars?: number[], cut?: boolean }} PlannedStep
  *   fusion 是融合的键（如 wind>fire）；wallNamed：这一招风是句子里点名吹土墙的（见 namesWall）；pillars：这一招落地时推倒哪几根华表（见 pickPillars）
  * @typedef {{ el: string, name: string, target: string, dmg: number, radius: number, cast: boolean, ghost: boolean,
- *             first?: boolean, pillars?: number[] }} SummonPlan cast = 真召出来了；ghost = 差一口气，只演龙影（法术已换成 steps 里的雨）
+ *             first?: boolean, pillars?: number[], cut?: boolean }} SummonPlan cast = 真召出来了；ghost = 差一口气，只演龙影（法术已换成 steps 里的雨）
  * @typedef {{ ok: boolean, steps: PlannedStep[], cost: number, momentum: number, momentumHalved: boolean,
  *             downgrades: string[], backlash: boolean, gaugeGain: number, gaugeSpent?: boolean, summon?: SummonPlan,
  *             lastCombo: { key: string, streak: number } | null, newlySeen: string[], saidKey: string }} CastPlan
@@ -242,8 +242,9 @@ export function twinTarget(first, enemies, opt) {
 /**
  * 一次命中对一个敌人造成多少伤害、附加什么效果。反应只在这里判断。
  * @param {{ type: string, frozen: boolean, lastEl?: string }} enemy
- * @param {{ el: string, dmg: number, fromAbove?: boolean, fromBehind?: boolean, whirl?: boolean, rock?: boolean, crush?: boolean }} hit
- *   whirl：这一下的范围被风放大了（火旋风，见 fireReach）；rock：被风掀出去的土墙砸的（落石），顺着往外推；crush：被倒下的华表砸的，同样往外推
+ * @param {{ el: string, dmg: number, fromAbove?: boolean, fromBehind?: boolean, whirl?: boolean, rock?: boolean, crush?: string }} hit
+ *   whirl：这一下的范围被风放大了（火旋风，见 fireReach）；rock：被风掀出去的土墙砸的（落石），顺着往外推；
+ *   crush：被场景物件砸的（华表、镇山石，写名字，飘字用），同样往外推
  * @returns {{ dmg: number, reaction: string, freezeSec: number, burnSec: number, unfreeze: boolean, push: number, aoeBonus: number,
  *             stunSec: number }}
  */
@@ -260,7 +261,7 @@ export function damageTo(enemy, hit) {
   }
   if (hit.whirl && !reaction) reaction = REACTIONS['wind+fire'].name;
   if (hit.rock) reaction = REACTIONS['earth+wind'].name;
-  if (hit.crush) reaction = TOPPLE.name;
+  if (hit.crush) reaction = hit.crush;
   if ('frontReduce' in spec && !hit.fromAbove && !hit.fromBehind) dmg *= 1 - spec.frontReduce;
   const freezeSec = hit.el === 'ice' ? ELEMENTS.ice.freezeSec * ('freezeMult' in spec ? spec.freezeMult : 1) : 0;
   const burnSec = hit.el === 'fire' ? ELEMENTS.fire.burnSec : 0;
@@ -364,6 +365,29 @@ export function underLog(pos, boss, a, b) {
   const x = a.x + dx * t, z = a.z + dz * t;
   return Math.hypot(pos.x - x, pos.z - z) <= (boss ? TOPPLE.bossReach : TOPPLE.reach) ? { x, z } : null;
 }
+
+/** 这句话说的是把石头弄下来（没说火的时候要说这些才算）@param {string} text */
+export const saysCut = (text) => /[断落掉砸]|放下/.test(text);
+
+/**
+ * 这一招断不断得了吊镇山石的铁链：要点名铁链（绳子、镇山石都算），火不用多说，别的元素要说断、落、掉、砸。
+ * @param {{ el: string, target: string }} step @param {string} text 原话
+ */
+export function cuts(step, text) {
+  return step.target === 'rope' && (step.el === 'fire' || saysCut(text));
+}
+
+/**
+ * 铁链断了 t 秒，镇山石往下掉了多少米：先顿一下，再越掉越快，到地上不再动。
+ * @param {number} t @param {number} h 石头底离地多高 @returns {number}
+ */
+export function stoneDrop(t, h) {
+  const u = Math.max(0, t - DROP.hold);
+  return Math.min(h, (DROP.g * u * u) / 2);
+}
+
+/** 镇山石砸到地上，离落点 d 米的挨多少 @param {number} d @returns {number} */
+export const dropDamage = (d) => (d <= DROP.r ? DROP.dmg : d <= DROP.ringR ? DROP.ringDmg : 0);
 
 /**
  * 雷的连锁：从被打中的敌人跳向 range 米内最近、这一下还没打过的敌人，最多跳 jumps 次；

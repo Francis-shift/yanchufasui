@@ -258,6 +258,11 @@ export const REACTION_OPEN = ['ice+fire', 'ice+wind', 'ice+thunder', 'wind+fire'
  * dmg 砸中多疼；reach、bossReach 离柱子中线几米内算砸中（boss 身子大）
  */
 export const TOPPLE = { name: '华表', hinge: 0.5, len: 4.6, rest: 1.5, lean: 0.25, fall: 0.7, settle: 0.3, dmg: 80, reach: 0.9, bossReach: 1.6 };
+/**
+ * 镇山石（设计文档第 2 节：烧断 → 砸在石阶口）：铁链断了先顿 hold 秒，再按重力 g 往下掉；一局只有一次。
+ * r 米内受 dmg（砸得死小怪，巨像不死），ringR 米内受 ringDmg；落地后占一个半径 body 的圆，留在门洞正中。
+ */
+export const DROP = { name: '镇山石', hold: 0.15, g: 14, r: 1.7, dmg: 200, ringR: 3.4, ringDmg: 60, body: 0.95 };
 
 /**
  * 当前批次开放的原件。中期只开火 / 冰 / 风 × 弹 / 爆，第一批起火冰风土雷 × 弹爆墙雨全开；

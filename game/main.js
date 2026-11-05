@@ -13,7 +13,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-import { chainTargets, damageTo, fireReach, namesWall, pickPillars, planCast, regenMana, resolveTarget, rockRun, saysDown, topples, twinTarget, underLog, windReaches } from './rules/arbiter.js';
+import { chainTargets, cuts, damageTo, dropDamage, fireReach, namesWall, pickPillars, planCast, regenMana, resolveTarget, rockRun, saysCut, saysDown, topples, twinTarget, underLog, windReaches } from './rules/arbiter.js';
 import { inWave } from './rules/fusion.js';
 import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
@@ -28,7 +28,7 @@ import {
   toggleTalent,
 } from './rules/talents.js';
 import {
-  BEAM, BUTTON_CHANT_MS, CHANT_MIN_MS, CORE_HP, ELEMENTS, FORMS, INPUT_MAX_CHARS, MANA_MAX, MOMENTUM_FX, MOMENTUM_RANGE, PARSE_TIMEOUT_MS, RAIN,
+  BEAM, BUTTON_CHANT_MS, CHANT_MIN_MS, CORE_HP, DROP, ELEMENTS, FORMS, INPUT_MAX_CHARS, MANA_MAX, MOMENTUM_FX, MOMENTUM_RANGE, PARSE_TIMEOUT_MS, RAIN,
   REACTIONS, RUN, SLOWMO_MAX_SEC, SLOWMO_SCALE, SUMMONS, TALENTS, TOPPLE, TORNADO, TRIAL, WALL,
 } from './rules/numbers.js';
 import { Caster } from './actors/caster.js';
@@ -52,6 +52,7 @@ import { FOLLOW, LOCK, LOOK, SHOT, VIEW_NAMES, clearDist, followPose, kickAt, lo
   orbitHome, orbitIsHome, orbitOpts, orbitPinch, orbitZoom, readSens, readView, shoulderPose, turnToward, viewDir } from './world/trialcam.js';
 import { loadProps } from './world/props.js';
 import { Huabiao } from './world/huabiao.js';
+import { Zhenshan } from './world/zhenshan.js';
 import { buildLayout, CAMERA_BLOCKERS, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS, OBSTACLES, PILLARS } from './world/layout.js';
 import { Hud, preloadFonts } from './ui/hud.js';
 import { makeReport, topNames } from './ui/report.js';
@@ -151,8 +152,8 @@ export function start(root, opts = {}) {
   env.setShadowMap(quality.shadowMap);
   const layout = buildLayout(scene, { tex: quality.name === 'cinema' ? 2048 : 1024, reflect: quality.reflect });
   const barrier = buildBarrier(scene, { tex: quality.name === 'cinema' ? 2048 : 1024 });   // 护山大阵的金色光罩，裂纹跟阵眼血量
-  const huabiao = new Huabiao(layout.huabiaoBox.children);
-  if (opts.models) loadProps(scene, { ...layout, huabiao }, quality.name, opts.models, renderer, env);   // 牌坊、石兽、镇山石的模型，到了替换方块占位
+  const huabiao = new Huabiao(layout.huabiaoBox.children), zhenshan = new Zhenshan(layout.stoneBox, layout.stoneChains);
+  if (opts.models) loadProps(scene, { ...layout, huabiao, zhenshan }, quality.name, opts.models, renderer, env);   // 牌坊、石兽、镇山石的模型，到了替换方块占位
   const particles = new Particles(scene, quality.particles);
   particles.floorAt = (x, z) => (groundHeightAt(x, z) ?? -60) + 0.03;
   const ink = new Particles(scene, quality.ink, { ink: true });   // 墨点、墨烟（特效风格 v2）
@@ -477,7 +478,7 @@ export function start(root, opts = {}) {
   /** 清场：敌人、墙、融合、龙、火种与旋风、战报的账、排着的延时、没放出去的按键、对话框（开局、回首页都要） */
   function clearField() {
     enemies.clear();
-    if ([walls.clear(), huabiao.reset()].some(Boolean)) enemies.setObstacles([]);
+    if ([walls.clear(), huabiao.reset(), zhenshan.reset()].some(Boolean)) enemies.setObstacles([]);
     fusions.clear();
     dragon.clear();
     embers.length = 0;
@@ -1231,17 +1232,29 @@ export function start(root, opts = {}) {
   let buttonChant = false;   // 按键的咏唱很短：不慢放、不推镜头
 
   /**
-   * 这一招点名了华表：推得倒的把要倒的那几根写进步骤（pushOver 落地时推）；推不倒、或者已经倒了，在咒语卡上说一声。
-   * 模型有时把"推倒"当成做不到的要求，真推了就从卡上拿掉。返回咒语卡用的意图（原来那份按钮还要接着用，不改）。
+   * 这一招点名了华表、铁链：做得到的写进步骤（pushOver 落地时动手）；做不到、或者已经没了，在咒语卡上说一声。
+   * 模型有时把"推倒""烧断"当成做不到的要求，真做了就从卡上拿掉。返回咒语卡用的意图（原来那份按钮还要接着用，不改）。
    * @param {any} plan @param {import('./rules/intent.js').Intent} intent @param {string} text
    */
-  function aimPillars(plan, intent, text) {
-    const list = [...plan.steps, ...(plan.summon ? [plan.summon] : [])].filter((s) => s.target === 'pillar');
-    if (!list.length) return intent;
-    const picked = pickPillars(text, huabiao.views(), enemies.views()), push = list.some((s) => topples(s, text));
-    for (const s of list) s.pillars = topples(s, text) ? picked : [];
-    const note = !picked.length ? '华表已经倒了' : push ? '' : '华表没有倒：要用风，或者说"推倒"';
-    return { ...intent, notes: note ? [...intent.notes, note] : intent.notes, unknown: push ? intent.unknown.filter((w) => !saysDown(w)) : intent.unknown };
+  function aimProps(plan, intent, text) {
+    const all = [...plan.steps, ...(plan.summon ? [plan.summon] : [])];
+    const pillars = all.filter((s) => s.target === 'pillar'), ropes = all.filter((s) => s.target === 'rope');
+    let shown = intent;
+    /** @param {string} note @param {boolean} done @param {(w: string) => boolean} said */
+    const tell = (note, done, said) => {
+      shown = { ...shown, notes: note ? [...shown.notes, note] : shown.notes, unknown: done ? shown.unknown.filter((w) => !said(w)) : shown.unknown };
+    };
+    if (pillars.length) {
+      const picked = pickPillars(text, huabiao.views(), enemies.views()), push = pillars.some((s) => topples(s, text));
+      for (const s of pillars) s.pillars = topples(s, text) ? picked : [];
+      tell(!picked.length ? '华表已经倒了' : push ? '' : '华表没有倒：要用风，或者说"推倒"', push, saysDown);
+    }
+    if (ropes.length) {
+      const cut = ropes.some((s) => cuts(s, text));
+      for (const s of ropes) s.cut = cuts(s, text);
+      tell(zhenshan.t >= 0 ? '镇山石已经落下来了' : cut ? '' : '铁链没有断：要用火，或者说"烧断"', cut, saysCut);
+    }
+    return shown;
   }
 
   /**
@@ -1283,7 +1296,7 @@ export function start(root, opts = {}) {
     const autoNamed = !intent.name || intent.name === defaultName(intent.steps);
     const name = fused && autoNamed ? /** @type {string} */ (fused.fusionName) : intent.name || (plan.ok ? defaultName(plan.steps) : '');
     // 试炼开战后不出咒语卡：顶上是 boss 血条，眼睛要看地上（开口召的龙另有"××现世"的大字）
-    const shown = aimPillars(plan, intent, text);
+    const shown = aimProps(plan, intent, text);
     if (!(trial.fighting && (c.button || c.voice))) hud.showCard({ name, text, plan, intent: shown, source, ms });
     if (plan.backlash) { fx.backlash(); hud.bigText('天道不允', '#b3261e', 1300); }
     fx.endChant();
@@ -1931,16 +1944,41 @@ export function start(root, opts = {}) {
   }
 
   /**
-   * 推倒华表：法术落到了就开始倒，雨落六次、「连」再放一次都只推这一回。砸中的伤害记在这一招的账上。
-   * @param {any} step 哪一招（步骤或召的龙，pillars 见 aimPillars）
+   * 推倒华表、断铁链：法术落到了就动手，雨落六次、「连」再放一次都只算这一回。砸中的伤害记在这一招的账上。
+   * @param {any} step 哪一招（步骤或召的龙，pillars、cut 见 aimProps）
    */
   function pushOver(step) {
-    const list = step.pillars;
-    if (!list?.length) return;
-    step.pillars = [];
+    const list = step.pillars, cut = step.cut;
+    if (!list?.length && !cut) return;
+    step.pillars = []; step.cut = false;
     const src = { el: 'earth', tally: tallyOf.get(step) }, st = stepStats.get(step);
     if (st) stepStats.set(src, st);
-    for (const i of list) if (huabiao.topple(i, () => pillarDown(i, src))) sound.play('crack');
+    for (const i of list ?? []) if (huabiao.topple(i, () => pillarDown(i, src))) sound.play('crack');
+    if (cut && zhenshan.cut(() => stoneDown(src))) {
+      const { x, y, z } = zhenshan.ring;
+      fx.burst(new THREE.Vector3(x, y, z), step.el, 1.6, 0.6);
+      sound.play('clang');
+    }
+  }
+
+  /**
+   * 镇山石砸到地上：门洞正中从此挡路，正下方的挨重的、外圈挨轻的，都被弹开。从上面砸下来，盾傀儡挡不住。
+   * @param {{ el: string, tally?: Tally }} src
+   */
+  function stoneDown(src) {
+    enemies.setObstacles(walls.obstacles());
+    const at = new THREE.Vector3(OBJECTS.rope.x, 0, OBJECTS.rope.z);
+    for (const e of [...enemies.list]) {
+      const dmg = dropDamage(Math.hypot(e.pos.x - at.x, e.pos.z - at.z));
+      if (dmg) hitEnemy(e, src, dmg, at, { crush: DROP.name, fromAbove: true });
+    }
+    trial.clearOfBlocks();
+    fx.rockDebris([at.clone().setY(0.3)], 80, { speed: 8, spread: 1.2, size: 0.22, life: 1.6, heat: 0.1, up: 1 });
+    fx.burst(at.clone().setY(0.4), 'earth', 3.2, 0.8);
+    fx.crack(at, 3);
+    sound.play('boom', { el: 'earth', scale: 2 });
+    fx.shake = Math.max(fx.shake, 1);
+    fx.hitStop = Math.max(fx.hitStop, 0.12);
   }
 
   /**
@@ -1952,7 +1990,7 @@ export function start(root, opts = {}) {
     const { a, b } = huabiao.ends(i);
     for (const e of [...enemies.list]) {
       const at = underLog(e.pos, e.mode === 'boss', a, b);
-      if (at) hitEnemy(e, src, TOPPLE.dmg, new THREE.Vector3(at.x, 0, at.z), { crush: true, fromAbove: true });
+      if (at) hitEnemy(e, src, TOPPLE.dmg, new THREE.Vector3(at.x, 0, at.z), { crush: TOPPLE.name, fromAbove: true });
     }
     trial.clearOfBlocks();
     logDust(i);
@@ -2424,6 +2462,7 @@ export function start(root, opts = {}) {
     updateCubes(dt);
     if (walls.update(dt)) enemies.setObstacles(walls.obstacles());   // 土墙沉下去了，流场重算
     huabiao.update(dt);
+    zhenshan.update(dt);
     curtainContacts();
     rockContacts();
     if (S.phase === 'playing') { updateEmbers(dt); updateGales(dt); }
@@ -2605,6 +2644,7 @@ export function start(root, opts = {}) {
     /** 单独卷一股火旋风看样子；flying() 看有几堵土墙在飞（落石） */
     whirl: (x = 0, z = -4, r = 3) => fusions.whirl(new THREE.Vector3(x, 0, z), r),
     huabiao: () => huabiao.list.map((p) => ({ t: +p.t.toFixed(2), down: p.down, gone: p.gone })),
+    zhenshan: () => ({ t: +zhenshan.t.toFixed(2), down: zhenshan.down }),
     flying: () => walls.flying().map((w) => ({ pts: w.pts.map((p) => [+p.x.toFixed(1), +p.z.toFixed(1)]), left: w.blown?.left.map((d) => +d.toFixed(1)), hit: w.blown?.hit.size })),
     /** 入侵程度锁在 k（0～1），不给就回到跟着波次走；flash 在黑雾里劈一道闪电 */
     invade: (k = -1) => { lab.inv = k; },

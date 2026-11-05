@@ -21,7 +21,7 @@ import { nameIsClean } from './safety.js';
 export const TARGETS = ['front', 'strongest', 'densest', 'left', 'right', 'center', 'self', 'rope', 'censer', 'bridge', 'pillar'];
 export const TARGET_NAMES = {
   front: '最前面', strongest: '最强', densest: '最密集', left: '左边', right: '右边', center: '中间', self: '自己脚下',
-  rope: '吊石的绳子', censer: '香炉', bridge: '索桥', pillar: '华表',
+  rope: '吊石的铁链', censer: '香炉', bridge: '索桥', pillar: '华表',
 };
 export const PATHS = ['straight', 'sky', 'behind'];
 export const PATH_NAMES = { straight: '直线', sky: '从天而降', behind: '绕到背后' };

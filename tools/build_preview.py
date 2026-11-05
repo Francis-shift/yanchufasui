@@ -75,12 +75,19 @@ def collect_pkg(path: str, out: dict):
     out[path] = REL_IMPORT.sub(rewrite, src)
 
 
+# 预览页没人听，声音换成空壳（什么都答应、什么都不做），省下约 8 KB。11-05 离 512 KB 上限只剩 3 KB 时加的
+STUBS = {
+    "game/fx/sound.js": "export class Sound { constructor() { const t = { muted: false, vol: { sfx: 1, music: 1 } };"
+                        " return new Proxy(t, { get: (o, k) => (k in o ? o[k] : () => {}) }); } }",
+}
+
+
 def collect_local(rel: str, out: dict):
     """rel 是相对仓库根的路径，如 game/main.js"""
     if rel in out:
         return
     out[rel] = None
-    src, base = (ROOT / rel).read_text(encoding="utf-8"), posixpath.dirname(rel)
+    src, base = STUBS.get(rel) or (ROOT / rel).read_text(encoding="utf-8"), posixpath.dirname(rel)
 
     def rewrite(m):
         dep = posixpath.normpath(posixpath.join(base, m.group(3)))

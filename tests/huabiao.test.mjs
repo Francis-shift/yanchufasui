@@ -70,7 +70,7 @@ test('倒的过程：先慢、越倒越快、到底弹一下，最后躺在 rest
 });
 
 test('砸中的：标华表、照伤害算，盾傀儡挡不住，往外弹', () => {
-  const r = damageTo({ type: 'shield', frozen: false }, { el: 'earth', dmg: TOPPLE.dmg, crush: true, fromAbove: true });
+  const r = damageTo({ type: 'shield', frozen: false }, { el: 'earth', dmg: TOPPLE.dmg, crush: TOPPLE.name, fromAbove: true });
   assert.equal(r.reaction, TOPPLE.name);
   assert.equal(r.dmg, TOPPLE.dmg, '从上面砸下来，不吃正面减伤');
   assert.equal(r.push, ELEMENTS.wind.push);
