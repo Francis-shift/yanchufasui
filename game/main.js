@@ -13,7 +13,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-import { chainTargets, damageTo, fireReach, namesWall, planCast, regenMana, resolveTarget, rockRun, twinTarget, windReaches } from './rules/arbiter.js';
+import { chainTargets, damageTo, fireReach, namesWall, pickPillars, planCast, regenMana, resolveTarget, rockRun, saysDown, topples, twinTarget, underLog, windReaches } from './rules/arbiter.js';
 import { inWave } from './rules/fusion.js';
 import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
@@ -29,7 +29,7 @@ import {
 } from './rules/talents.js';
 import {
   BEAM, BUTTON_CHANT_MS, CHANT_MIN_MS, CORE_HP, ELEMENTS, FORMS, INPUT_MAX_CHARS, MANA_MAX, MOMENTUM_FX, MOMENTUM_RANGE, PARSE_TIMEOUT_MS, RAIN,
-  REACTIONS, RUN, SLOWMO_MAX_SEC, SLOWMO_SCALE, SUMMONS, TALENTS, TORNADO, TRIAL, WALL,
+  REACTIONS, RUN, SLOWMO_MAX_SEC, SLOWMO_SCALE, SUMMONS, TALENTS, TOPPLE, TORNADO, TRIAL, WALL,
 } from './rules/numbers.js';
 import { Caster } from './actors/caster.js';
 import { Enemies } from './actors/enemies.js';
@@ -51,7 +51,8 @@ import { fitFrame } from './world/framing.js';
 import { FOLLOW, LOCK, LOOK, SHOT, VIEW_NAMES, clearDist, followPose, kickAt, lockPose, lockTarget, lookDrag, nextView, offscreenArrow, orbitDrag,
   orbitHome, orbitIsHome, orbitOpts, orbitPinch, orbitZoom, readSens, readView, shoulderPose, turnToward, viewDir } from './world/trialcam.js';
 import { loadProps } from './world/props.js';
-import { buildLayout, CAMERA_BLOCKERS, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS, OBSTACLES } from './world/layout.js';
+import { Huabiao } from './world/huabiao.js';
+import { buildLayout, CAMERA_BLOCKERS, CASTER_POS, CORE_POS, groundHeightAt, OBJECTS, OBSTACLES, PILLARS } from './world/layout.js';
 import { Hud, preloadFonts } from './ui/hud.js';
 import { makeReport, topNames } from './ui/report.js';
 import { asrRemote, inspireRemote, parseRemote, warmUp } from './net.js';
@@ -150,7 +151,8 @@ export function start(root, opts = {}) {
   env.setShadowMap(quality.shadowMap);
   const layout = buildLayout(scene, { tex: quality.name === 'cinema' ? 2048 : 1024, reflect: quality.reflect });
   const barrier = buildBarrier(scene, { tex: quality.name === 'cinema' ? 2048 : 1024 });   // 护山大阵的金色光罩，裂纹跟阵眼血量
-  if (opts.models) loadProps(scene, layout, quality.name, opts.models, renderer, env);   // 牌坊、石兽、镇山石的模型，到了替换方块占位
+  const huabiao = new Huabiao(layout.huabiaoBox.children);
+  if (opts.models) loadProps(scene, { ...layout, huabiao }, quality.name, opts.models, renderer, env);   // 牌坊、石兽、镇山石的模型，到了替换方块占位
   const particles = new Particles(scene, quality.particles);
   particles.floorAt = (x, z) => (groundHeightAt(x, z) ?? -60) + 0.03;
   const ink = new Particles(scene, quality.ink, { ink: true });   // 墨点、墨烟（特效风格 v2）
@@ -214,6 +216,7 @@ export function start(root, opts = {}) {
     fireWave: (from, dir) => fusions.beam(new THREE.Vector3(from.x, 1.3, from.z), new THREE.Vector3(dir.x, 0, dir.z), null),   // 火灵的火浪借豪火灭却的火云
     canvas: renderer.domElement, mobile, floatText: floatAt, win: trialWon, lose: trialLost,
     blockers: () => walls.obstacles(),   // 土墙挡路、挡冲锋
+    smashLog,                            // boss 碰到倒下的华表就撞碎
     shields: () => walls.shields(),      // 四种墙都挡弹幕
     reward: (mana, gauge) => {   // 完美闪避：回法力、加气势；拿了刹那、反手的开窗口
       S.mana = Math.min(MANA_MAX, S.mana + mana); setGauge(Math.min(S.mods.ult, S.gauge + gauge));
@@ -474,7 +477,7 @@ export function start(root, opts = {}) {
   /** 清场：敌人、墙、融合、龙、火种与旋风、战报的账、排着的延时、没放出去的按键、对话框（开局、回首页都要） */
   function clearField() {
     enemies.clear();
-    if (walls.clear()) enemies.setObstacles([]);
+    if ([walls.clear(), huabiao.reset()].some(Boolean)) enemies.setObstacles([]);
     fusions.clear();
     dragon.clear();
     embers.length = 0;
@@ -1166,10 +1169,12 @@ export function start(root, opts = {}) {
    * 每一步打谁，在放出之前就定下来：锁定标记亮的就是之后真正打的。
    * @param {{ el: string, form: string, target: string, count: number, wide?: number }[]} steps
    * @param {number} [m] 气势档（范围随气势变大，圈也跟着大）
+   * @param {string} [text] 原话（点名华表时看说的是哪根）
    */
-  function lockSteps(steps, m = 0) {
+  function lockSteps(steps, m = 0, text = '') {
     const views = enemies.views();
-    const resolved = steps.map((s) => resolveTarget(s.target, views, { count: s.count, caster: CASTER_POS, objects: OBJECTS }));
+    const objects = { ...OBJECTS, pillar: PILLARS[pickPillars(text, huabiao.views(), views)[0]] ?? OBJECTS.pillar };
+    const resolved = steps.map((s) => resolveTarget(s.target, views, { count: s.count, caster: CASTER_POS, objects }));
     const marks = steps.map((s, i) => {
       const res = resolved[i], k = (MOMENTUM_RANGE[m] ?? 1) * (s.wide ?? 1);
       const heads = s.form === 'bolt' ? res.ids.slice(0, s.count) : [];
@@ -1193,7 +1198,7 @@ export function start(root, opts = {}) {
     const castId = ++castSeq;
     beginChant(guessElement(text) || 'arcane');          // 回车 0.1 秒内先给反应
     const kwRaw = parseKeywords(text);
-    locks.show(castId, lockSteps(sanitizeIntent(kwRaw, text).steps).marks);   // 先按关键词亮锁定，模型回来再更正
+    locks.show(castId, lockSteps(sanitizeIntent(kwRaw, text).steps, 0, text).marks);   // 先按关键词亮锁定，模型回来再更正
     /** @type {any} */
     const remoteP = play.on ? { fail: 'autoplay' } : parseRemote(opts.parseUrl, text, PARSE_TIMEOUT_MS);   // 演示模式不调模型，直接走关键词
     await new Promise((r) => setTimeout(r, CHANT_MIN_MS));
@@ -1224,6 +1229,20 @@ export function start(root, opts = {}) {
   /** 天赋按键放出的法术：每一步的命中记在这里，按打法加气势槽（talents.js buttonGaugeGain） */
   const stepStats = new WeakMap();
   let buttonChant = false;   // 按键的咏唱很短：不慢放、不推镜头
+
+  /**
+   * 这一招点名了华表：推得倒的把要倒的那几根写进步骤（pushOver 落地时推）；推不倒、或者已经倒了，在咒语卡上说一声。
+   * 模型有时把"推倒"当成做不到的要求，真推了就从卡上拿掉。返回咒语卡用的意图（原来那份按钮还要接着用，不改）。
+   * @param {any} plan @param {import('./rules/intent.js').Intent} intent @param {string} text
+   */
+  function aimPillars(plan, intent, text) {
+    const list = [...plan.steps, ...(plan.summon ? [plan.summon] : [])].filter((s) => s.target === 'pillar');
+    if (!list.length) return intent;
+    const picked = pickPillars(text, huabiao.views(), enemies.views()), push = list.some((s) => topples(s, text));
+    for (const s of list) s.pillars = topples(s, text) ? picked : [];
+    const note = !picked.length ? '华表已经倒了' : push ? '' : '华表没有倒：要用风，或者说"推倒"';
+    return { ...intent, notes: note ? [...intent.notes, note] : intent.notes, unknown: push ? intent.unknown.filter((w) => !saysDown(w)) : intent.unknown };
+  }
 
   /**
    * 意图 → 裁决 → 咒语卡 → 放出。打字和天赋按键都走这里。
@@ -1264,7 +1283,8 @@ export function start(root, opts = {}) {
     const autoNamed = !intent.name || intent.name === defaultName(intent.steps);
     const name = fused && autoNamed ? /** @type {string} */ (fused.fusionName) : intent.name || (plan.ok ? defaultName(plan.steps) : '');
     // 试炼开战后不出咒语卡：顶上是 boss 血条，眼睛要看地上（开口召的龙另有"××现世"的大字）
-    if (!(trial.fighting && (c.button || c.voice))) hud.showCard({ name, text, plan, intent, source, ms });
+    const shown = aimPillars(plan, intent, text);
+    if (!(trial.fighting && (c.button || c.voice))) hud.showCard({ name, text, plan, intent: shown, source, ms });
     if (plan.backlash) { fx.backlash(); hud.bigText('天道不允', '#b3261e', 1300); }
     fx.endChant();
     buttonChant = false;
@@ -1293,7 +1313,7 @@ export function start(root, opts = {}) {
       awardButton(stats);
     }
     if (plan.steps.some((s) => s.runes?.includes('zhong'))) trial.lockDash(RUN.runes.zhong.lock);   // 字诀「重」：放完一会儿不能闪避
-    const { resolved, marks } = lockSteps(plan.steps, m);
+    const { resolved, marks } = lockSteps(plan.steps, m, text);
     locks.show(castId, marks);
     fx.launchBurst(plan.steps[0].el);
     caster.cast(aimOf(resolved[0]));
@@ -1495,7 +1515,7 @@ export function start(root, opts = {}) {
    */
   function runSummon(sm, castId) {
     const views = enemies.views();
-    const res = resolveTarget(sm.target, views, { count: 3, caster: CASTER_POS, objects: OBJECTS });
+    const res = resolveTarget(sm.target, views, { count: 3, caster: CASTER_POS, objects: { ...OBJECTS, pillar: PILLARS[sm.pillars?.[0] ?? 0] } });
     if (play.on) sm.dmg *= AUTO.dragon;
     const el = /** @type {keyof typeof SUMMONS} */ (sm.el), k = sm.dmg / SUMMONS[el].dmg;
     const twin = S.mods.twin, guard = S.mods.guard && S.mode === 'trial';
@@ -1534,6 +1554,7 @@ export function start(root, opts = {}) {
     const impact = (/** @type {THREE.Vector3} */ p) => {
       locks.clear(castId);
       if (S.phase !== 'playing') return;
+      pushOver(sm);
       if (el === 'wind') gale(p, sm.radius, k, tally);
       else if (el !== 'thunder') {
         for (const e of [...enemies.list]) {
@@ -1774,12 +1795,13 @@ export function start(root, opts = {}) {
    */
   function runStep(step, res, m = 0) {
     if (S.phase !== 'playing') return;
-    if (step.fusion) { runFusion(step, res); return; }
+    if (step.fusion) { pushOver(step); runFusion(step, res); return; }
     const range = (MOMENTUM_RANGE[m] ?? 1) * (step.wide ?? 1), big = MOMENTUM_FX[m] ?? 1;   // wide：试炼里升过级的招式字
     const boom = (p, R, scale) => {
       fx.burst(p, step.el, R, scale * big);
       if (m >= 3) fx.hitStop = Math.max(fx.hitStop, 0.12);
       if (step.el === 'wind') blowWalls(step, p, step.wallNamed ? Infinity : R);   // 落石：风刮到土墙，把墙掀出去
+      pushOver(step);
     };
     /** 火旋风：圈里有带风痕的敌人，这一下的范围放大、原地卷起一股火 @param {THREE.Vector3} p @param {number} R */
     const fan = (p, R) => {
@@ -1865,6 +1887,7 @@ export function start(root, opts = {}) {
    * 土墙压到的敌人挨一下，然后挡路；火冰风墙是帘子，谁穿过去谁挨一下（每堵墙每个敌人只算一次）。
    */
   function raiseWall(step, res) {
+    pushOver(step);
     let c = res.point ? { x: res.point.x, z: res.point.z } : { x: DEFAULT_AIM.x, z: DEFAULT_AIM.z };
     if (res.ids.length) {
       // 打的是敌人：墙立在它前面 2 米（挡在它和阵眼之间；试炼里挡在它和自己之间），而不是砸在它身上
@@ -1905,6 +1928,58 @@ export function start(root, opts = {}) {
       walls.blow(w, to, w.pts.map((q) => rockRun(q, to, dist, noWallAt)), speed, rock);
     }
     if (list.length) enemies.setObstacles(walls.obstacles());
+  }
+
+  /**
+   * 推倒华表：法术落到了就开始倒，雨落六次、「连」再放一次都只推这一回。砸中的伤害记在这一招的账上。
+   * @param {any} step 哪一招（步骤或召的龙，pillars 见 aimPillars）
+   */
+  function pushOver(step) {
+    const list = step.pillars;
+    if (!list?.length) return;
+    step.pillars = [];
+    const src = { el: 'earth', tally: tallyOf.get(step) }, st = stepStats.get(step);
+    if (st) stepStats.set(src, st);
+    for (const i of list) if (huabiao.topple(i, () => pillarDown(i, src))) sound.play('crack');
+  }
+
+  /**
+   * 华表砸到地上：路从这一刻起断了，压在下面的敌人挨一下、被弹开。从上面砸下来，盾傀儡挡不住。
+   * @param {number} i 哪一根 @param {{ el: string, tally?: Tally }} src
+   */
+  function pillarDown(i, src) {
+    enemies.setObstacles(walls.obstacles());
+    const { a, b } = huabiao.ends(i);
+    for (const e of [...enemies.list]) {
+      const at = underLog(e.pos, e.mode === 'boss', a, b);
+      if (at) hitEnemy(e, src, TOPPLE.dmg, new THREE.Vector3(at.x, 0, at.z), { crush: true, fromAbove: true });
+    }
+    trial.clearOfBlocks();
+    logDust(i);
+    fx.crack(new THREE.Vector3(b.x, 0, b.z), 1.6);
+    fx.shake = Math.max(fx.shake, 0.6);
+    fx.hitStop = Math.max(fx.hitStop, 0.08);
+  }
+
+  /** 沿倒下的华表扬一溜土和碎石 @param {number} i 哪一根 */
+  function logDust(i) {
+    const { a, b } = huabiao.ends(i);
+    const pts = [0.15, 0.4, 0.65, 0.9].map((t) => new THREE.Vector3(a.x + (b.x - a.x) * t, 0.2, a.z + (b.z - a.z) * t));
+    fx.rockDebris(pts, 40, { speed: 5, spread: 0.5, size: 0.18, life: 1.5, heat: 0.1, up: 0.8 });
+    for (const q of pts) fx.burst(q, 'earth', 1.4, 0.5);
+  }
+
+  /**
+   * 试炼的 boss 走到倒下的华表跟前：撞碎，路让开。
+   * @param {{ x: number, z: number }} at @param {number} r 身子半径
+   */
+  function smashLog(at, r) {
+    const i = huabiao.touching(at, r);
+    if (i < 0) return;
+    huabiao.shatter(i);
+    enemies.setObstacles(walls.obstacles());
+    logDust(i);
+    fx.shake = Math.max(fx.shake, 0.45);
   }
 
   /** 每帧：飞着的石头撞到谁，砸一下（落石）并顺着往外推，每堵墙每个敌人只算一次；撞上 boss 整堵都碎 */
@@ -2348,6 +2423,7 @@ export function start(root, opts = {}) {
     world.step(1 / 60, dt, 3);
     updateCubes(dt);
     if (walls.update(dt)) enemies.setObstacles(walls.obstacles());   // 土墙沉下去了，流场重算
+    huabiao.update(dt);
     curtainContacts();
     rockContacts();
     if (S.phase === 'playing') { updateEmbers(dt); updateGales(dt); }
@@ -2528,6 +2604,7 @@ export function start(root, opts = {}) {
     shot: (el = 'fire', to = [0, 1, -5], big = true) => fx.bolt({ el, path: 'straight', big, target: () => new THREE.Vector3(...to), onHit: (p) => fx.burst(p, el, 1.3, 0.45) }),
     /** 单独卷一股火旋风看样子；flying() 看有几堵土墙在飞（落石） */
     whirl: (x = 0, z = -4, r = 3) => fusions.whirl(new THREE.Vector3(x, 0, z), r),
+    huabiao: () => huabiao.list.map((p) => ({ t: +p.t.toFixed(2), down: p.down, gone: p.gone })),
     flying: () => walls.flying().map((w) => ({ pts: w.pts.map((p) => [+p.x.toFixed(1), +p.z.toFixed(1)]), left: w.blown?.left.map((d) => +d.toFixed(1)), hit: w.blown?.hit.size })),
     /** 入侵程度锁在 k（0～1），不给就回到跟着波次走；flash 在黑雾里劈一道闪电 */
     invade: (k = -1) => { lab.inv = k; },

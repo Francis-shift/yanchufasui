@@ -37,6 +37,12 @@ const STONE = { ringTop: GATE.openTop - 0.5, height: 1.95 };
  * （尺寸取自打包后的模型）
  */
 const HUABIAO_X = 4.2, HUABIAO_Z = -3.0;
+/**
+ * 两根华表往哪倒：都往路中间倒才挡得到路（从施法者那边推过去会倒在路外面、砸上石兽）。一根朝阵眼偏、一根朝牌坊偏，
+ * 两根都倒了也不叠在一起。dir 是水平单位向量，下标 0 左 1 右
+ */
+const HUABIAO_TILT = 0.2;
+export const PILLARS = [-1, 1].map((s) => ({ x: s * HUABIAO_X, z: HUABIAO_Z, dir: { x: -s * Math.cos(HUABIAO_TILT), z: -s * Math.sin(HUABIAO_TILT) } }));
 /** 香炉：广场两侧（目标图里在正中，但广场中间是敌人的路）。模型高 1.5、连龙耳宽 1.54、四足落地约 1.06 见方 */
 const CENSER_X = 7.2, CENSER_Z = 1.5;
 /**
@@ -65,6 +71,23 @@ export const OBSTACLES = [
   { x: -LION.x, z: LION.z, r: 1.0 }, { x: LION.x, z: LION.z, r: 1.0 },
   ...LANTERNS.map((l) => ({ x: l.x, z: l.z, r: 0.35 })),
 ];
+
+/**
+ * 倒下的华表占的地：从柱脚往倒的方向一串圆，圆距比直径小，中间钻不过去。
+ * @param {{ x: number, z: number, dir: { x: number, z: number } }} p
+ */
+export const fallenCircles = (p) => [0.7, 1.48, 2.26, 3.04, 3.82, 4.6].map((t) => ({ x: p.x + p.dir.x * t, z: p.z + p.dir.z * t, r: 0.55 }));
+
+const STANDING = [...OBSTACLES];
+/**
+ * 换上华表现在占的地：走位、弹幕、出怪点、土墙、飞石这些用 OBSTACLES 的地方都跟着认。敌人的流场要另外重算（enemies.setObstacles）。
+ * @param {{ x: number, z: number, dir: { x: number, z: number } }[]} lying 躺在地上的几根
+ * @param {number[]} gone 不在原地的几根（PILLARS 的下标，也是 OBSTACLES 开头两个圆的下标）：倒了、碎了，柱脚那个圆拿掉
+ */
+export function setFallen(lying, gone) {
+  OBSTACLES.length = 0;
+  OBSTACLES.push(...STANDING.filter((_, i) => !gone.includes(i)), ...lying.flatMap(fallenCircles));
+}
 
 /** @param {number} x0 @param {number} x1 @param {number} y0 @param {number} y1 @param {number} z0 @param {number} z1 */
 const box = (x0, x1, y0, y1, z0, z1) => ({ min: [x0, y0, z0], max: [x1, y1, z1] });
@@ -253,14 +276,17 @@ export function buildLayout(scene, opts = {}) {
   stoneBox.position.set(0, STONE.ringTop - STONE.height + 0.9, GATE.z);
   scene.add(stoneBox);
 
-  // 华表（牌坊到阵眼的路两旁）与香炉（广场两侧）：占位，模型到了藏起来
+  // 华表（牌坊到阵眼的路两旁）与香炉（广场两侧）：占位，模型到了藏起来。华表每根一组、原点在柱脚，推倒时整组转（world/huabiao.js）
   const huabiaoBox = new THREE.Group(), censerBox = new THREE.Group();
   for (const sx of [-HUABIAO_X, HUABIAO_X]) {
     const col_ = shadowy(new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.4, 4.6, 12), stone));
-    col_.position.set(sx, 2.3, HUABIAO_Z);
+    col_.position.set(0, 2.3, 0);
     const cap = shadowy(new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.18, 0.4), stone));
-    cap.position.set(sx, 3.9, HUABIAO_Z);
-    huabiaoBox.add(col_, cap);
+    cap.position.set(0, 3.9, 0);
+    const one = new THREE.Group();
+    one.position.set(sx, 0, HUABIAO_Z);
+    one.add(col_, cap);
+    huabiaoBox.add(one);
   }
   for (const sx of [-CENSER_X, CENSER_X]) {
     const bowl = shadowy(new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.5, 0.8, 16), bronze));

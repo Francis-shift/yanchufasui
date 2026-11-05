@@ -6,7 +6,7 @@
  */
 import {
   BOLT_COUNT_MAX, COMBO_DISCOUNT, ELEMENTS, ENEMIES, FIRST_DISCOVERY_MULT, FORMS, FUSION_DMG_MULT, FUSION_OPEN, FUSIONS,
-  MANA_MAX, MANA_REGEN, MOMENTUM_MULT, MOMENTUM_RANGE, POWER_DEFAULT, REACTIONS, REPEAT_DECAY, SUMMON_OPEN, SUMMONS,
+  MANA_MAX, MANA_REGEN, MOMENTUM_MULT, MOMENTUM_RANGE, POWER_DEFAULT, REACTIONS, REPEAT_DECAY, SUMMON_OPEN, SUMMONS, TOPPLE,
   ULT_GAUGE, boltCostFactor, boltTotalDmgFactor, powerFactor,
 } from './numbers.js';
 
@@ -36,10 +36,10 @@ export function totalCost(steps) {
  *   ult：召龙要几格气势（默认 ULT_GAUGE；试炼拿了心法「龙吟」变少，见 run.js runMods）
  *   fusions：能合成哪些融合（默认 FUSION_OPEN；试炼里只有领悟了的合字，见 run.js runFusions）
  * @typedef {Step & { cost: number, dmgTotal: number, dmgEach: number, first: boolean, repeat: number,
- *             fusion?: string, fusionName?: string, idiom?: string, wallNamed?: boolean }} PlannedStep
- *   fusion 是融合的键（如 wind>fire）；wallNamed：这一招风是句子里点名吹土墙的（见 namesWall）
+ *             fusion?: string, fusionName?: string, idiom?: string, wallNamed?: boolean, pillars?: number[] }} PlannedStep
+ *   fusion 是融合的键（如 wind>fire）；wallNamed：这一招风是句子里点名吹土墙的（见 namesWall）；pillars：这一招落地时推倒哪几根华表（见 pickPillars）
  * @typedef {{ el: string, name: string, target: string, dmg: number, radius: number, cast: boolean, ghost: boolean,
- *             first?: boolean }} SummonPlan cast = 真召出来了；ghost = 差一口气，只演龙影（法术已换成 steps 里的雨）
+ *             first?: boolean, pillars?: number[] }} SummonPlan cast = 真召出来了；ghost = 差一口气，只演龙影（法术已换成 steps 里的雨）
  * @typedef {{ ok: boolean, steps: PlannedStep[], cost: number, momentum: number, momentumHalved: boolean,
  *             downgrades: string[], backlash: boolean, gaugeGain: number, gaugeSpent?: boolean, summon?: SummonPlan,
  *             lastCombo: { key: string, streak: number } | null, newlySeen: string[], saidKey: string }} CastPlan
@@ -242,8 +242,8 @@ export function twinTarget(first, enemies, opt) {
 /**
  * 一次命中对一个敌人造成多少伤害、附加什么效果。反应只在这里判断。
  * @param {{ type: string, frozen: boolean, lastEl?: string }} enemy
- * @param {{ el: string, dmg: number, fromAbove?: boolean, fromBehind?: boolean, whirl?: boolean, rock?: boolean }} hit
- *   whirl：这一下的范围被风放大了（火旋风，见 fireReach）；rock：被风掀出去的土墙砸的（落石），顺着往外推
+ * @param {{ el: string, dmg: number, fromAbove?: boolean, fromBehind?: boolean, whirl?: boolean, rock?: boolean, crush?: boolean }} hit
+ *   whirl：这一下的范围被风放大了（火旋风，见 fireReach）；rock：被风掀出去的土墙砸的（落石），顺着往外推；crush：被倒下的华表砸的，同样往外推
  * @returns {{ dmg: number, reaction: string, freezeSec: number, burnSec: number, unfreeze: boolean, push: number, aoeBonus: number,
  *             stunSec: number }}
  */
@@ -260,10 +260,11 @@ export function damageTo(enemy, hit) {
   }
   if (hit.whirl && !reaction) reaction = REACTIONS['wind+fire'].name;
   if (hit.rock) reaction = REACTIONS['earth+wind'].name;
+  if (hit.crush) reaction = TOPPLE.name;
   if ('frontReduce' in spec && !hit.fromAbove && !hit.fromBehind) dmg *= 1 - spec.frontReduce;
   const freezeSec = hit.el === 'ice' ? ELEMENTS.ice.freezeSec * ('freezeMult' in spec ? spec.freezeMult : 1) : 0;
   const burnSec = hit.el === 'fire' ? ELEMENTS.fire.burnSec : 0;
-  const push = hit.el === 'wind' || hit.rock ? ELEMENTS.wind.push : 0;
+  const push = hit.el === 'wind' || hit.rock || hit.crush ? ELEMENTS.wind.push : 0;
   const stunSec = hit.el === 'thunder' ? ELEMENTS.thunder.stunSec : 0;
   return { dmg, reaction, freezeSec, burnSec, unfreeze, push, aoeBonus, stunSec };
 }
@@ -309,6 +310,59 @@ export function rockRun(q, dir, max, blocked) {
     if (blocked(q.x + dir.x * d, q.z + dir.z * d)) return d - STEP;
   }
   return max;
+}
+
+/**
+ * 华表：这一招推得倒吗。先要点名华表（场上风刮过去不算，不然一招风爆路就堵了，玩家还不知道为什么）；
+ * 风本来就推得动，别的元素要句子里说了倒（「用雷把华表劈倒」）。
+ * @param {{ el: string, target: string }} step @param {string} text 原话
+ */
+export function topples(step, text) {
+  return step.target === 'pillar' && (step.el === 'wind' || saysDown(text));
+}
+
+/** 句子里说了要它倒（模型把这几个字当成做不到的要求时，咒语卡上也要拿掉） @param {string} text */
+export const saysDown = (text) => /[倒翻塌断]/.test(text);
+
+/**
+ * 华表：这句话说的是哪几根（下标，0 左 1 右，方位按屏幕）。说了两根、都、左和右，就是还立着的全部；说了左或右听它的；
+ * 都没说挑离最前面那只敌人最近的（倒下来挡得到它）。倒了的不算，都倒了返回空。
+ * @param {string} text @param {{ x: number, z: number, up: boolean }[]} pillars @param {EnemyView[]} enemies
+ * @returns {number[]}
+ */
+export function pickPillars(text, pillars, enemies) {
+  const up = pillars.map((p, i) => ({ ...p, i })).filter((p) => p.up);
+  const left = text.includes('左'), right = text.includes('右');
+  if ((left && right) || /两根|两座|两边|双|一对|所有|全部|都/.test(text)) return up.map((p) => p.i);
+  if (left || right) return up.filter((p) => p.i === (left ? 0 : 1)).map((p) => p.i);
+  if (up.length < 2 || !enemies.length) return up.slice(0, 1).map((p) => p.i);
+  const head = enemies.reduce((a, e) => (e.distToCore < a.distToCore ? e : a));
+  const near = (/** @type {{ x: number, z: number }} */ p) => Math.hypot(p.x - head.x, p.z - head.z);
+  return [up.reduce((a, p) => (near(p) < near(a) ? p : a)).i];
+}
+
+/**
+ * 华表倒下去转了多少弧度：推了 t 秒。先慢慢歪一点，再越倒越快，砸到地上弹一下。
+ * @param {number} t @returns {number}
+ */
+export function toppleAngle(t) {
+  const { lean, fall, settle, rest } = TOPPLE, tip = 0.08, bounce = 0.06;
+  if (t <= lean) return tip * (t / lean);
+  if (t <= lean + fall) { const u = (t - lean) / fall; return tip + (rest - tip) * u * u; }
+  return rest - bounce * Math.sin(Math.PI * Math.min(1, (t - lean - fall) / settle));
+}
+
+/**
+ * 倒下的华表压没压到站在 pos 的：压到了给压住的那一点，没压到给 null。boss 身子大，够得远一些。
+ * @param {{ x: number, z: number }} pos @param {boolean} boss
+ * @param {{ x: number, z: number }} a @param {{ x: number, z: number }} b 柱身两头
+ * @returns {{ x: number, z: number } | null}
+ */
+export function underLog(pos, boss, a, b) {
+  const dx = b.x - a.x, dz = b.z - a.z;
+  const t = Math.max(0, Math.min(1, ((pos.x - a.x) * dx + (pos.z - a.z) * dz) / (dx * dx + dz * dz)));
+  const x = a.x + dx * t, z = a.z + dz * t;
+  return Math.hypot(pos.x - x, pos.z - z) <= (boss ? TOPPLE.bossReach : TOPPLE.reach) ? { x, z } : null;
 }
 
 /**

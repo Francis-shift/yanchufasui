@@ -23,7 +23,7 @@ const { smoothstep } = THREE.MathUtils;
 /** 走进阵眼这么近就算撞上阵眼 */
 const CORE_REACH = 2.6;
 /** 广场上的固定障碍：场景物件（位置以 layout.js 为准）加上施法者本人 */
-const STATIC_OBSTACLES = [...OBSTACLES, { x: CASTER_POS.x, z: CASTER_POS.z, r: 0.5 }];
+const CASTER_OBSTACLE = { x: CASTER_POS.x, z: CASTER_POS.z, r: 0.5 };
 /** 试炼模式：追上来的小傀儡离施法者这么近就自爆；铁头傀儡贴到这么近就站住等着冲 */
 const TOUCH_REACH = 0.9;
 const CHARGER_STOP = 1.0;
@@ -97,7 +97,7 @@ export class Enemies {
     this.paths = PATHS.map(pathInfo);
     /** 广场上的寻路：石阶、索桥仍是仅有的两个入口，上了广场就跟着流场走 */
     this.field = new FlowField({ radius: PLAZA_R - 0.4, goal: { x: CORE_POS.x, z: CORE_POS.z, r: CORE_REACH - 0.2 } });
-    this.field.setObstacles(STATIC_OBSTACLES);
+    this.field.setObstacles([...OBSTACLES, CASTER_OBSTACLE]);
     // 试炼：追人的小傀儡另用一张以玩家为目标的流场（玩家走动就重算，见 chaseDir）。只看身边的绕法出不了凹口：
     // 石兽和牌坊柱子挨着，顺着一根滑又撞上另一根（10-27 预览：玩家站到牌坊下，一只卡在两者之间不动）
     this.chaseField = new FlowField({ radius: PLAZA_R - 0.4, goal: { x: CASTER_POS.x, z: CASTER_POS.z, r: 1.0 } });
@@ -274,7 +274,7 @@ export class Enemies {
    * @param {{ x: number, z: number, r: number }[]} list 固定障碍之外的临时障碍
    */
   setObstacles(list) {
-    this.temp = list; this.field.setObstacles([...STATIC_OBSTACLES, ...list]);
+    this.temp = list; this.field.setObstacles([...OBSTACLES, CASTER_OBSTACLE, ...list]);
     this.chaseField.setObstacles([...OBSTACLES, ...list]);
   }
 

@@ -85,14 +85,14 @@ export class Trial {
    *           caster: THREE.Object3D, origins: THREE.Vector3[], canvas: HTMLElement, mobile: boolean,
    *           floatText: (p: THREE.Vector3, text: string, color: string) => void, win: () => void, lose: () => void,
    *           blockers: () => { x: number, z: number, r: number }[], shields: () => { x: number, z: number, r: number, bounce?: boolean }[],
-   *           reward: (mana: number, gauge: number) => void,
+   *           smashLog: (at: { x: number, z: number }, r: number) => void, reward: (mana: number, gauge: number) => void,
    *           local: (x: number, y: number) => { x: number, y: number }, pick: (insight: boolean, done: () => void) => void,
    *           strike: (e: any, dmg: number, at: { x: number, z: number }) => void,
    *           dodge?: () => void, ghost?: (mat: THREE.Material) => THREE.Object3D | null,
    *           fireWave?: (from: { x: number, z: number }, dir: { x: number, z: number }) => void }} d
    *   origins：法术起点（施法者胸口高度），跟着玩家走；blockers：此刻的土墙（挡路、挡冲锋）；
    *   shields：此刻挡弹幕的墙段（四种墙都算；bounce 的写了字诀「返」，把冰锥弹回去）；
-   *   reward：完美闪避回法力、加气势；local：屏幕坐标换成界面坐标（画面转了 90° 时要转回来）；
+   *   smashLog：boss 走到倒下的华表跟前就撞碎；reward：完美闪避回法力、加气势；local：屏幕坐标换成界面坐标（画面转了 90° 时要转回来）；
    *   pick：出三选一（insight：打完 boss 那次），选完调 done 接着打；strike：弹回去的冰锥撞上敌人，打它一下（main.js 结算）；
    *   dodge：施法者做闪避的动作；ghost：施法者模型此刻姿势的一份拷贝（残影用；模型没到给 null，照旧用胶囊）；
    *   fireWave：火灵的火浪的样子（借豪火灭却的火云，只是画面；烧没烧到人这里判）
@@ -555,6 +555,7 @@ export class Trial {
     const cfg = this.cfg = BOSS_CFG[Math.min(n, BOSS_CFG.length) - 1];
     const b = this.d.enemies.spawnAt(/** @type {'boss' | 'stone' | 'flame'} */ (cfg.type), BOSS_AT.x, BOSS_AT.z, 'boss');
     this.boss = b;
+    this.clearOfBlocks();   // 现身的地方可能横着倒下的华表
     this.armor = cfg.armor; this.phase = 1; this.freezeCd = 0; this.sinceSummon = 0; this.lastMove = '';
     this.state = 'roar'; this.t = this.roarLen = BOSS.roarSec; this.tail = null;
     const { hud, fx, particles } = this.d;
@@ -1256,6 +1257,9 @@ export class Trial {
   /** 敌人身子有多宽（米，俯看的半径）：弹回去的冰锥、护身的龙碰没碰到它 @param {any} e */
   bodyR(e) { return e === this.boss ? BOSS_BODY : 0.45; }
 
+  /** boss 平时走路才看障碍；华表倒在它身上（或者它现身在华表上）时挪到边上，不让柱子穿过身子 */
+  clearOfBlocks() { if (this.boss) for (let i = 0; i < 4; i++) keepInArena(this.boss.pos, BLOCK, ARENA_R - 0.3, BOSS_BODY); }
+
   /**
    * 弹回去的冰锥飞一帧：穿过土墙（刚从墙上弹出来）、撞上石物件就碎、撞上敌人打它一下；拖一道金光
    * @param {{ x: number, y: number, z: number, vx: number, vz: number, t: number, life: number, dmg: number, r: number }} b @param {number} dt
@@ -1499,6 +1503,7 @@ export class Trial {
           const v = ENEMIES[/** @type {'boss' | 'stone' | 'flame'} */ (cfg.type)].speed * (this.phase >= 3 ? BOSS.enrageSpeed : 1) * dt;
           b.pos.x += (dx / dist) * v; b.pos.z += (dz / dist) * v;
           keepInArena(b.pos, BLOCK, ARENA_R - 0.3, BOSS_BODY);
+          this.d.smashLog(b.pos, BOSS_BODY);   // 倒下的华表挡得住小怪，挡不住 boss：不然两根都倒了 boss 关在牌坊前面出不来（11-05 预览）
           b.moving = true;
         }
         if (this.t <= 0) {

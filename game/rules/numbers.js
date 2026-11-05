@@ -253,6 +253,13 @@ export const REACTIONS = {
 export const REACTION_OPEN = ['ice+fire', 'ice+wind', 'ice+thunder', 'wind+fire', 'earth+wind'];
 
 /**
+ * 华表推倒（设计文档第 2 节"场景物件可点名"）：name 飘字；hinge 贴地的转轴离柱心几米（底座半宽）；len 柱长；
+ * rest 躺下时转了多少弧度（压在底座和云板上，不到 90°）；lean、fall、settle 三段各几秒：先慢慢歪、再越倒越快、砸到地上弹一下；
+ * dmg 砸中多疼；reach、bossReach 离柱子中线几米内算砸中（boss 身子大）
+ */
+export const TOPPLE = { name: '华表', hinge: 0.5, len: 4.6, rest: 1.5, lean: 0.25, fall: 0.7, settle: 0.3, dmg: 80, reach: 0.9, bossReach: 1.6 };
+
+/**
  * 当前批次开放的原件。中期只开火 / 冰 / 风 × 弹 / 爆，第一批起火冰风土雷 × 弹爆墙雨全开；
  * 设计里有、还没做的，说到时未生效或降级成最接近的开放原件，并在咒语卡上注明。
  */
