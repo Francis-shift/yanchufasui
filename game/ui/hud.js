@@ -5,6 +5,7 @@
  */
 import { ELEMENTS, FORMS, INPUT_MAX_CHARS, SUMMONS } from '../rules/numbers.js';
 import { PATH_NAMES, TARGET_NAMES } from '../rules/intent.js';
+import { FRAME_CSS, ScreenFrame } from './frame.js';
 
 /**
  * 书法字体（tools/subset_font.py 按字表裁剪，见 game/rules/charset.js）：
@@ -274,7 +275,11 @@ const CSS = FONT_CSS + `
 .yc-summon { position: relative; height: 54px; padding: 0 14px; border: 0; border-radius: 3px; background: #b3261e; color: #fbefe6;
   font: normal 24px/1 ${BRUSH}; letter-spacing: 2px; cursor: pointer; transform: rotate(-3deg); animation: yc-glow 1.1s ease-in-out infinite;
   box-shadow: inset 0 0 0 2.5px #b3261e, inset 0 0 0 4px rgba(251,239,230,0.85), 0 8px 16px -8px rgba(60,8,0,0.8); }
-.yc-summon[hidden] { display: none; }
+.yc-summon[hidden], .yc-domain[hidden] { display: none; }
+/* 法域：一方白文墨印，歪向另一边，和朱红的召唤分得开 */
+.yc-domain { position: relative; height: 54px; padding: 0 14px; border: 0; border-radius: 3px; background: #16130f; color: #f4ead6;
+  font: normal 24px/1 ${BRUSH}; letter-spacing: 2px; cursor: pointer; transform: rotate(2deg); animation: yc-glow 1.1s ease-in-out infinite;
+  box-shadow: inset 0 0 0 2.5px #16130f, inset 0 0 0 4px rgba(244,234,214,0.8), 0 8px 16px -8px rgba(0,0,0,0.8); }
 .yc-write { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(220, 232, 245, 0.45); pointer-events: auto; }
 .yc-write[hidden] { display: none; }
 .yc-write .yc-box { width: min(460px, calc(100% - 24px)); text-align: left; padding: 18px; }
@@ -374,6 +379,7 @@ const CSS = FONT_CSS + `
 .yc-pad .yc-skill:nth-of-type(2) { right: 82px; bottom: 82px; }
 .yc-pad .yc-skill:nth-of-type(3) { right: 11px; bottom: 111px; }
 .yc-pad .yc-summon { position: absolute; left: 0; top: 0; height: 50px; }
+.yc-pad .yc-domain { position: absolute; left: 0; top: 60px; height: 50px; }
 /* boss 血条紧挨左上面板右边放（横屏手机只有 600～900 宽，居中会和面板撞上、被挤到画面中间） */
 .yc-pad .yc-boss { left: 212px; right: 104px; width: auto; max-width: 440px; transform: none; }   /* 右边留出设置与声音开关 */
 /* 法力条挪到下方正中（摇杆和按钮之间空着），不然右边一列太高，顶到 boss 血条 */
@@ -586,7 +592,7 @@ export class Hud {
   /** @param {HTMLElement} root */
   constructor(root) {
     const style = document.createElement('style');
-    style.textContent = CSS;
+    style.textContent = CSS + FRAME_CSS;
     this.root = el(`<div class="yc-ui"></div>`);
     this.root.append(style);
     let brush = '';
@@ -683,7 +689,7 @@ export class Hud {
     this.lockShown = '';
     this.lockBtn.addEventListener('click', () => { this.lockBtn.blur(); this.onLock?.(); });
     /** 按钮下面、视角与锁定按钮上写的键名（setKeyLabels；守关是数字） */
-    this.keyLabels = { dash: '空格', skills: ['1', '2', '3'], ult: '4', view: 'V', lock: 'F' };
+    this.keyLabels = { dash: '空格', skills: ['1', '2', '3'], ult: '4', domain: 'G', view: 'V', lock: 'F' };
     // 设置：齿轮 + 纸面板（openSettings / renderSettings）；各项点了调 setOn 里对应的
     const tooth = (/** @type {number} */ a) => `<rect x="10.5" y="1.6" width="3" height="4.2" rx="0.8" transform="rotate(${a} 12 12)"/>`;
     this.gear = el(`<button class="yc-gear" type="button" title="设置（Esc）" aria-label="设置"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="currentColor">
@@ -750,6 +756,7 @@ export class Hud {
     this.bossEdge = 0;
     this.root.append(this.floats, this.stick, this.arrow, this.top, this.boss, this.card, this.big, this.bottom, this.debug, this.write, this.picks, this.overlay, this.cover, this.autoBar, this.report, this.mute, this.viewBtn, this.lockBtn, this.gear, this.set);
     root.append(this.root);
+    this.frame = new ScreenFrame(this.root, BRUSH_BIG);
     this.input = /** @type {HTMLInputElement} */ (this.bottom.querySelector('input'));
     this.go = /** @type {HTMLButtonElement} */ (this.bottom.querySelector('[data-go]'));
     // 麦克风：按下就开始（不等松手），抓住这根手指，滑出按钮再松开也算松开；不抢输入框的焦点、长按不弹菜单
@@ -806,7 +813,7 @@ export class Hud {
    * 战斗中的天赋按钮栏：每个天赋一个圆钮（右上角的笔用来写咒），后面是气势满了才出现的"召唤"。
    * 试炼模式另给 dash：天赋前面多一个"闪"（闪避）。
    * @param {{ el: string, label: string, named: boolean }[]} skills
-   * @param {{ cast: (el: string) => void, pen: (el: string) => void, summon: () => void, dash?: () => void }} on
+   * @param {{ cast: (el: string) => void, pen: (el: string) => void, summon: () => void, domain?: () => void, dash?: () => void }} on
    */
   setSkills(skills, on) {
     const bar = this.q('.yc-skills');
@@ -829,7 +836,9 @@ export class Hud {
     });
     const sm = el(`<button class="yc-summon" hidden>召唤<span class="yc-key">${esc(this.keyLabels.ult)}</span></button>`);
     sm.addEventListener('pointerdown', (e) => { e.preventDefault(); on.summon(); });
-    bar.append(sm);
+    const dm = el(`<button class="yc-domain" hidden><span data-domain>法域</span><span class="yc-key">${esc(this.keyLabels.domain)}</span></button>`);
+    dm.addEventListener('pointerdown', (e) => { e.preventDefault(); on.domain?.(); });
+    bar.append(sm, dm);
     bar.hidden = !skills.length;
   }
   /** @param {string} elKey @param {string} label @param {boolean} named 写过咒的按钮显示咒语名（小一号） */
@@ -849,7 +858,25 @@ export class Hud {
   }
   /** @param {boolean} on */
   setSummonReady(on) { const b = this.root.querySelector('.yc-summon'); if (b) /** @type {HTMLElement} */ (b).hidden = !on; }
-
+  /** 法域按钮：气势满了亮「法域」，念咒时亮「收束」（不等时间到），别的时候藏着 @param {'' | '法域' | '收束'} text */
+  setDomainBtn(text) {
+    const b = /** @type {HTMLElement | null} */ (this.root.querySelector('.yc-domain'));
+    if (!b) return;
+    b.hidden = !text;
+    const t = /** @type {HTMLElement} */ (b.querySelector('[data-domain]'));
+    if (text && t.textContent !== text) t.textContent = text;
+  }
+  /**
+   * 法域里念咒：开战后本来藏着的输入框放出来（电脑上直接能打字，手机上点了才弹键盘，不然一开就把画面挤掉一半）
+   * @param {boolean} on @param {boolean} focus
+   */
+  setDomainChant(on, focus) {
+    this.input.hidden = !on;
+    this.input.placeholder = on ? '念一句，写上天……（回车写上去，空着回车收束）' : '说出你的咒语……（回车施法）';
+    this.input.value = '';
+    if (on && focus) this.input.focus();
+    else if (!on) this.input.blur();
+  }
   /**
    * 给按钮写咒的对话框。
    * @param {string} name 天赋名 @param {string} elKey
@@ -1306,10 +1333,12 @@ export class Hud {
 
   /**
    * 按钮下面、视角与锁定按钮上写的键名：试炼电脑上按设置里绑的，守关是数字（触屏上 .yc-pad 不显示）
-   * @param {{ dash: string, skills: string[], ult: string, view: string, lock: string }} k
+   * @param {{ dash: string, skills: string[], ult: string, domain: string, view: string, lock: string }} k
    */
   setKeyLabels(k) {
     this.keyLabels = k;
+    const dm = this.root.querySelector('.yc-domain .yc-key');
+    if (dm) dm.textContent = k.domain;
     const d = this.root.querySelector('.yc-dash .yc-key');
     if (d) d.textContent = k.dash;
     this.root.querySelectorAll('.yc-skill .yc-key').forEach((s, i) => { s.textContent = k.skills[i] ?? ''; });

@@ -35,6 +35,10 @@ test('字表：main.js、modes/trial.js 里所有大字、结算标题与战报�
   const reports = found.filter((m) => m[1] === 'reportOf' && /'[^']+'/.test(m[2]));
   assert.ok(reports.length >= 3, `战报卡的胜负行只扫到 ${reports.length} 处，正则可能失效`);
   const big = new Set(BIG_CHARS);
+  // 全屏画框的大字（ui/frame.js）也用大字字体：取 text: 后面到颜色之前那一段
+  const frames = [...src.matchAll(/frame\.show\('\w+', \{ text: (.*?), color:/g)].map((m) => m[1]);
+  assert.ok(frames.length >= 2, `只找到 ${frames.length} 处画框大字，正则可能失效`);
+  calls.push(...frames);
   const lits = calls.flatMap((c) => [...c.matchAll(/'([^']*)'|`([^`]*)`/g)].map((m) => (m[1] ?? m[2]).replace(/\$\{[^}]*\}/g, '')));
   const bad = lits.join('').split('').filter((ch) => !big.has(ch));
   assert.deepEqual([...new Set(bad)], [], `这些大字不在大字字体里：${[...new Set(bad)].join('')}`);

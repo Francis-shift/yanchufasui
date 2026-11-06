@@ -239,6 +239,10 @@ export const RUN = {
     fan: { speed: 1.3, mult: 2 }, yin: { jumps: 2, r: 0.9 } },
   dragon: { twin: { delay: 1.2, apart: 6 },
     guard: { sec: 5, r: 3.6, h: 1.2, speed: 13, block: 1.0, reach: 0.9, touch: 0.25, every: 0.8, outer: { dr: 1.6, dh: 0.7 } } },
+  // 法域（game/rules/domain.js）：open 展开几秒、sec 最多念几秒、lines 最多几句（都是真实时间）；mult 念的法术的威力；slash 收束这一笔打全场多少；
+  // stun 这一笔定住敌人几秒（等法术落到）；gap 法术一招接一招隔几秒（同时落，只错开一点，冰火还能打出反应）；wait 时间到了最多等解析几秒（比 PARSE_TIMEOUT_MS 长一点）；
+  // inkR 水墨铺到多大（半径，屏高 = 1，够盖住最宽的屏幕的四角）；fade 收束后几秒褪掉
+  domain: { open: 1, sec: 8, lines: 3, mult: 1.5, slash: 60, stun: 1.5, gap: 0.08, wait: 5, inkR: 2, fade: 0.45 },
 };
 
 /** 元素反应（只在程序里判断）：先中的元素 + 后来的元素 */

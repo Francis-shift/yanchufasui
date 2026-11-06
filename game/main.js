@@ -32,6 +32,8 @@ import {
   BEAM, BRIDGE_ICE, BUTTON_CHANT_MS, CHANT_MIN_MS, CORE_HP, DROP, ELEMENTS, FORMS, INPUT_MAX_CHARS, MANA_MAX, MOMENTUM_FX, MOMENTUM_RANGE, PARSE_TIMEOUT_MS, RAIN,
   REACTIONS, RUN, SLOWMO_MAX_SEC, SLOWMO_SCALE, SPILL, SUMMONS, TALENTS, TOPPLE, TORNADO, TRIAL, WALL,
 } from './rules/numbers.js';
+import { DOMAIN_OFF, addLine, canChant, canOpen, domainLeft, domainOn, endChant, inkStep, openDomain, tickDomain } from './rules/domain.js';
+import { FRAME_GLOW } from './ui/frame.js';
 import { Caster } from './actors/caster.js';
 import { Enemies } from './actors/enemies.js';
 import { loadRig } from './actors/rig.js';
@@ -441,6 +443,8 @@ export function start(root, opts = {}) {
     run: newRun(), mods: runMods(newRun()),
     /** 心法的三个窗口还剩几秒（玩家的时间）：刹那全场慢放、反手下一招加伤、余威龙落地后加伤 */
     slowT: 0, counterT: 0, afterT: 0,
+    /** 法域走到哪（rules/domain.js）；domainEl：开的时候气势槽哪种颜色最多，那一笔就是什么元素 */
+    domain: DOMAIN_OFF, domainEl: 'ice',
   };
   /** 按游戏时间延后执行（慢放、顿帧时一起变慢） */
   const timers = [];
@@ -502,6 +506,7 @@ export function start(root, opts = {}) {
   function startGame(mode = 'defense') {
     preloadFonts(true);   // 开局后把其余一级字也下好，免得冷门字第一次出现时先闪成别的字体
     clearField();
+    closeDomain();
     Object.assign(S, { mode, phase: 'playing', mana: MANA_MAX, core: CORE_HP, gauge: 0, lastCombo: null, seen: [], said: new Set(),
       wave: 0, queue: [], busy: false, restT: 0, inv: 0, run: newRun(), slowT: 0, counterT: 0, afterT: 0 });   // 新的一局天先放晴，再随第一波慢慢压上来
     S.mods = runMods(S.run);
@@ -511,7 +516,7 @@ export function start(root, opts = {}) {
     S.binds = Object.fromEntries(Object.entries(S.binds).filter(([k, b]) => S.talents.includes(k) && !b.auto));
     applyKeys();   // 按钮下面写哪个键：试炼按设置里绑的，守关是数字
     hud.setSkills(S.talents.map((el) => ({ el, ...skillLabel(el) })),
-      { cast: pressTalent, pen: openWrite, summon: pressSummon, dash: mode === 'trial' ? () => trial.dash() : undefined });
+      { cast: pressTalent, pen: openWrite, summon: pressSummon, domain: pressDomain, dash: mode === 'trial' ? () => trial.dash() : undefined });
     hud.setCore(S.core, CORE_HP);
     layout.core.visible = mode !== 'trial';   // 试炼用不上阵眼：阵盘、水晶、石桩整组藏起来（也不挡路，见 trial.js BLOCK）
     if (mode === 'trial') trial.prepare();   // 试炼：战前先写咒、试招，点"开战"boss 才出来
@@ -590,6 +595,7 @@ export function start(root, opts = {}) {
   /** 结算页"回首页"：清场、回到封面（镜头接着摆，法术接着自己放） */
   function backToTitle() {
     clearField();
+    closeDomain();
     trial.stop();
     landscape(false);
     Object.assign(S, { mode: 'defense', phase: 'title', mana: MANA_MAX, core: CORE_HP, gauge: 0, wave: 0, queue: [], busy: false, restT: 0 });
@@ -839,7 +845,12 @@ export function start(root, opts = {}) {
   };
   const onKey = (e) => {
     if (!input.value && hotkey(e)) return;
-    if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const t = input.value; input.value = ''; onInput(); submit(t); }
+    if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault();
+      const t = input.value;
+      if (!t.trim() && canChant(S.domain)) { pressDomain(); return; }   // 法域里空着回车：念够了，这就收束
+      input.value = ''; onInput(); submit(t);
+    }
     else if (e.key === 'Escape') input.blur();
   };
   // ---------------------------------------------------------------- 键位与设置（设计文档第 4 节"10-30 改：键位与设置"）
@@ -850,8 +861,8 @@ export function start(root, opts = {}) {
   function applyKeys() {
     const L = (/** @type {import('./rules/keymap.js').Action} */ a) => keyLabel(keys[a]);
     hud.setKeyLabels(S.mode === 'trial'
-      ? { dash: L('dash'), skills: [L('skill1'), L('skill2'), L('skill3')], ult: L('ult'), view: L('view'), lock: L('lock') }
-      : { dash: L('dash'), skills: ['1', '2', '3'], ult: '4', view: L('view'), lock: L('lock') });
+      ? { dash: L('dash'), skills: [L('skill1'), L('skill2'), L('skill3')], ult: L('ult'), domain: L('domain'), view: L('view'), lock: L('lock') }
+      : { dash: L('dash'), skills: ['1', '2', '3'], ult: '4', domain: L('domain'), view: L('view'), lock: L('lock') });
     trial.keyText = { skills: [L('skill1'), L('skill2'), L('skill3')].join('、'), ult: L('ult'), dash: L('dash'), home: L('home'), lock: L('lock') };
   }
   /** 试炼里按下绑了动作的键：放招可以按住连发（同原来的数字键），闪避、大招、切视角、镜头回正、锁定开关按一下算一下 @param {import('./rules/keymap.js').Action} a @param {boolean} repeat */
@@ -860,6 +871,7 @@ export function start(root, opts = {}) {
     if (repeat) return;
     if (a === 'dash') trial.dash();
     else if (a === 'ult') pressSummon();
+    else if (a === 'domain') pressDomain();
     else if (a === 'home') camHome();
     else if (a === 'lock') toggleLock();
     else cycleView();
@@ -1080,7 +1092,7 @@ export function start(root, opts = {}) {
   /** idle 没在录；wait 等麦克风打开（第一次要授权）；on 按住在录；tap 点一下开始的、再点一下结束；busy 在听写 */
   let mic = /** @type {'idle' | 'wait' | 'on' | 'tap' | 'busy'} */ ('idle'), micPress = 0, micUpEarly = false, micTimer = 0;
   /** 现在能不能开口：守关随时；试炼战前随时，开战后只在气势满了的时候（战中只能开口召龙） */
-  const micAllowed = () => !!recorder && S.phase === 'playing' && (S.mode !== 'trial' || !trial.fighting || S.gauge >= S.mods.ult);
+  const micAllowed = () => !!recorder && S.phase === 'playing' && (domainOn(S.domain) ? chantRoom() : S.mode !== 'trial' || !trial.fighting || S.gauge >= S.mods.ult);
   function micReset() {
     clearTimeout(micTimer);
     mic = 'idle';
@@ -1217,9 +1229,11 @@ export function start(root, opts = {}) {
   /** @param {string} text @param {{ ms: number }} [voice] 说出来的（识别成的文字）：ms 是服务器上听写花的毫秒数 */
   async function submit(text, voice) {
     text = [...text.trim()].slice(0, INPUT_MAX_CHARS).join('');
-    if (!text || S.busy || S.phase !== 'playing') return;
+    const inDomain = domainOn(S.domain);   // 法域里手快：上一句还在解析也能念下一句，这里不看 S.busy
+    if (!text || S.phase !== 'playing' || (inDomain ? !chantRoom() : S.busy)) return;
     text = maskText(text).text;   // 敏感词换成＊：咒语卡上看不到，模型也收不到，其余照常施法
     S.busy = true;
+    if (inDomain) chantPending++;
     slowSince = 0; slowSpent = false;
     const t0 = performance.now();
     const castId = ++castSeq;
@@ -1250,7 +1264,7 @@ export function start(root, opts = {}) {
       if (k.steps.length) { intent = { ...k, unknown: intent.unknown, overreach: intent.overreach || k.overreach }; source += '＋关键词'; }
     }
     if (voice) source = `语音${voice.ms ? `（听写 ${voice.ms} 毫秒）` : ''} → ${source}`;
-    perform(intent, { text, source, ms, raw, castId, voice: !!voice });
+    perform(intent, { text, source, ms, raw, castId, voice: !!voice, domain: inDomain });
   }
 
   /** 天赋按键放出的法术：每一步的命中记在这里，按打法加气势槽（talents.js buttonGaugeGain） */
@@ -1297,12 +1311,16 @@ export function start(root, opts = {}) {
   /**
    * 意图 → 裁决 → 咒语卡 → 放出。打字和天赋按键都走这里。
    * @param {import('./rules/intent.js').Intent} intent
-   * @param {{ text: string, source: string, ms: number, raw: any, castId: number, button?: boolean, voice?: boolean }} c voice：说出来的
+   * @param {{ text: string, source: string, ms: number, raw: any, castId: number, button?: boolean, voice?: boolean, domain?: boolean }} c
+   *   voice：说出来的；domain：在法域里念的，不放出去，收起来等收束
    */
   function perform(intent, c) {
     const { text, source, ms, raw, castId } = c;
-    if (S.phase !== 'playing') { fx.endChant(); caster.endCharge(); buttonChant = false; locks.clear(castId); S.busy = false; return; }
-    if (c.voice && trial.fighting && !intent.summon) {   // 试炼开战后只能开口召龙（设计文档第 2 节"试炼模式"）
+    if (c.domain && !c.button) chantPending = Math.max(0, chantPending - 1);
+    const inDomain = !!c.domain && domainOn(S.domain);
+    if (S.phase !== 'playing' || (c.domain && !inDomain)) { fx.endChant(); caster.endCharge(); buttonChant = false; locks.clear(castId); S.busy = false; return; }   // 念到一半法域收了：这一句算了
+    if (c.voice && trial.fighting && !inDomain && !intent.summon) {   // 试炼开战后只能开口召龙（设计文档第 2 节"试炼模式"），法域里随便说
+
       fx.endChant(); caster.endCharge(); locks.clear(castId); S.busy = false;
       hud.bigText('未能成咒', '#5d6b7a', 1000);
       hud.setHint(`听到的是「${text}」：开战后开口只能召龙，说一句召龙的话；别的招用按钮放`);
@@ -1311,18 +1329,22 @@ export function start(root, opts = {}) {
     }
     const firstEl = intent.summon && intent.summon !== 'thunder' ? intent.summon : intent.steps[0]?.el;
     if (firstEl) fx.retint(firstEl);
-    let plan = planCast(intent, { mana: S.mana, lastCombo: S.lastCombo, seen: S.seen, said: S.said, text: c.button ? '' : text,
+    // 法域里不耗法力、不召龙（气势刚花掉，念龙就只算这句话里别的招）
+    let plan = planCast(inDomain ? { ...intent, summon: null } : intent, { mana: inDomain ? MANA_MAX : S.mana, lastCombo: S.lastCombo, seen: S.seen, said: S.said, text: c.button ? '' : text,
       gauge: S.gauge, ult: S.mods.ult, button: !!c.button, fusions: castFusions() });
+    if (inDomain) plan = boostPlan(plan, RUN.domain.mult);
     // 心法反手、余威：窗口里放出去的这一招加伤（按放出那一刻算，飞到时窗口关了也照样加）；反手只管一招
-    const boost = plan.ok ? artBoost({ counter: S.counterT, after: S.afterT }) : null;
+    const boost = plan.ok && !inDomain ? artBoost({ counter: S.counterT, after: S.afterT }) : null;
     if (boost && boost.k !== 1) {
       plan = boostPlan(plan, boost.k);
       if (boost.counter) S.counterT = 0;
       const tag = [boost.counter ? '反手' : '', boost.after ? '余威' : ''].filter(Boolean).join('·');
       floatAt(new THREE.Vector3(CASTER_POS.x, 2.6, CASTER_POS.z), `${tag} ×${+boost.k.toFixed(2)}`, '#ffd76a');
     }
-    S.mana -= plan.cost;
-    setGauge(plan.gaugeSpent ? 0 : Math.min(S.mods.ult, S.gauge + plan.gaugeGain), stepEls(plan.steps));
+    if (!inDomain) {
+      S.mana -= plan.cost;
+      setGauge(plan.gaugeSpent ? 0 : Math.min(S.mods.ult, S.gauge + plan.gaugeGain), stepEls(plan.steps));
+    }
     if (intent.summon) dragon.preload(intent.summon);
     S.lastCombo = plan.lastCombo;
     S.seen.push(...plan.newlySeen);
@@ -1336,7 +1358,7 @@ export function start(root, opts = {}) {
     const name = fused && autoNamed ? /** @type {string} */ (fused.fusionName) : intent.name || (plan.ok ? defaultName(plan.steps) : '');
     // 试炼开战后不出咒语卡：顶上是 boss 血条，眼睛要看地上（开口召的龙另有"××现世"的大字）
     const shown = aimProps(plan, intent, text);
-    if (!(trial.fighting && (c.button || c.voice))) hud.showCard({ name, text, plan, intent: shown, source, ms });
+    if (!inDomain && !(trial.fighting && (c.button || c.voice))) hud.showCard({ name, text, plan, intent: shown, source, ms });
     if (plan.backlash) { fx.backlash(); hud.bigText('天道不允', '#b3261e', 1300); }
     fx.endChant();
     buttonChant = false;
@@ -1352,6 +1374,7 @@ export function start(root, opts = {}) {
     if (plan.summon) tallyOf.set(plan.summon, tally);
     const m = plan.momentum;
     if (!c.button) { if (m >= 3) sound.play('surge'); else sound.play('card'); }   // 开口念成的咒"叮"一声；气势如虹换成锣鼓
+    if (inDomain) { domainLine(plan, m, c.button ? name : text, text, castId); S.busy = false; return; }
     if (plan.summon?.cast) {
       caster.cast(null);
       runSummon(plan.summon, castId);
@@ -1369,13 +1392,7 @@ export function start(root, opts = {}) {
     locks.show(castId, marks);
     fx.launchBurst(plan.steps[0].el);
     caster.cast(aimOf(resolved[0]));
-    const go = () => {
-      plan.steps.forEach((step, i) => after(i * 0.45, () => runStep(step, resolved[i], m)));
-      after((plan.steps.length - 1) * 0.45 + 1.2, () => locks.clear(castId));
-      // 字诀「连」：最后一步放出 lian.sec 秒后，带「连」的几步再放一次
-      const again = plan.steps.filter((s) => s.runes?.includes('lian'));
-      if (again.length) after((plan.steps.length - 1) * 0.45 + RUN.runes.lian.sec, () => castAgain(again, m));
-    };
+    const go = () => launch(plan, resolved, m, castId, 0.45, 0);
     if (plan.summon?.ghost) {
       // 差一口气：龙影升起、散开，再落雨
       hud.bigText('差一口气', '#2f5d8a', 1200);
@@ -1384,6 +1401,115 @@ export function start(root, opts = {}) {
     } else go();
     if (m >= 3 && !c.button) hud.bigText('气势如虹', '#16202b', 900);
     S.busy = false;
+  }
+
+  /**
+   * 一招的几步按顺序放出去。gap：步与步隔几秒；wait：整招晚几秒放（法域收束时几招错开一点）
+   * @param {{ steps: import('./rules/arbiter.js').PlannedStep[] }} plan @param {any[]} resolved @param {number} m @param {number} castId @param {number} gap @param {number} wait
+   */
+  function launch(plan, resolved, m, castId, gap, wait) {
+    const n = plan.steps.length - 1;
+    plan.steps.forEach((step, i) => after(wait + i * gap, () => runStep(step, resolved[i], m)));
+    after(wait + n * gap + 1.2, () => locks.clear(castId));
+    // 字诀「连」：最后一步放出 lian.sec 秒后，带「连」的几步再放一次
+    const again = plan.steps.filter((s) => s.runes?.includes('lian'));
+    if (again.length) after(wait + n * gap + RUN.runes.lian.sec, () => castAgain(again, m));
+  }
+
+  // ---------------------------------------------------------------- 法域（设计文档第 4 节"法域"，走段在 rules/domain.js）
+  let inkWash = { r: 0, k: 0 };   // 水墨铺到哪（rules/domain.js inkStep）
+  let chantPending = 0;   // 法域里念出去、还在解析的句数（手快时可能有两句）
+  let domainHint = '';    // 念咒时提示行换成法域的说明，收束后换回来
+  /** 还能不能再念一句：解析中的也算占了名额 */
+  const chantRoom = () => canChant(S.domain) && S.domain.lines.length + chantPending < RUN.domain.lines;
+  /** 按钮亮不亮：气势满了、场上有敌人才值得开（小怪潮打完到下一段之间开了也是空斩） */
+  const domainReady = () => S.mode === 'trial' && S.phase === 'playing' && S.mods.domain && trial.fighting && enemies.list.length > 0 && S.gauge >= S.mods.ult;
+
+  /** 气势满了开法域；念咒时再按一下就是提前收束 */
+  function pressDomain() {
+    if (canChant(S.domain)) { S.domain = endChant(S.domain); return; }
+    if (!canOpen(S.domain, { has: domainReady(), fighting: trial.fighting, gauge: S.gauge, ult: S.mods.ult, busy: S.busy || !!pend || mic !== 'idle' || !hud.write.hidden })) return;
+    S.domainEl = gaugeDragon(S.gaugeCols);
+    setGauge(0);
+    S.domain = openDomain();
+    trial.held = true;
+    hud.frame.show('large', { text: '法域', color: FRAME_GLOW[S.domainEl] });
+    sound.play('frameL');
+    fx.shake = Math.max(fx.shake, 0.5);
+  }
+
+  /** 展开完了：放出输入框，开始念 */
+  function domainChant() {
+    domainHint = hud.q('[data-hint]').textContent ?? '';
+    hud.setDomainChant(true, !mobile);
+    hud.setHint(mobile ? '全场定住了：点输入框打字、按麦克风开口，或者按招式按钮；点「收束」提前落下'
+      : '全场定住了：打字、开口，或者按 1 2 3 放招；空着回车提前收束');
+  }
+
+  /**
+   * 法域里念成一句：写到天上，落点的锁定先亮着，等收束才放
+   * @param {{ steps: import('./rules/arbiter.js').PlannedStep[] }} plan @param {number} m @param {string} shown 天上写什么 @param {string} text @param {number} castId
+   */
+  function domainLine(plan, m, shown, text, castId) {
+    const { resolved, marks } = lockSteps(plan.steps, m, text);
+    locks.show(castId, marks);
+    caster.endCharge();
+    S.domain = addLine(S.domain, { plan, m, resolved, castId });
+    hud.frame.line(shown, SUMMON_INK[plan.steps[0].el] ?? '#16202b');
+  }
+
+  /** 把念咒的界面收掉（输入框、麦克风的慢放、提示行） */
+  function domainDone() {
+    trial.held = false;
+    chantPending = 0;
+    slowSince = 0; slowSpent = false;
+    fx.setListening(false);
+    if (S.mode === 'trial') hud.setDomainChant(false, false);
+    if (domainHint) hud.setHint(domainHint);
+    domainHint = '';
+  }
+
+  /** 收束：一笔斩过全屏，弹幕全碎、boss 破甲，打全场一下并定住，念过的法术同时落下 @param {any[]} lines */
+  function domainStrike(lines) {
+    const el = S.domainEl, D = RUN.domain;
+    domainDone();
+    hud.frame.slash(FRAME_GLOW[el]);
+    sound.play('slash');
+    fx.shake = Math.max(fx.shake, 0.9);
+    trial.domainCut();
+    const cut = { el, runes: [], tally: newTally('法域') }, from = new THREE.Vector3(trial.p.x, 0, trial.p.z);
+    for (const e of [...enemies.list]) {
+      const at = e.pos.clone().setY(e.pos.y + 1);
+      hitEnemy(e, cut, D.slash, from, { chain: true });   // 不连锁：这一笔本来就打全场
+      e.stun = Math.max(e.stun, D.stun);
+      fx.burst(at, el, 1.1, 0.5);
+    }
+    lines.forEach((l, k) => {
+      fx.launchBurst(l.plan.steps[0].el);
+      launch(l.plan, l.resolved, l.m, l.castId, D.gap, k * D.gap);
+    });
+    if (lines.length) caster.cast(aimOf(lines[0].resolved[0]));
+  }
+
+  /** 这一局没了（重开、回首页、退到别处）：法域和画框一笔勾销 */
+  function closeDomain() {
+    for (const l of S.domain.lines) locks.clear(l.castId);
+    S.domain = DOMAIN_OFF;
+    domainDone();
+    hud.frame.clear();
+  }
+
+  /** 每帧走一步（真实时间）：返回这一帧世界要不要定住 @param {number} rdt @returns {boolean} */
+  function stepDomain(rdt) {
+    hud.setDomainBtn(canChant(S.domain) ? '收束' : domainReady() && !domainOn(S.domain) ? '法域' : '');
+    if (!domainOn(S.domain)) return false;
+    if (S.phase !== 'playing' || !trial.fighting) { closeDomain(); return false; }
+    const r = tickDomain(S.domain, rdt, chantPending > 0 || !!pend || mic !== 'idle');
+    S.domain = r.d;
+    hud.frame.progress(domainLeft(S.domain));
+    if (r.event === 'chant') domainChant();
+    if (r.event === 'strike') { domainStrike(r.lines); return false; }
+    return true;
   }
 
   /**
@@ -1449,11 +1575,12 @@ export function start(root, opts = {}) {
   /** @param {string} el */
   function pressTalent(el) {
     if (S.phase !== 'playing' || !S.talents.includes(el) || !hud.write.hidden) return;
+    if (domainOn(S.domain) && !chantRoom()) return;   // 法域展开时、念满了：按钮不算数
     if (pend) {
       if (pend.els.length < 2 && !pend.els.includes(el)) { pend.els.push(el); hud.setCharging(pend.els); fireButtons(); }
       return;
     }
-    if (S.busy) return;
+    if (S.busy && !domainOn(S.domain)) return;
     S.busy = true;
     const castId = ++castSeq;
     // 咏唱多久看先按的这个按钮：字诀「疾」快、「重」慢（守关不认字诀）
@@ -1473,12 +1600,12 @@ export function start(root, opts = {}) {
     hud.setCharging([]);
     const intent = combineButtons(p.els.map(buttonIntent));
     const names = p.els.map((e) => S.binds[e]?.name || elName(e));
-    perform(intent, { text: `按键 · ${names.join(' → ')}`, source: '天赋按键', ms: 0, raw: null, castId: p.castId, button: true });
+    perform(intent, { text: `按键 · ${names.join(' → ')}`, source: '天赋按键', ms: 0, raw: null, castId: p.castId, button: true, domain: domainOn(S.domain) });
   }
 
   /** 气势满了点"召唤"：召气势槽里颜色最多的那条龙（gaugeDragon），按气势 0 档召（开口召的吃那句话的气势，更猛） */
   function pressSummon() {
-    if (S.phase !== 'playing' || S.busy || pend || S.gauge < S.mods.ult || !hud.write.hidden) return;
+    if (S.phase !== 'playing' || S.busy || pend || S.gauge < S.mods.ult || !hud.write.hidden || domainOn(S.domain)) return;
     S.busy = true;
     buttonChant = true;
     const el = /** @type {keyof typeof SUMMONS} */ (gaugeDragon(S.gaugeCols));
@@ -1571,10 +1698,11 @@ export function start(root, opts = {}) {
     if (play.on) sm.dmg *= AUTO.dragon;
     const el = /** @type {keyof typeof SUMMONS} */ (sm.el), k = sm.dmg / SUMMONS[el].dmg;
     const twin = S.mods.twin, guard = S.mods.guard && S.mode === 'trial';
-    hud.bigText(`${sm.name}现世`, SUMMON_INK[el] ?? SUMMON_INK.ice, 1400);
+    hud.frame.show('small', { text: guard ? (twin ? '双龙护身' : '护身') : `${sm.name}现世`, color: FRAME_GLOW[el] });
+    sound.play('frameS');
     fx.launchBurst(el);
     sound.play('dragon', { el });
-    if (twin || guard) floatAt(new THREE.Vector3(CASTER_POS.x, 3.1, CASTER_POS.z), twin && guard ? '双龙·护身' : twin ? '双龙' : '护身', '#ffd76a');
+    if (twin && !guard) floatAt(new THREE.Vector3(CASTER_POS.x, 3.1, CASTER_POS.z), '双龙', '#ffd76a');
     if (guard) { guardDragons(sm, el, twin); return; }
     flyAt(sm, el, k, res, castId);
     if (S.mode === 'trial' && trial.on) tcam.shot = { f: dragon.flights[dragon.flights.length - 1], t: 0, wait: 0 };   // 大招镜头：推到肩后看龙飞出去
@@ -2511,7 +2639,8 @@ export function start(root, opts = {}) {
     if (mic !== 'idle' && S.phase !== 'playing') { if (mic === 'on' || mic === 'tap') recorder?.stop(); micReset(); }
     hud.setMicShown(micAllowed() || mic !== 'idle');
     const stop = frozen || setUi.paused;   // 写咒对话框、设置面板开着：游戏停住，画面照画
-    let dt = stop ? 0 : realDt * timeScale * lab.speed;   // 试验场可放慢、定格
+    const held = stepDomain(stop ? 0 : realDt);   // 法域开着：世界的钟停住，法术等收束才放；法域自己走真实时间
+    let dt = stop || held ? 0 : realDt * timeScale * lab.speed;   // 试验场可放慢、定格
     // 施法者自己的钟：开口慢放时世界慢、人照常（不然 0.8 秒的咏唱里手还没抬起来）；顿帧照样顿
     let cdt = stop ? 0 : realDt * lab.speed;
     if (fx.hitStop > 0) { fx.hitStop -= realDt; dt *= 0.06; cdt *= 0.06; }
@@ -2625,7 +2754,11 @@ export function start(root, opts = {}) {
     fx.shock.tick(realDt);
     const ring = fx.shock.ring(camera.position.distanceTo(_v.copy(fx.shock)), camera.fov);
     _v.project(camera);
-    grade.tick(realDt, impactNow, impactUv, camera.aspect, { ...ring, x: _v.x * 0.5 + 0.5, y: _v.y * 0.5 + 0.5, amp: _v.z < 1 ? ring.amp : 0 });
+    const shockNow = { ...ring, x: _v.x * 0.5 + 0.5, y: _v.y * 0.5 + 0.5, amp: _v.z < 1 ? ring.amp : 0 };
+    // 水墨从脚下铺开：圆心是施法者脚下在屏幕上的位置
+    inkWash = inkStep(inkWash, domainOn(S.domain), realDt);
+    _v.set(trial.p.x, 0, trial.p.z).project(camera);
+    grade.tick(realDt, impactNow, impactUv, camera.aspect, shockNow, { ...inkWash, x: _v.x * 0.5 + 0.5, y: _v.y * 0.5 + 0.5 });
     renderer.info.reset();
     composer.render();
     if (shotDue >= 0 && idleT >= shotDue) { shotDue = -1; captureShot(); }   // 战报卡的最佳一击：紧跟在画完之后截
@@ -2714,6 +2847,9 @@ export function start(root, opts = {}) {
     /** 气势槽设成 n 格，新加的格染 el（一串就轮着染；不给是白格）；gaugeCols() 看每一格的颜色 */
     gauge: (n = S.mods.ult, /** @type {string | string[] | undefined} */ el = undefined) => setGauge(n, el),
     gaugeCols: () => [...S.gaugeCols],
+    /** 法域：domain() 按一下按钮（开或提前收束）；domainState 看走到哪、念了几句 */
+    domain: pressDomain,
+    domainState: () => ({ phase: S.domain.phase, t: S.domain.t, lines: S.domain.lines.length, pending: chantPending, held: trial.held, ink: { ...inkWash } }),
     /** 天赋按键：按一个，或在 0.6 秒内按两个（press('wind','fire') 出火卷风）；summonBtn 是金色召唤按钮 */
     press: (...els) => els.forEach((el) => pressTalent(el)),
     summonBtn: () => pressSummon(),

@@ -141,7 +141,7 @@ test('拿了：记一级、再出带「·二」（招式字不在卡上标，选
 test('心法加成：没拿是原值；见切放宽完美闪避窗口、聚气多加气势、回元回得快、龙吟召龙格数变少', () => {
   const base = runMods(newRun());
   assert.deepEqual(base, { perfectWindow: TRIAL.perfect.window, perfectGauge: TRIAL.perfect.gauge, manaRegen: 1, ult: ULT_GAUGE,
-    chana: false, fanshou: false, canying: false, yuwei: false, twin: false, guard: false });
+    chana: false, fanshou: false, canying: false, yuwei: false, twin: false, guard: false, domain: false });
   let run = newRun();
   for (const id of ['jianqie', 'juqi', 'huiyuan', 'longyin']) run = take(run, byId(id));
   const m = runMods(run);

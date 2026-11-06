@@ -123,6 +123,7 @@ export class Trial {
     // 精力：还剩几格（攒到一半也算数）、离上次按闪避过了几秒；shownSta 是闪避按钮上画成什么样（变了才重画）
     // dashLock：字诀「重」放完这几秒不能闪避；slowTele：字诀「凝」冻住了 boss，下一招预警变慢
     this.stamina = TRIAL.stamina.max; this.sinceDash = Infinity; this.shownSta = ''; this.dashLock = 0; this.slowTele = false;
+    this.held = false;   // 法域开着：全场定住，玩家也不能闪（main.js 管开关）
     /** 小怪潮里冒着紫烟、还没出来的小怪：落点、还要几秒、是哪种 @type {{ x: number, z: number, t: number, kind: string }[]} */
     this.pending = [];
     /** 铁头傀儡正亮着的红条（收场时一起收） @type {Set<{ g: THREE.Group, fill: THREE.Mesh }>} */
@@ -655,7 +656,7 @@ export class Trial {
 
   // ---------------------------------------------------------------- 玩家
   dash() {
-    if (!this.on || !canDash(this.stamina, this.sinceDash) || this.dashLock > 0 || this.hp <= 0) return;
+    if (!this.on || !canDash(this.stamina, this.sinceDash) || this.dashLock > 0 || this.hp <= 0 || this.held) return;
     const mv = this.input();
     this.dashDir.copy(mv.lengthSq() > 0.01 ? mv.normalize() : this.face);
     this.dashT = TRIAL.dash.sec;
@@ -829,15 +830,25 @@ export class Trial {
   hitBoss(e, el, r, po = false) {
     const cfg = this.cfg, h = bossHit({ armor: this.armor, freezeCd: this.freezeCd }, el, r, po, cfg);
     this.armor = h.armor;
-    if (h.broke) {
-      this.d.hud.bigText(`${cfg.armorName}碎了`, BOSS_INK[cfg.type][1], 1100);
-      this.d.fx.burst(new THREE.Vector3(e.pos.x, 2, e.pos.z), cfg.el, 2.6, 0.9);
-      this.d.fx.sound?.play('armor', { el: cfg.el });
-    }
+    if (h.broke) this.armorBroke(e);
     if (this.state === 'stagger') h.r.dmg *= STONE.charge.staggerMult;
     else if (this.state === 'tele' && this.move === 'charge' && (this.chargeDmg += h.r.dmg) >= STONE.charge.breakDmg) this.interrupt();
     if (this.floor > 0) h.r.dmg = Math.min(h.r.dmg, Math.max(0, e.hp - this.floor));
     return h.r;
+  }
+
+  /** 甲碎了：大字、碎片、响一声 @param {any} e */
+  armorBroke(e) {
+    const cfg = this.cfg;
+    this.d.hud.bigText(`${cfg.armorName}碎了`, BOSS_INK[cfg.type][1], 1100);
+    this.d.fx.burst(new THREE.Vector3(e.pos.x, 2, e.pos.z), cfg.el, 2.6, 0.9);
+    this.d.fx.sound?.play('armor', { el: cfg.el });
+  }
+
+  /** 法域收束这一笔：天上地下的弹幕全碎，boss 的甲破掉（伤害和定身在 main.js 算） */
+  domainCut() {
+    this.clearBullets();
+    if (this.boss && this.armor > 0) { this.armor = 0; this.armorBroke(this.boss); }
   }
 
   /** 蓄力冲撞被打断：红条收起，boss 往前一栽、硬直几秒（这时挨打更疼），不再连冲 */

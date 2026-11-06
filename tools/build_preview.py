@@ -80,6 +80,11 @@ STUBS = {
     "game/fx/sound.js": "export class Sound { constructor() { const t = { muted: false, vol: { sfx: 1, music: 1 } };"
                         " return new Proxy(t, { get: (o, k) => (k in o ? o[k] : () => {}) }); } }",
 }
+# 游戏页不带模型（全是方块占位），摆模型的、读模型格式的换成空壳，又省约 8 KB（--dragon 要真读龙，不换）。11-06 加法域时超了 512 KB
+MODEL_STUBS = {
+    "game/world/props.js": "export const loadProps = () => {};",
+    "game/world/drg2.js": "const no = async () => { throw new Error('预览页没有模型'); }; export { no as decodeDRG2, no as fetchBytes };",
+}
 
 
 def collect_local(rel: str, out: dict):
@@ -219,6 +224,8 @@ def main():
         assets.append(pathlib.Path(args[i + 1]))
         del args[i:i + 2]
     entry, boot, title, out_name = TARGETS[args[0] if args else "game"]
+    if entry == "game/main.js" and not dragon:
+        STUBS.update(MODEL_STUBS)
     locs: dict = {}
     collect_local(entry, locs)
     used = {m.group(2) for src in locs.values() for m in BARE_IMPORT.finditer(src)}

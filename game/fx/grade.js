@@ -20,14 +20,17 @@ const GradeShader = {
     uAspect: { value: 1 },
     uShock: { value: new THREE.Vector4(0.5, 0.5, 0, 1) },   // 圈心 x、y，半径，宽度（半径、宽度按屏高 = 1）
     uShockAmp: { value: 0 },
+    uInk: { value: new THREE.Vector4(0.5, 0.5, 0, 0) },   // 水墨（法域）：铺开的圆心 x、y，半径（屏高 = 1），浓淡 0～1
+    uTexel: { value: new THREE.Vector2(0.001, 0.001) },   // 水墨描边隔多远取样（一个像素多宽，取 1.5 倍）
   },
   vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
   fragmentShader: `
     uniform sampler2D tDiffuse; uniform float uContrast; uniform float uSaturation; uniform float uVignette;
     uniform float uGrain; uniform float uTime; uniform float uImpact; uniform vec2 uCenter; uniform float uAspect;
-    uniform vec4 uShock; uniform float uShockAmp;
+    uniform vec4 uShock; uniform float uShockAmp; uniform vec4 uInk; uniform vec2 uTexel;
     varying vec2 vUv;
     float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+    float lum(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
     void main(){
       vec2 uv = vUv;
       if (uShockAmp > 0.00001) {
@@ -60,6 +63,18 @@ const GradeShader = {
       c = mix(vec3(l), c, uSaturation);
       // 暗部偏青、亮部偏暖（电影里常见的冷暖分离，压得很轻）
       c += vec3(-0.012, 0.004, 0.02) * (1. - l) * (1. - l) + vec3(0.018, 0.008, -0.012) * l * l;
+      if (uInk.w > 0.001) {
+        // 水墨：从脚下铺开，亮度换成纸和墨，明暗交界描一道墨线；浓的颜色（法术、红圈）留着。边上按小格子抖一下，铺开的边是毛的
+        vec2 id = (vUv - uInk.xy) * vec2(uAspect, 1.);
+        float edge = smoothstep(uInk.z, uInk.z - 0.1, length(id) + (hash(floor(vUv * 160.)) - 0.5) * 0.05);
+        float g = lum(c);
+        float gx = lum(texture2D(tDiffuse, uv + vec2(uTexel.x, 0.)).rgb) - lum(texture2D(tDiffuse, uv - vec2(uTexel.x, 0.)).rgb);
+        float gy = lum(texture2D(tDiffuse, uv + vec2(0., uTexel.y)).rgb) - lum(texture2D(tDiffuse, uv - vec2(0., uTexel.y)).rgb);
+        vec3 ink = mix(vec3(0.07, 0.065, 0.06), vec3(0.93, 0.9, 0.83), smoothstep(0.08, 0.8, g));
+        ink *= 1. - 0.8 * smoothstep(0.04, 0.2, length(vec2(gx, gy)));
+        float sat = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
+        c = mix(c, mix(ink, c, smoothstep(0.45, 0.8, sat)), edge * uInk.w);
+      }
       // 暗角：按画面比例做成椭圆
       vec2 d = (vUv - 0.5) * vec2(uAspect, 1.);
       c *= 1. - uVignette * smoothstep(0.35, 1.05, length(d) * 1.25);
@@ -86,8 +101,9 @@ export class GradePass extends ShaderPass {
    * shock 是这一刻的冲击波圈（x、y 是圈心在屏幕上的位置）；g.impact 为 0 的档（手机流畅档）不画，也不多算。
    * @param {number} dt @param {number} impact @param {THREE.Vector2} center @param {number} aspect
    * @param {{ x: number, y: number, r: number, w: number, amp: number }} [shock]
+   * @param {{ x: number, y: number, r: number, k: number }} [ink] 水墨（法域）：不看 g.impact，手机流畅档也要有
    */
-  tick(dt, impact, center, aspect, shock) {
+  tick(dt, impact, center, aspect, shock, ink) {
     const u = this.uniforms;
     u.uTime.value = (u.uTime.value + dt) % 100;
     u.uImpact.value = impact * this.g.impact;
@@ -95,5 +111,10 @@ export class GradePass extends ShaderPass {
     u.uAspect.value = aspect;
     u.uShockAmp.value = shock ? shock.amp * this.g.impact : 0;
     if (shock) u.uShock.value.set(shock.x, shock.y, shock.r, shock.w);
+    u.uInk.value.w = ink ? ink.k : 0;
+    if (ink) {
+      u.uInk.value.set(ink.x, ink.y, ink.r, ink.k);
+      u.uTexel.value.set(1.5 / (1080 * aspect), 1.5 / 1080);   // 按 1080 高算：屏幕小的线粗一点，反正水墨是粗的
+    }
   }
 }
