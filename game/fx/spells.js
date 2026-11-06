@@ -11,6 +11,7 @@ import {
 } from './common.js';
 import { fireball, scorchTextures } from './fire.js';
 import { chipGeo, crystalGeo, frostTexture, iceMaterial } from './ice.js';
+import { Shock } from './shock.js';
 import { Trail, crescent, helix, scroll, stroke } from './wind.js';
 import { chunkGeo, crackTextures, rockMat } from './earth.js';
 
@@ -41,6 +42,8 @@ export class SpellFx {
     this.dimLevel = 0; this.dimHold = 0;
     /** 冲击后期：impactK 一瞬间冲到 1 再很快衰减（主循环按真实时间衰减，慢放、定格时不糊着不走），impactPos 是落点 */
     this.impactK = 0; this.impactPos = new THREE.Vector3();
+    /** 落点跑出去的那一圈折射（主循环按真实时间推，交给调色层画） */
+    this.shock = new Shock();
     /** @type {{ update(dt: number): boolean, dispose(): void }[]} */
     this.fx = [];
     this.shake = 0;
@@ -378,6 +381,7 @@ export class SpellFx {
     this.shake = Math.max(this.shake, (earth ? 0.55 : 0.4) * scale);   // 土砸得沉，多震一点
     this.hitStop = Math.max(this.hitStop, 0.05 * Math.min(scale, 1.2));   // 顿帧
     this.impact(p, Math.min(1, 0.35 + 0.45 * scale));
+    this.shock.hit(p, R, scale);
     if (scale >= 0.9) this.pulseDim(Math.min(0.75, 0.32 + 0.3 * (scale - 0.9)), 0.25 + 0.2 * scale);
     this.inkSplash(p, el, R, scale);
     this.foregroundBokeh(p, el, scale);

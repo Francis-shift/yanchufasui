@@ -2621,7 +2621,11 @@ export function start(root, opts = {}) {
     fx.impactK *= Math.exp(-realDt * 9);
     _v.copy(fx.impactPos).project(camera);
     impactUv.set(_v.x * 0.5 + 0.5, _v.y * 0.5 + 0.5);
-    grade.tick(realDt, _v.z < 1 ? fx.impactK : 0, impactUv, camera.aspect);
+    const impactNow = _v.z < 1 ? fx.impactK : 0;
+    fx.shock.tick(realDt);
+    const ring = fx.shock.ring(camera.position.distanceTo(_v.copy(fx.shock)), camera.fov);
+    _v.project(camera);
+    grade.tick(realDt, impactNow, impactUv, camera.aspect, { ...ring, x: _v.x * 0.5 + 0.5, y: _v.y * 0.5 + 0.5, amp: _v.z < 1 ? ring.amp : 0 });
     renderer.info.reset();
     composer.render();
     if (shotDue >= 0 && idleT >= shotDue) { shotDue = -1; captureShot(); }   // 战报卡的最佳一击：紧跟在画完之后截
