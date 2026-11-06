@@ -14,6 +14,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 import { chainTargets, cuts, damageTo, dropDamage, fireReach, freezes, namesWall, pickOfTwo, planCast, regenMana, resolveTarget, rockRun, saysCut, saysDown, saysTip, tips, topples, twinTarget, underLog, windReaches } from './rules/arbiter.js';
+import { BOOK_TOTAL, lightCells, readBook } from './rules/book.js';
 import { inWave } from './rules/fusion.js';
 import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
@@ -55,6 +56,7 @@ import { Huabiao } from './world/huabiao.js';
 import { Tipper } from './world/tipper.js';
 import { Zhenshan } from './world/zhenshan.js';
 import { buildLayout, CAMERA_BLOCKERS, CASTER_POS, CENSERS, CORE_POS, groundHeightAt, OBJECTS, OBSTACLES, PILLARS, slipDir, spillSpots } from './world/layout.js';
+import { BookPanel } from './ui/book.js';
 import { Hud, preloadFonts } from './ui/hud.js';
 import { makeReport, topNames } from './ui/report.js';
 import { asrRemote, inspireRemote, parseRemote, warmUp } from './net.js';
@@ -554,6 +556,24 @@ export function start(root, opts = {}) {
     best = cur;
     try { localStorage.setItem(BEST_KEY, JSON.stringify(cur)); } catch { /* 存不进去就只记在这次打开里 */ }
     return had;
+  }
+
+  /** 咒语图鉴：和本机最佳一样存在浏览器里（rules/book.js）；演示和试验场放的不算 */
+  const BOOK_KEY = 'yc-book';
+  let book = (() => { try { return readBook(localStorage.getItem(BOOK_KEY)); } catch { return readBook(null); } })();
+  const bookPanel = new BookPanel(hud.root);
+  hud.onBook = () => bookPanel.open(book);
+  hud.setBookCount(Object.keys(book).length, BOOK_TOTAL);
+  /** 点亮几格，新亮的飘一句 @param {string[]} keys @param {string} [text] 这回念的话（默认这局最近一句） */
+  let saying = '';   // 最近一句亲口念的；按钮放的没有原话。物件和反应要打到了才亮，记的也是这一句
+  function lightBook(keys) {
+    if (play.on || lab.on) return;
+    const r = lightCells(book, keys, saying);
+    if (!r.fresh.length) return;
+    book = r.book;
+    try { localStorage.setItem(BOOK_KEY, JSON.stringify(book)); } catch { /* 存不进去就只记在这次打开里 */ }
+    hud.setBookCount(Object.keys(book).length, BOOK_TOTAL);
+    floatAt(new THREE.Vector3(CASTER_POS.x, 3, CASTER_POS.z), `新咒语发现！${r.fresh.join(' ')}`, '#ffd76a');
   }
 
   /** 首页：活的封面（hud.showCover；背后的画面见主循环前的 coverLife）；点了模式再选天赋、开始。试炼主推，排前面 */
@@ -1306,6 +1326,8 @@ export function start(root, opts = {}) {
     if (intent.summon) dragon.preload(intent.summon);
     S.lastCombo = plan.lastCombo;
     S.seen.push(...plan.newlySeen);
+    saying = c.button ? '' : text;
+    lightBook(plan.newlySeen);
     if (plan.saidKey) S.said.add(plan.saidKey);
     S.last = { text, source, ms, raw, plan };
     // 融合了、而名字只是按步骤自动拼的（模型没起名），就用融合的名字（"火卷风"而不是"风弹·火弹"）
@@ -1971,17 +1993,19 @@ export function start(root, opts = {}) {
     step.pillars = step.tips = []; step.cut = step.freeze = false;
     const src = { el: 'earth', tally: tallyOf.get(step) }, flame = { el: 'fire', tally: src.tally }, st = stepStats.get(step);
     if (st) { stepStats.set(src, st); stepStats.set(flame, st); }
-    for (const i of pillars) if (huabiao.topple(i, () => pillarDown(i, src))) sound.play('crack');
-    for (const i of pots) if (censers.topple(i, () => spill(i, flame))) sound.play('clang');
+    for (const i of pillars) if (huabiao.topple(i, () => pillarDown(i, src))) { sound.play('crack'); lightBook(['物件:pillar']); }
+    for (const i of pots) if (censers.topple(i, () => spill(i, flame))) { sound.play('clang'); lightBook(['物件:censer']); }
     if (cut && zhenshan.cut(() => stoneDown(src))) {
       const { x, y, z } = zhenshan.ring;
       fx.burst(new THREE.Vector3(x, y, z), step.el, 1.6, 0.6);
       sound.play('clang');
+      lightBook(['物件:rope']);
     }
     if (freeze) {
       bridgeIce = BRIDGE_ICE.sec;
       layout.frostBridge(true);
       sound.play('boom', { el: 'ice', scale: 1.4 });
+      lightBook(['物件:bridge']);
     }
   }
 
@@ -2158,6 +2182,7 @@ export function start(root, opts = {}) {
     if (step.el === 'thunder' && !dir.chain) chain(e, at, wasFrozen, step, dmg);
     const st = stepStats.get(step);   // 天赋按键放的：记命中与反应，按打法加气势
     if (st) { st.hits.add(e.id); if (r.reaction) st.combo = true; awardButton(st); }
+    if (r.reaction) lightBook([`反应:${r.reaction}`]);
     if (r.aoeBonus) {
       // 蒸汽爆：冻住的目标被火打中，炸开一圈额外伤害
       fx.burst(at.clone().setY(at.y + 0.6), 'fire', 2.5, 0.7);
@@ -2697,6 +2722,8 @@ export function start(root, opts = {}) {
     whirl: (x = 0, z = -4, r = 3) => fusions.whirl(new THREE.Vector3(x, 0, z), r),
     huabiao: () => huabiao.list.map((p) => ({ t: +p.t.toFixed(2), down: p.down, gone: p.gone })),
     zhenshan: () => ({ t: +zhenshan.t.toFixed(2), down: zhenshan.down }),
+    book: () => ({ ...book }),
+    openBook: () => bookPanel.open(book),
     censers: () => censers.list.map((p) => ({ t: +p.t.toFixed(2), down: p.down })),
     bridgeIce: () => +bridgeIce.toFixed(2),
     flying: () => walls.flying().map((w) => ({ pts: w.pts.map((p) => [+p.x.toFixed(1), +p.z.toFixed(1)]), left: w.blown?.left.map((d) => +d.toFixed(1)), hit: w.blown?.hit.size })),

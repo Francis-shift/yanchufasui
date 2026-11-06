@@ -204,7 +204,8 @@ const CSS = FONT_CSS + `
 .yc-btns .yc-btn { margin-top: 0; }
 .yc-btns [hidden] { display: none; }
 .yc-overlay .yc-ink { align-items: center; min-width: 140px; padding: 8px 26px 10px; }
-.yc-overlay .yc-btns::after { content: ""; order: 0; flex-basis: 100%; height: 0; }   /* 主按钮独占一行，三个次按钮排在下面一行 */
+.yc-overlay .yc-btns { column-gap: 14px; }
+.yc-overlay .yc-btns::after { content: ""; order: 0; flex-basis: 100%; height: 0; }   /* 主按钮独占一行，次按钮（最多四个）排在下面一行 */
 .yc-overlay .yc-ink:not(.yc-sub)::before { right: -16px; }
 .yc-overlay .yc-ink b { font-size: 26px; letter-spacing: 0.1em; }
 /* 次一等的按钮：墨字，底下只剩一道细笔画 */
@@ -456,8 +457,9 @@ const CSS = FONT_CSS + `
 .yc-cover-step .yc-ink::before { right: -14px; }   /* 后面紧跟着"返回"，飞白别伸过去 */
 .yc-cback { font: inherit; font-size: 14px; color: #5a4d3e; background: none; border: 0; cursor: pointer; padding: 6px 8px;
   text-decoration: underline; text-underline-offset: 4px; }
-.yc-cover [data-auto] { pointer-events: auto; color: #26313d; padding: 6px 2px; text-shadow: 0 0 8px rgba(250,246,236,0.95), 0 0 3px rgba(250,246,236,0.9); }
-.yc-cover.step2 [data-auto] { display: none; }
+.yc-cover .yc-cover-links button { pointer-events: auto; color: #26313d; padding: 6px 2px; text-shadow: 0 0 8px rgba(250,246,236,0.95), 0 0 3px rgba(250,246,236,0.9); }
+.yc-cover.step2 .yc-cover-links { display: none; }
+.yc-cover-links { display: flex; gap: 22px; }
 /* 演示模式的字幕（setAutoplay）：要在展台几步外读得清，所以字大；不挡点击，碰到哪里都算退出 */
 .yc-auto { position: absolute; left: 50%; bottom: 25%; transform: translateX(-50%); width: max-content; max-width: min(86%, 900px); pointer-events: none;
   padding: 8px 26px 9px; text-align: center; background: var(--grain), var(--panel); border: 1px solid rgba(52,40,28,0.5); border-radius: 2px; font-family: ${KAI}; }
@@ -611,7 +613,8 @@ export class Hud {
         <p data-lead></p><div class="yc-stats" hidden></div><p data-tip hidden></p><div class="yc-best" hidden></div></div>
       <div class="yc-res-r"><div class="yc-picker"><div class="yc-picker-title">选天赋（最多 3 个）</div><div class="yc-talents"></div><div class="yc-syn"></div></div>
         <div class="yc-btns"><button class="yc-ink" data-trial><b>开始试炼</b></button><button class="yc-ink yc-sub" data-start><b>守关模式</b></button>
-          <button class="yc-ink yc-sub" data-report style="order:2" hidden><b>看战报</b></button><button class="yc-ink yc-sub" data-home style="order:3"><b>回首页</b></button></div>
+          <button class="yc-ink yc-sub" data-report style="order:2" hidden><b>看战报</b></button><button class="yc-ink yc-sub" data-book style="order:3"><b>图鉴</b></button>
+          <button class="yc-ink yc-sub" data-home style="order:4"><b>回首页</b></button></div>
         <p class="yc-note" data-note hidden></p></div></div></div>`);
     // 首页封面（showCover）：第二步选天赋用的就是上面结算页那块（picker 在两处之间挪）
     this.cover = el(`<div class="yc-cover" hidden><div class="yc-cover-main">
@@ -619,7 +622,7 @@ export class Hud {
         <p class="yc-cover-tag">打一句中文，法术就是什么<br>说得越有画面感，气势越足</p></div>
       <div class="yc-cover-best" hidden></div>
       <div class="yc-cover-modes"><button class="yc-ink" data-mode="trial"></button><button class="yc-ink" data-mode="defense"></button></div>
-      <button class="yc-cback" data-auto>看演示</button></div>
+      <div class="yc-cover-links"><button class="yc-cback" data-auto>看演示</button><button class="yc-cback" data-book>咒语图鉴</button></div></div>
       <div class="yc-cover-step yc-paper" hidden><h2></h2><p></p>
         <div class="yc-btns"><button class="yc-ink" data-cgo><b>开始</b></button><button class="yc-cback" data-back>返回</button></div></div></div>`);
     this.picker = /** @type {HTMLElement} */ (this.overlay.querySelector('.yc-picker'));
@@ -638,6 +641,10 @@ export class Hud {
     /** @type {(() => void) | null} */
     this.onAutoplay = null;
     /** @type {HTMLElement} */ (this.cover.querySelector('[data-auto]')).addEventListener('click', () => this.onAutoplay?.());
+    // 咒语图鉴：封面和结算页上的入口（面板在 ui/book.js）
+    /** @type {(() => void) | null} */
+    this.onBook = null;
+    for (const b of [this.cover, this.overlay]) /** @type {HTMLElement} */ (b.querySelector('[data-book]')).addEventListener('click', () => this.onBook?.());
     this.autoBar = el(`<div class="yc-auto" hidden><b></b><span>演示中 · 不联网、不调模型 · 按任意键或点屏幕退出</span></div>`);
     this.write = el(`<div class="yc-write" hidden><div class="yc-box">
       <div class="yc-write-title"></div>
@@ -1196,6 +1203,10 @@ export class Hud {
   setAutoplay(text) {
     this.autoBar.hidden = text === null;
     /** @type {HTMLElement} */ (this.autoBar.firstElementChild).textContent = text ?? '';
+  }
+  /** 封面上图鉴那个入口写亮了几格 @param {number} lit @param {number} total */
+  setBookCount(lit, total) {
+    /** @type {HTMLElement} */ (this.cover.querySelector('[data-book]')).textContent = lit ? `咒语图鉴 ${lit}/${total}` : '咒语图鉴';
   }
   /** 封面开着没有 */
   get onCover() { return !this.cover.hidden; }
