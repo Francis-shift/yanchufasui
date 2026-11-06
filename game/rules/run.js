@@ -69,7 +69,7 @@ export const CARDS = [
   { id: 'slot', kind: 'insight', name: '双诀', text: '每句咒多认一个字诀', max: 1, ready: true },
   { id: 'button', kind: 'insight', name: '一心二用', text: '多一个按钮，同一个元素能装两种招', max: 1, ready: false },
   { id: 'twin', kind: 'insight', name: '双龙', text: '一次召两条龙，各打满额，分扑两群（只有一群就前后砸两下）', max: 1, ready: true },
-  { id: 'guard', kind: 'insight', name: '护身', text: `龙不扑出去，绕着自己转 ${RUN.dragon.guard.sec} 秒，打碎碰到的冰锥，撞到的敌人吃它的元素`, max: 1, ready: true },
+  { id: 'guard', kind: 'insight', name: '护身', text: `龙不扑出去，绕着自己转 ${RUN.dragon.guard.sec} 秒：这几秒什么都打不动你，碰到的冰锥全碎，撞到的敌人吃它的元素；和「双龙」同在时，挡下一击反震一圈`, max: 1, ready: true },
   { id: 'domain', kind: 'insight', name: '法域', text: `气势满了可以不召龙：全场定住，最多 ${RUN.domain.sec} 秒里念 ${RUN.domain.lines} 句咒，收束时一起落下，不耗法力，威力 ×${RUN.domain.mult}`, max: 1, ready: true },
 ];
 

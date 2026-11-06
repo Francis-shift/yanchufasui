@@ -374,6 +374,7 @@ export const RECIPES = {
   drums: (k, t) => Math.max(...[0, 0.32, 0.56, 0.72, 0.88].map((d, i) => k.drum(t + d, 0.35 + i * 0.08)), k.gong(t + 1.04, 82, 2.8, 0.3)),
   frameS: (k, t) => Math.max(k.drum(t, 0.7), k.drum(t + 0.09, 0.4)),   // 全屏画框：小的一声鼓，大的鼓接磬压住全场（ui/frame.js）
   frameL: (k, t) => Math.max(...[0, 0.14, 0.26].map((d, i) => k.drum(t + d, 0.5 + i * 0.15)), k.gong(t + 0.3, 110, 3.6, 0.32, k.out, [1, 2.4, 3.9, 5.3]), k.gong(t + 0.3, 660, 2.4, 0.08, k.out, [1, 2.76, 5.4])),
+  block: (k, t) => Math.max(k.gong(t, 523, 0.7, 0.16, k.out, [1, 2.4, 3.9]), k.drum(t, 0.3)),   // 护身挡下一击：龙鳞上敲一下
   slash: (k, t) => Math.max(k.hiss(t, { f: 1800, to: 6000, q: 0.8, dur: 0.14, peak: 0.6, a: 0.02 }), k.gong(t + 0.1, 196, 1.6, 0.3, k.out, [1, 2.4, 3.9]), k.tone(t + 0.1, { f: 90, to: 36, dur: 0.5, peak: 0.6 })),
   clear: (k, t) => Math.max(...[5, 7, 9, 10, 12].map((d, i) => k.pluck(t + i * 0.09, pentaHz(d), 0.14, 1.2)), k.bell(t + 0.5, pentaHz(15), 1.4, 0.12)),
   win: (k, t) => Math.max(...[0, 2, 4, 5, 7, 9, 10].map((d, i) => k.pluck(t + i * 0.11, pentaHz(d + 5), 0.15, 1.4)),

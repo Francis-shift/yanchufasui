@@ -17,6 +17,7 @@ import {
   pyreSpots, recoverSec, regenStamina, ringReach, rockSpots, slamCount, spawnSpot, spikeDirs, spikeReach, spiralAngles, teleSec, waveReach,
 } from '../rules/trial.js';
 import { waveHalfW } from '../rules/fusion.js';
+import { GUARD_OFF, blockHit, guardGlow, guardOn, openGuard, tickGuard } from '../rules/guard.js';
 import { CASTER_POS, OBSTACLES, PLAZA_R } from '../world/layout.js';
 import { rand } from '../fx/common.js';
 import { distToSegment } from '../fx/walls.js';
@@ -24,6 +25,7 @@ import { BOSS_CLIPS, bossPose } from '../actors/bossanim.js';
 import { FLAME_SHELL_K } from '../actors/enemies.js';
 
 /** 走位按哪个方向算"往前"（取它的朝向，高低不管） @typedef {{ getWorldDirection(v: THREE.Vector3): THREE.Vector3 }} Steer */
+/** 护身挡下一击（at 是人头顶） @typedef {(at: THREE.Vector3, r: { shock: boolean, show: boolean }) => void} Blocked */
 
 /** 守关时施法者站的地方（开局就记下，试炼结束放回这里） */
 const HOME = CASTER_POS.clone();
@@ -120,6 +122,8 @@ export class Trial {
     /** @type {{ id: number, x: number, y: number, t: number, moved: boolean } | null} */
     this.ptr = null;
     this.dashT = 0; this.dashDir = new THREE.Vector3(); this.hurtT = 0; this.flash = 0;
+    /** 护身无敌（rules/guard.js）；挡下一击时报给谁；身上亮什么颜色 */
+    this.ward = GUARD_OFF; /** @type {Blocked | null} */ this.warded = null; this.wardTint = new THREE.Color();
     // 精力：还剩几格（攒到一半也算数）、离上次按闪避过了几秒；shownSta 是闪避按钮上画成什么样（变了才重画）
     // dashLock：字诀「重」放完这几秒不能闪避；slowTele：字诀「凝」冻住了 boss，下一招预警变慢
     this.stamina = TRIAL.stamina.max; this.sinceDash = Infinity; this.shownSta = ''; this.dashLock = 0; this.slowTele = false;
@@ -629,6 +633,7 @@ export class Trial {
     this.dashAt = -Infinity; this.perfectUsed = true; this.glow = 0; this.lastMove = '';
     this.keys.clear(); this.ptr = null; this.stick.x = this.stick.y = 0;
     this.dashT = 0; this.hurtT = 0; this.flash = 0;
+    this.ward = GUARD_OFF; this.warded = null;
     this.stamina = TRIAL.stamina.max; this.sinceDash = Infinity; this.shownSta = ''; this.dashLock = 0; this.slowTele = false;
     this.pending.length = 0;
     for (const e of this.d.enemies.list) if (e.strip) this.dropStrip(e);
@@ -765,7 +770,8 @@ export class Trial {
     this.d.caster.visible = this.hurtT <= 0 || Math.floor(this.hurtT * 16) % 2 === 0;
     this.flash = Math.max(0, this.flash - dt * 3);
     this.glow = Math.max(0, this.glow - dt * 1.5);   // 完美闪避：袍子亮白一下
-    this.robe.emissive.setRGB(0.9 * this.flash + 0.8 * this.glow, 0.08 * this.flash + 0.8 * this.glow, 0.04 * this.flash + 0.9 * this.glow);
+    const w = guardGlow(this.ward) * 0.7, c = this.wardTint;   // 护身：袍子亮这条龙的颜色
+    this.robe.emissive.setRGB(0.9 * this.flash + 0.8 * this.glow + c.r * w, 0.08 * this.flash + 0.8 * this.glow + c.g * w, 0.04 * this.flash + 0.9 * this.glow + c.b * w);
   }
 
   /** 闪避按钮上的精力格（攒到几成画几成；变化不到 2% 不重画）；字诀「重」锁住闪避时按钮变淡 */
@@ -798,11 +804,25 @@ export class Trial {
     this.d.fx.groundSigil.position.set(this.p.x, 0.03, this.p.z);
   }
 
-  /** 玩家挨一下（冲刺中闪掉） @param {number} dmg @returns {boolean} 打中了没有 */
+  /**
+   * 领悟「护身」：龙转着的这几秒什么都打不动（rules/guard.js）
+   * @param {boolean} twin 两条龙：挡下一击再反震 @param {string} color 身上亮的颜色 @param {Blocked} blocked 挡下一击时叫它
+   */
+  shield(twin, color, blocked) {
+    this.ward = openGuard(twin); this.wardTint.set(color); this.warded = blocked;
+  }
+
+  /** 玩家挨一下（冲刺中闪掉、护身挡掉） @param {number} dmg @returns {boolean} 打中了没有 */
   hurt(dmg) {
     if (!this.fighting || this.hp <= 0) return false;
     const at = new THREE.Vector3(this.p.x, 2.2, this.p.z);
     if (this.dashT > 0) { this.perfect(); return false; }   // 冲刺中硬吃过去：也是完美闪避
+    if (guardOn(this.ward)) {
+      const r = blockHit(this.ward);
+      this.ward = r.g;
+      this.warded?.(at, r);
+      return false;
+    }
     if (this.hurtT > 0 || this.auto) return false;
     this.hp = Math.max(0, this.hp - dmg);
     this.hurtT = TRIAL.hurtGrace; this.flash = 1;
@@ -1467,6 +1487,7 @@ export class Trial {
   update(dt, camera, pdt = dt) {
     if (!this.on) return;
     this.clock += dt;
+    this.ward = tickGuard(this.ward, dt);   // 跟着世界的钟走：龙转多久就挡多久，全场慢下来时一起慢
     if (this.hp > 0) this.movePlayer(pdt, camera);
     if (this.ghostT > 0) {   // 残影慢慢淡掉
       this.ghostT -= dt;

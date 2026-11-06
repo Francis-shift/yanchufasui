@@ -1761,11 +1761,13 @@ export function start(root, opts = {}) {
   /**
    * 领悟「护身」：龙绕着人转（fx/dragon.js guardPlan），人走圈跟着走。转的时候每帧看龙身中线上贴地的那几段（离地 2.6 米以内）：
    * 两侧 block 米内的冰锥打碎（trial.shatter）；碰到的敌人（reach 米加身宽）挨这条龙伤害的 touch 倍、吃它的元素效果，
-   * 同一只每 every 秒最多挨一下（两条护身共用这份计时）。转完算龙落地（余威）。
+   * 同一只每 every 秒最多挨一下（两条护身共用这份计时）。转完算龙落地（余威）。转着的时候人无敌，挡下一击见 guardBlock。
    * @param {import('./rules/arbiter.js').SummonPlan} sm @param {keyof typeof SUMMONS} el @param {boolean} twin 两条：外圈那条反着转
    */
   function guardDragons(sm, el, twin) {
     const G = RUN.dragon.guard, tally = tallyOf.get(sm);
+    const arm = () => trial.shield(twin, FRAME_GLOW[el], (at, r) => guardBlock(sm, el, tally, at, r));
+    arm();
     const me = () => atGround(trial.p.x, trial.p.z);
     /** @type {Map<string, number>} 敌人 → 到几秒（clock）才能再挨 */
     const next = new Map();
@@ -1774,7 +1776,10 @@ export function start(root, opts = {}) {
     if (twin) rings.push({ r: G.r + G.outer.dr, h: G.h + G.outer.dh, dir: -1 });
     rings.forEach((g, ri) => {
       const tick = (/** @type {THREE.Vector3[]} */ spine, /** @type {number} */ dt) => {
-        if (ri === 0) clock += dt;   // 只让第一条走钟，两条一起走就快了一倍
+        if (ri === 0) {   // 只让第一条走钟，两条一起走就快了一倍
+          if (!clock) arm();   // 龙这才破土（前面要蓄一下，模型没下载完还要等）：从这一刻重新算，转完正好结束
+          clock += dt;
+        }
         if (S.phase !== 'playing') return;
         const y0 = me().y;
         for (let i = 0; i + 1 < spine.length; i++) {
@@ -1790,6 +1795,34 @@ export function start(root, opts = {}) {
       };
       dragon.summon(me(), el, { impact: dragonLanded, tick }, me, { ...g, speed: G.speed, sec: G.sec });
     });
+  }
+
+  /**
+   * 护身挡下一击：飘个「挡」，人身上溅一下这条龙的元素，好让人看见是龙替自己挨的。
+   * 双龙护身再反震（设计文档第 4 节）：周身 shock.r 米的敌人挨这条龙伤害的 shock.k 倍、吃它的元素，小怪往外掀，冰锥全碎。
+   * @param {import('./rules/arbiter.js').SummonPlan} sm @param {keyof typeof SUMMONS} el @param {Tally | undefined} tally
+   * @param {THREE.Vector3} at 人头顶 @param {{ shock: boolean, show: boolean }} r
+   */
+  function guardBlock(sm, el, tally, at, r) {
+    if (S.phase !== 'playing') return;
+    const p = atGround(at.x, at.z);
+    if (r.show) {
+      floatAt(at, '挡', FRAME_GLOW[el]);
+      sound.play('block');
+      fx.hitStop = Math.max(fx.hitStop, 0.05);
+      fx.shock.hit(p, 2, 0.5);
+    }
+    if (!r.shock) return;
+    const { k, r: reach, fling } = RUN.dragon.guard.shock;
+    floatAt(at.clone().setY(3.1), '反震', '#ffd76a');
+    fx.burst(p, el, reach, 0.55);   // 炸在人身上，又隔零点几秒一下：1 的话整屏发白，红圈都看不见（实测）
+    trial.shatter(p, p, reach);
+    for (const e of [...enemies.list]) {
+      const dx = e.pos.x - p.x, dz = e.pos.z - p.z, d = Math.hypot(dx, dz) || 1;
+      if (d > reach + trial.bodyR(e)) continue;
+      hitEnemy(e, { el, tally }, sm.dmg * k, p, {});
+      enemies.fling(e, (dx / d) * fling, 5, (dz / d) * fling);
+    }
   }
 
   /**
@@ -2850,6 +2883,7 @@ export function start(root, opts = {}) {
     /** 法域：domain() 按一下按钮（开或提前收束）；domainState 看走到哪、念了几句 */
     domain: pressDomain,
     domainState: () => ({ phase: S.domain.phase, t: S.domain.t, lines: S.domain.lines.length, pending: chantPending, held: trial.held, ink: { ...inkWash } }),
+    ward: () => ({ ...trial.ward }),
     /** 天赋按键：按一个，或在 0.6 秒内按两个（press('wind','fire') 出火卷风）；summonBtn 是金色召唤按钮 */
     press: (...els) => els.forEach((el) => pressTalent(el)),
     summonBtn: () => pressSummon(),

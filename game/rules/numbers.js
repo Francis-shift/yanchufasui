@@ -226,6 +226,8 @@ export const TRIAL = { hp: 100, speed: 4.2, dash: { dist: 3.6, sec: 0.18, gap: 0
  *   护身——龙不扑出去，从脚下钻出来绕着人转 guard.sec 秒（半径 r、离地 h、每秒 speed 米，人走圈跟着走），再冲上天：
  *   龙身贴地那几段 block 米内的冰锥打碎；碰到龙身（reach 米加敌人身宽）的敌人挨这条龙伤害的 touch 倍、吃它的元素效果，
  *   同一只每 every 秒最多挨一下。两张都拿了：第二条在外圈（半径 + outer.dr、高 + outer.dh）反着转。
+ *   转着的时候人无敌（game/rules/guard.js）：召的时候开，龙破土那一下重新算（lead 秒是龙从破土钻到人身边那一小段），最后 warn 秒身上一闪一闪；飘「挡」至少隔 quiet 秒。
+ *   两张都拿了再加反震 shock：挡下一击，周身 r 米的敌人挨这条龙伤害的 k 倍、吃它的元素，小怪往外掀 fling 米每秒，冰锥全碎，隔 every 秒才能再震。
  */
 export const RUN = {
   wave: { n: [16, 22, 28], first: 1.2, gap: [1.2, 2.8], batch: [2, 3], away: 5, warn: 0.8, alive: 10,
@@ -238,7 +240,8 @@ export const RUN = {
     liao: { sec: 3, r: 1.3, tick: 0.5, k: 0.1, max: 10 }, ning: { freeze: 1.5, tele: 1.5 }, hui: { mult: 0.6, r: 1.1 },
     fan: { speed: 1.3, mult: 2 }, yin: { jumps: 2, r: 0.9 } },
   dragon: { twin: { delay: 1.2, apart: 6 },
-    guard: { sec: 5, r: 3.6, h: 1.2, speed: 13, block: 1.0, reach: 0.9, touch: 0.25, every: 0.8, outer: { dr: 1.6, dh: 0.7 } } },
+    guard: { sec: 5, r: 3.6, h: 1.2, speed: 13, block: 1.0, reach: 0.9, touch: 0.25, every: 0.8, outer: { dr: 1.6, dh: 0.7 },
+      lead: 0.15, warn: 1, quiet: 0.25, shock: { k: 0.4, r: 5, every: 0.6, fling: 9 } } },
   // 法域（game/rules/domain.js）：open 展开几秒、sec 最多念几秒、lines 最多几句（都是真实时间）；mult 念的法术的威力；slash 收束这一笔打全场多少；
   // stun 这一笔定住敌人几秒（等法术落到）；gap 法术一招接一招隔几秒（同时落，只错开一点，冰火还能打出反应）；wait 时间到了最多等解析几秒（比 PARSE_TIMEOUT_MS 长一点）；
   // inkR 水墨铺到多大（半径，屏高 = 1，够盖住最宽的屏幕的四角）；fade 收束后几秒褪掉
