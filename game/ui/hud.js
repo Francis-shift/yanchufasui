@@ -411,6 +411,7 @@ const CSS = FONT_CSS + `
 .yc-pick .yc-key { left: 9px; top: 6px; bottom: auto; transform: none; color: #9a8a76; background: none; padding: 0; }   /* 电脑上按 1～3 拿，标在笺的左上角 */
 .yc-pick.insight { background: linear-gradient(180deg, rgba(214,168,60,0.2), rgba(255,252,244,0.6) 65%); border-color: rgba(160,122,20,0.75); }
 .yc-picks-btns { display: flex; gap: 8px 28px; justify-content: center; flex-wrap: wrap; margin-top: 24px; }
+.yc-picks-btns [hidden] { display: none; }
 .yc-picks-btns .yc-ink b { font-size: 17px; }
 .yc-short .yc-picks-box { padding: 16px 24px 12px; }
 .yc-short .yc-picks-title { font-size: 26px; } .yc-short .yc-picks-sub { margin-bottom: 10px; font-size: 12.5px; }
@@ -879,7 +880,7 @@ export class Hud {
    */
   setDomainChant(on, focus) {
     this.input.hidden = !on;
-    this.input.placeholder = on ? '念一句，写上天……（回车写上去，空着回车收束）' : '说出你的咒语……（回车施法）';
+    this.input.placeholder = on ? '念一句，写上天……（打完回车写上去，空着回车收束）' : '说出你的咒语……（回车施法）';
     this.input.value = '';
     if (on && focus) this.input.focus();
     else if (!on) this.input.blur();

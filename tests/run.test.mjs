@@ -6,7 +6,7 @@ import { planCast, regenMana } from '../game/rules/arbiter.js';
 import { inCharset } from '../game/rules/charset.js';
 import { BUTTON_CHANT_MS, FUSION_OPEN, MANA_MAX, MANA_REGEN, RUN, TRIAL, ULT_GAUGE } from '../game/rules/numbers.js';
 import {
-  BOSS_COUNT, CARDS, RUN_STAGES, applyRunes, artBoost, beats, boostPlan, buttonMove, clock, eligible, limitToLearned, moveName, moveTargets, native, newRun,
+  BOSS_COUNT, CARDS, RUN_STAGES, applyRunes, artBoost, avatarElement, beats, boostPlan, buttonMove, clock, eligible, limitToLearned, moveName, moveTargets, native, newRun,
   offer, previewMove, readRecord, recordText, reroll, runFusions, runMods, runeChantMs, runesOf, skip, stageAt, take, upLabel, weight, writeRune,
 } from '../game/rules/run.js';
 import { combineButtons, defaultIntent } from '../game/rules/talents.js';
@@ -95,6 +95,19 @@ test('出卡：只出效果做好的；某一类抽不出就从别的能出的�
   let full = newRun();
   for (const c of CARDS.filter((x) => x.ready)) for (let i = 0; i < c.max; i++) full = take(full, c);
   assert.deepEqual(offer(full, { els: ELS, insight: true }, rng(3)), []);
+});
+
+test('化身选元素：拿卡时选的记下来，也算押在这个元素上；手上没这个元素、没选过就用手上第一个', () => {
+  const c = byId('avatar');
+  const run = take(newRun(), c, 'wind');
+  assert.equal(run.avatarEl, 'wind');
+  assert.ok(run.invest.includes('wind'));
+  assert.equal(avatarElement(run, ['fire', 'wind']), 'wind');
+  assert.equal(avatarElement(run, ['fire', 'ice']), 'fire');
+  assert.equal(avatarElement(take(newRun(), c), ['ice', 'fire']), 'ice');
+  assert.equal(avatarElement(newRun(), []), 'ice');
+  assert.equal(take(run, byId('jianqie'), 'fire').avatarEl, 'wind', '别的卡不改它');
+  assert.equal(take(newRun(), byId('twin'), 'fire').avatarEl, '');
 });
 
 const BIG = ['twin', 'guard', 'domain', 'avatar'];

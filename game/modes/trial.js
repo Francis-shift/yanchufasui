@@ -130,7 +130,8 @@ export class Trial {
     // 精力：还剩几格（攒到一半也算数）、离上次按闪避过了几秒；shownSta 是闪避按钮上画成什么样（变了才重画）
     // dashLock：字诀「重」放完这几秒不能闪避；slowTele：字诀「凝」冻住了 boss，下一招预警变慢
     this.stamina = TRIAL.stamina.max; this.sinceDash = Infinity; this.shownSta = ''; this.dashLock = 0; this.slowTele = false;
-    this.held = false;   // 法域开着：全场定住，玩家也不能闪（main.js 管开关）
+    this.held = false;   // 化身亮相：世界定住，玩家也不能闪（main.js 管开关）
+    this.domain = false;   // 法域开着：敌人定住，人随便走，走到冰锥、小怪身上也不算挨打（main.js 管开关）
     /** 小怪潮里冒着紫烟、还没出来的小怪：落点、还要几秒、是哪种 @type {{ x: number, z: number, t: number, kind: string }[]} */
     this.pending = [];
     /** 铁头傀儡正亮着的红条（收场时一起收） @type {Set<{ g: THREE.Group, fill: THREE.Mesh }>} */
@@ -820,7 +821,7 @@ export class Trial {
 
   /** 玩家挨一下（冲刺中闪掉、护身挡掉） @param {number} dmg @returns {boolean} 打中了没有 */
   hurt(dmg) {
-    if (!this.fighting || this.hp <= 0) return false;
+    if (!this.fighting || this.hp <= 0 || this.domain) return false;
     const at = new THREE.Vector3(this.p.x, 2.2, this.p.z);
     if (this.dashT > 0) { this.perfect(); return false; }   // 冲刺中硬吃过去：也是完美闪避
     if (guardOn(this.ward)) {

@@ -1,8 +1,9 @@
 // 法域的走段（game/rules/domain.js）：展开、念咒、等解析、收束，念够了、时间到了、提前收束都要走到收束
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-import { DOMAIN_OFF, addLine, canChant, canOpen, domainLeft, domainOn, endChant, inkStep, openDomain, tickDomain } from '../game/rules/domain.js';
+import { DOMAIN_OFF, addLine, canChant, canOpen, domainLeft, domainOn, domainPace, endChant, inkStep, openDomain, tickDomain } from '../game/rules/domain.js';
 import { RUN } from '../game/rules/numbers.js';
 import { CARDS, runMods, newRun } from '../game/rules/run.js';
 
@@ -107,6 +108,29 @@ test('水墨：展开的时间里铺满，不超过上限；关了几成几成�
   assert.ok(Math.abs(h.k - 0.5) < 1e-9);
   assert.equal(h.r, D.inkR, '褪的时候半径不动');
   assert.deepEqual(inkStep(h, false, D.fade), { r: 0, k: 0 });
+});
+
+test('法域里人随便走：挨打不算、用玩家的钟走；念完一句回车不把焦点叫回去；选元素时重抽藏得住', () => {
+  const src = (f) => readFileSync(new URL(`../game/${f}`, import.meta.url), 'utf8');
+  const main = src('main.js'), trial = src('modes/trial.js'), hud = src('ui/hud.js');
+  assert.match(trial, /if \(!this\.fighting \|\| this\.hp <= 0 \|\| this\.domain\) return false;/);
+  assert.match(main, /S\.domain = openDomain\(\);\s+trial\.domain = true;/);
+  assert.match(main, /function domainDone\(\) \{\s+trial\.domain = false;/);
+  assert.match(main, /const walk = domainOn\(S\.domain\) \? cdt : pdt;/);
+  assert.match(main, /trial\.update\(dt, steer, walk\)/);
+  assert.match(main, /if \(e\.target instanceof HTMLInputElement \|\| document\.activeElement instanceof HTMLInputElement\) return;/);
+  assert.match(hud, /\.yc-picks-btns \[hidden\] \{ display: none; \}/);
+});
+
+test('墨是一点点铺满的：不是一下盖住，也别等太久；世界跟着慢下来，铺满时停住', () => {
+  const screen = D.open * Math.hypot(16 / 9 / 2, 0.75) / D.inkR;   // 人在画面中间偏下，铺到 16:9 的远角要多久
+  assert.ok(screen >= 1.2 && screen <= 2.2, `铺满画面要 ${screen.toFixed(2)} 秒`);
+  assert.equal(domainPace(DOMAIN_OFF), 1);
+  const o = openDomain();
+  assert.equal(domainPace(o), 1);
+  const half = domainPace(tickDomain(o, D.open / 2, false).d);
+  assert.ok(half > 0 && half < 0.5, `铺到一半世界走 ${half} 成`);
+  assert.equal(domainPace(chant()), 0);
 });
 
 test('法域的卡：领悟类，能抽到，拿了才有；水墨盖得住 21:9 的宽屏四角', () => {

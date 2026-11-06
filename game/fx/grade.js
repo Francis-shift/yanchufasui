@@ -31,6 +31,8 @@ const GradeShader = {
     varying vec2 vUv;
     float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
     float lum(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+    float wob(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
+      return mix(mix(hash(i), hash(i + vec2(1., 0.)), f.x), mix(hash(i + vec2(0., 1.)), hash(i + 1.), f.x), f.y); }
     void main(){
       vec2 uv = vUv;
       if (uShockAmp > 0.00001) {
@@ -64,9 +66,13 @@ const GradeShader = {
       // 暗部偏青、亮部偏暖（电影里常见的冷暖分离，压得很轻）
       c += vec3(-0.012, 0.004, 0.02) * (1. - l) * (1. - l) + vec3(0.018, 0.008, -0.012) * l * l;
       if (uInk.w > 0.001) {
-        // 水墨：从脚下铺开，亮度换成纸和墨，明暗交界描一道墨线；浓的颜色（法术、红圈）留着。边上按小格子抖一下，铺开的边是毛的
+        // 水墨：从脚下慢慢洇开，亮度换成纸和墨，明暗交界描一道墨线；浓的颜色（法术、红圈）留着。
+        // 边是洇出来的：大起伏加细毛刺，不是一个圆；刚洇到的地方墨最浓，压一道深的
         vec2 id = (vUv - uInk.xy) * vec2(uAspect, 1.);
-        float edge = smoothstep(uInk.z, uInk.z - 0.1, length(id) + (hash(floor(vUv * 160.)) - 0.5) * 0.05);
+        vec2 q = vec2(uAspect, 1.) * vUv;
+        float bleed = wob(q * 2.6) * 0.34 + wob(q * 7.) * 0.13 + wob(q * 24.) * 0.05 + wob(q * 90.) * 0.02 - 0.27;
+        float front = uInk.z - length(id) - bleed * min(1., uInk.z * 3.);
+        float edge = smoothstep(0., 0.09, front);
         float g = lum(c);
         float gx = lum(texture2D(tDiffuse, uv + vec2(uTexel.x, 0.)).rgb) - lum(texture2D(tDiffuse, uv - vec2(uTexel.x, 0.)).rgb);
         float gy = lum(texture2D(tDiffuse, uv + vec2(0., uTexel.y)).rgb) - lum(texture2D(tDiffuse, uv - vec2(0., uTexel.y)).rgb);
@@ -74,6 +80,7 @@ const GradeShader = {
         ink *= 1. - 0.8 * smoothstep(0.04, 0.2, length(vec2(gx, gy)));
         float sat = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
         c = mix(c, mix(ink, c, smoothstep(0.45, 0.8, sat)), edge * uInk.w);
+        c *= 1. - 0.62 * uInk.w * smoothstep(-0.015, 0.03, front) * smoothstep(0.17, 0.03, front);
       }
       // 暗角：按画面比例做成椭圆
       vec2 d = (vUv - 0.5) * vec2(uAspect, 1.);

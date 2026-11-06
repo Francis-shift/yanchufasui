@@ -70,19 +70,23 @@ export const CARDS = [
   { id: 'button', kind: 'insight', name: '一心二用', text: '多一个按钮，同一个元素能装两种招', max: 1, ready: false },
   { id: 'twin', kind: 'insight', name: '双龙', text: '一次召两条龙，各打满额，分扑两群（只有一群就前后砸两下）', max: 1, ready: true, big: true },
   { id: 'guard', kind: 'insight', name: '护身', text: `龙不扑出去，绕着自己转 ${RUN.dragon.guard.sec} 秒：这几秒什么都打不动你，碰到的冰锥全碎，撞到的敌人吃它的元素；和「双龙」同在时，挡下一击反震一圈`, max: 1, ready: true, big: true },
-  { id: 'domain', kind: 'insight', name: '法域', text: `气势满了可以不召龙：全场定住，最多 ${RUN.domain.sec} 秒里念 ${RUN.domain.lines} 句咒，收束时一起落下，不耗法力，威力 ×${RUN.domain.mult}`, max: 1, ready: true, big: true },
+  { id: 'domain', kind: 'insight', name: '法域', text: `气势满了可以不召龙：水墨铺满全场，敌人定住，你随便走，${RUN.domain.sec} 秒里念 ${RUN.domain.lines} 句咒，收束时一起落下，不耗法力，威力 ×${RUN.domain.mult}`, max: 1, ready: true, big: true },
   { id: 'avatar', kind: 'insight', name: '化身', text: `气血归零时不死，回 ${RUN.avatar.heal} 气血，化身 ${RUN.avatar.sec} 秒：法力、闪避都不花，闪避穿过敌人打它一下，结束时一圈爆开。一局一次，气血低于 ${RUN.avatar.low * 100}% 时也能自己开`, max: 1, ready: true, big: true },
 ];
 
 /**
  * 一局的状态：选过几次、还能重抽几次、每张卡拿了几次、押过哪些元素（拿过带元素的卡、把招式字换进了哪个元素的按钮）、不拿过几次；
- * 招式字：每个元素的按钮换过哪几栏（moves，没换过就是本命招）、学会了哪些字（learned）、哪些形态升过级（up，键是「元素:形态」）。
+ * 招式字：每个元素的按钮换过哪几栏（moves，没换过就是本命招）、学会了哪些字（learned）、哪些形态升过级（up，键是「元素:形态」）；
+ * avatarEl：拿化身时选的元素。
  * @typedef {{ form?: string, path?: string, count?: number }} MoveSet
  * @typedef {{ picks: number, rerolls: number, have: Record<string, number>, invest: string[], skips: number,
- *             moves: Record<string, MoveSet>, learned: Record<string, string[]>, up: Record<string, number> }} Run
+ *             moves: Record<string, MoveSet>, learned: Record<string, string[]>, up: Record<string, number>, avatarEl: string }} Run
  * @returns {Run}
  */
-export const newRun = () => ({ picks: 0, rerolls: RUN.rerolls, have: {}, invest: [], skips: 0, moves: {}, learned: {}, up: {} });
+export const newRun = () => ({ picks: 0, rerolls: RUN.rerolls, have: {}, invest: [], skips: 0, moves: {}, learned: {}, up: {}, avatarEl: '' });
+
+/** 化身用哪个元素：选过的；没选过（手上只有一个元素不用选）用手上第一个 @param {Run} run @param {string[]} els */
+export const avatarElement = (run, els) => (els.includes(run.avatarEl) ? run.avatarEl : els[0] ?? 'ice');
 
 /** @param {Run} run @param {string} id */
 export const level = (run, id) => run.have[id] ?? 0;
@@ -305,12 +309,13 @@ export function offer(run, ctx, rnd, avoid = [], pool = CARDS) {
 /**
  * 拿了一张卡：记一级；带元素的卡、换进了某个元素按钮的招式字，押在那个元素上。
  * 招式字换进 el 的按钮：按钮的那一栏换掉；没学过的字记成学会，学过的形态（含本命形态，如风的爆）再换进来就是升级。
- * @param {Run} run @param {Card} c @param {string} [el] 招式字换进了哪个元素的按钮
+ * @param {Run} run @param {Card} c @param {string} [el] 招式字换进了哪个元素的按钮；化身选了哪个元素
  * @returns {Run}
  */
 export function take(run, c, el) {
   const add = /** @type {string[]} */ ([c.el, ...(c.need ?? []), el].filter((e) => typeof e === 'string' && !run.invest.includes(e)));
-  const next = { ...run, picks: run.picks + 1, have: { ...run.have, [c.id]: level(run, c.id) + 1 }, invest: [...run.invest, ...new Set(add)] };
+  const next = { ...run, picks: run.picks + 1, have: { ...run.have, [c.id]: level(run, c.id) + 1 }, invest: [...run.invest, ...new Set(add)],
+    avatarEl: c.id === 'avatar' && el ? el : run.avatarEl };
   const set = MOVE_SET[c.id];
   if (c.kind !== 'move' || !set || !el) return next;
   const known = knows(run, el, c.id);

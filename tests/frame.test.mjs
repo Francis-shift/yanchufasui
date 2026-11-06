@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { GradePass } from '../game/fx/grade.js';
-import { FRAME_CSS, FRAME_GLOW, LEVELS, outranks } from '../game/ui/frame.js';
-import { SUMMONS } from '../game/rules/numbers.js';
+import { FRAME_ART, FRAME_CSS, FRAME_GLOW, FRAME_SETTLE, LEVELS, outranks } from '../game/ui/frame.js';
+import { RUN, SUMMONS } from '../game/rules/numbers.js';
 import * as THREE from 'three';
 
 test('三级：法域最大，化身次之，召龙最小；两个同时来只放强的，一样强的新的换旧的', () => {
@@ -20,6 +20,18 @@ test('化身的呼吸是单独一层：不挡手，封面、结算页上看不�
   assert.match(FRAME_CSS, /\.yc-aura \{[^}]*pointer-events: none/);
   assert.match(FRAME_CSS, /\.yc-on-cover \.yc-aura, \.yc-on-result \.yc-aura/);
   assert.match(FRAME_CSS, /\.yc-aura\.on \{[^}]*animation: yc-fbreath/);
+});
+
+test('素材都在：画框的笔触、立绘、收束那一笔缺一张就退回现画的，所以一张都不能少', async () => {
+  const { existsSync } = await import('node:fs');
+  for (const n of FRAME_ART) assert.ok(existsSync(new URL(`../public/frame/${n}.webp`, import.meta.url)), n);
+});
+
+test('法域的画框：水墨铺开时一笔笔落下，铺满之后人物退场，几笔收到边上让出地方走位', () => {
+  assert.equal(LEVELS.large.hold, 0);
+  assert.ok(FRAME_SETTLE >= RUN.domain.open && FRAME_SETTLE <= RUN.domain.open + 1);
+  assert.match(FRAME_CSS, /\.yc-frame\.large \{ --d: \.5s; --g: \.34s; \}/);
+  assert.match(FRAME_CSS, /\.yc-frame\.settle \.r, \.yc-frame\.settle em \{ opacity: 0;/);
 });
 
 test('中间不放东西：墨带最宽也只占短边一成半，大字贴在左边，天上的字在上半屏', () => {

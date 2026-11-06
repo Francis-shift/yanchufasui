@@ -20,7 +20,7 @@ import { defaultName, sanitizeIntent } from './rules/intent.js';
 import { guessElement, parseKeywords } from './rules/keywords.js';
 import { maskText } from './rules/safety.js';
 import {
-  BOSS_COUNT, CARDS, KIND_NAMES, RUNES, RUN_STAGES, applyRunes, artBoost, beats, boostPlan, buttonMove, clock, level, limitToLearned, moveName,
+  BOSS_COUNT, CARDS, KIND_NAMES, RUNES, RUN_STAGES, applyRunes, artBoost, avatarElement, beats, boostPlan, buttonMove, clock, level, limitToLearned, moveName,
   moveTargets, newRun, offer, previewMove, readRecord, recordText, reroll as rerollCards, runFusions, runMods, runeChantMs, runeSlots, runesOf,
   skip as skipCards, take as takeCard, upLabel, writeRune,
 } from './rules/run.js';
@@ -32,7 +32,7 @@ import {
   BEAM, BRIDGE_ICE, BUTTON_CHANT_MS, CHANT_MIN_MS, CORE_HP, DROP, ELEMENTS, FORMS, INPUT_MAX_CHARS, MANA_MAX, MOMENTUM_FX, MOMENTUM_RANGE, PARSE_TIMEOUT_MS, RAIN,
   REACTIONS, RUN, SLOWMO_MAX_SEC, SLOWMO_SCALE, SPILL, SUMMONS, TALENTS, TOPPLE, TORNADO, TRIAL, WALL,
 } from './rules/numbers.js';
-import { DOMAIN_OFF, addLine, canChant, canOpen, domainLeft, domainOn, endChant, inkStep, openDomain, tickDomain } from './rules/domain.js';
+import { DOMAIN_OFF, addLine, canChant, canOpen, domainLeft, domainOn, domainPace, endChant, inkStep, openDomain, tickDomain } from './rules/domain.js';
 import { AVATAR_OFF, avatarFree, avatarHeal, avatarOn, canAvatar, canSave, openAvatar, tickAvatar } from './rules/avatar.js';
 import { PALETTE, scaleArr } from './fx/common.js';
 import { FRAME_GLOW } from './ui/frame.js';
@@ -679,6 +679,7 @@ export function start(root, opts = {}) {
         if (!c) return;
         sound.play('take');
         if (c.kind === 'move') { chooseButton(c); return; }
+        if (c.id === 'avatar' && S.talents.length > 1) { chooseAvatar(c); return; }
         S.run = takeCard(S.run, c);
         applyMods();
         hud.floatText(hud.root.clientWidth / 2, hud.root.clientHeight * 0.4, `学会「${c.name}」`, '#16202b');
@@ -720,6 +721,24 @@ export function start(root, opts = {}) {
           const l = skillLabel(el);
           hud.setSkillLabel(el, l.label, l.named);
           hud.floatText(hud.root.clientWidth / 2, hud.root.clientHeight * 0.4, `${elName(el)}的按钮学会「${c.name}」`, '#16202b');
+          close();
+        },
+        reroll: () => {},
+        skip: show,
+      });
+    };
+    /** 拿了化身：选化身成哪个元素（亮边、粒子、撞人和爆开都用它）；"返回"回到三张卡 @param {import('./rules/run.js').Card} c */
+    const chooseAvatar = (c) => {
+      const els = S.talents;
+      hud.showPicks(els.map((el) => ({ kind: '化身', name: `化身·${elName(el)}`, el, insight: true,
+        text: `一身墨色描${elName(el)}的亮边，闪避撞人、结束爆开都带${elName(el)}的效果` })), {
+        title: '化身成哪个元素', sub: '这一局就定了', rerolls: null, skipText: '返回',
+        pick: (i) => {
+          const el = els[i];
+          if (!el) return;
+          S.run = takeCard(S.run, c, el);
+          applyMods();
+          hud.floatText(hud.root.clientWidth / 2, hud.root.clientHeight * 0.4, `学会「${c.name}」`, '#16202b');
           close();
         },
         reroll: () => {},
@@ -855,8 +874,10 @@ export function start(root, opts = {}) {
     if (e.key === 'Enter' && !e.isComposing) {
       e.preventDefault();
       const t = input.value;
-      if (!t.trim() && canChant(S.domain)) { pressDomain(); return; }   // 法域里空着回车：念够了，这就收束
+      const chanting = canChant(S.domain);
+      if (!t.trim() && chanting) { pressDomain(); return; }   // 法域里空着回车：念够了，这就收束
       input.value = ''; onInput(); submit(t);
+      if (chanting) input.blur();   // 念完一句，手回到走位上；再念再按回车
     }
     else if (e.key === 'Escape') input.blur();
   };
@@ -974,12 +995,14 @@ export function start(root, opts = {}) {
       if (k >= 0) { e.preventDefault(); hud.pickOn.pick(k); }
       return;
     }
-    if (document.activeElement instanceof HTMLInputElement) return;   // 在打字（主输入框或写咒对话框）
+    // 在打字（主输入框或写咒对话框）；看 target 是因为法域里念完一句输入框已经失焦，这个回车冒泡上来不能又把焦点叫回去
+    if (e.target instanceof HTMLInputElement || document.activeElement instanceof HTMLInputElement) return;
     if (S.mode === 'trial' && S.phase === 'playing' && hud.write.hidden) {
       // 试炼：设置里绑的键（闪避、三招、大招、切视角），WASD / 方向键走位；战前按回车开战。不打字，所以不抢焦点
       const a = e.ctrlKey || e.metaKey || e.altKey ? null : actionOf(keys, e.code);
       if (a) { e.preventDefault(); doAction(a, e.repeat); return; }
       if (trial.key(e.code, true)) { e.preventDefault(); return; }
+      if (e.key === 'Enter' && canChant(S.domain)) { e.preventDefault(); trial.keys.clear(); input.focus(); return; }   // 法域里走位和打字抢一副键盘：回车才开始打字
       if (e.key === 'Enter' && !trial.fighting) { e.preventDefault(); trial.engage(); return; }
     }
     if (hotkey(e)) return;
@@ -1004,9 +1027,9 @@ export function start(root, opts = {}) {
   const AUTO = { wave: 6, floor: 0.15, dragon: 20 };
   /**
    * side、sideT：绕敌人转的方向、还有几秒换向；castT、i：还有几秒放下一招、轮到第几个天赋；pickT：三选一看几秒再点；
-   * dragon：正等着放龙；kept：放之前的镜头设置，放完还回去
+   * dragon：正等着放龙；domain：正等着开法域（手上的招放完才开得了）；kept：放之前的镜头设置，放完还回去
    */
-  const auto = { side: 1, sideT: 0, castT: 0, i: 0, pickT: 0, dragon: false, kept: { view: view.mode, locked: view.locked } };
+  const auto = { side: 1, sideT: 0, castT: 0, i: 0, pickT: 0, dragon: false, domain: false, kept: { view: view.mode, locked: view.locked } };
   /** 试炼：这一段的小怪不冒了，场上的打碎 */
   function clearWave() {
     trial.waveLeft = 0; trial.pending.length = 0;
@@ -1025,16 +1048,24 @@ export function start(root, opts = {}) {
       setGauge(S.mods.ult, 'ice');
       auto.dragon = true;
     },
+    domain: () => {   // 领悟直接给，气势给满
+      const c = CARDS.find((x) => x.id === 'domain');
+      if (c) { S.run = takeCard(S.run, c); applyMods(); }
+      setGauge(S.mods.ult, 'ice');
+      auto.domain = true;
+    },
+    strike: () => { if (canChant(S.domain)) pressDomain(); },
   };
   /** 脚本里 until 等的事 @type {Record<string, () => boolean>} */
   const autoTests = {
     waveDone: () => trial.state !== 'wave',
     bossUp: () => !!trial.boss,
     bossGone: () => !trial.boss,
+    chanting: () => canChant(S.domain),
   };
   const play = new Autoplay({
     say: (t) => hud.setAutoplay(t),
-    go: (m) => { auto.dragon = false; if (m === 'cover') backToTitle(); else startGame(m); },
+    go: (m) => { auto.dragon = auto.domain = false; if (m === 'cover') backToTitle(); else startGame(m); },
     typed: (t) => { if (input.value !== t) { input.value = t; onInput(); } },
     cast: (t) => { input.value = ''; onInput(); submit(t); },
     ready: () => S.phase === 'playing' && !S.busy,
@@ -1086,6 +1117,8 @@ export function start(root, opts = {}) {
       inArena: (q) => Math.hypot(q.x, q.z) < ARENA_R });
     trial.auto = { x: m.x, y: 0, z: m.z };
     if (m.dash) trial.dash();
+    if (auto.domain) { pressDomain(); auto.domain = !domainOn(S.domain); return; }
+    if (domainOn(S.domain)) return;   // 法域里只走位，念咒归脚本
     if (auto.dragon) { if (!dragon.flights.length) pressSummon(); return; }
     if ((auto.castT -= rdt) > 0 || !foe) return;
     auto.castT = 1.1;
@@ -1441,7 +1474,7 @@ export function start(root, opts = {}) {
     S.domainEl = gaugeDragon(S.gaugeCols);
     setGauge(0);
     S.domain = openDomain();
-    trial.held = true;
+    trial.domain = true;
     hud.frame.show('large', { text: '法域', color: FRAME_GLOW[S.domainEl] });
     sound.play('frameL');
     fx.shake = Math.max(fx.shake, 0.5);
@@ -1450,9 +1483,9 @@ export function start(root, opts = {}) {
   /** 展开完了：放出输入框，开始念 */
   function domainChant() {
     domainHint = hud.q('[data-hint]').textContent ?? '';
-    hud.setDomainChant(true, !mobile);
-    hud.setHint(mobile ? '全场定住了：点输入框打字、按麦克风开口，或者按招式按钮；点「收束」提前落下'
-      : '全场定住了：打字、开口，或者按 1 2 3 放招；空着回车提前收束');
+    hud.setDomainChant(true, false);
+    hud.setHint(mobile ? '敌人都定住了，你随便走：点输入框打字、按麦克风开口，或者按招式按钮；点「收束」提前落下'
+      : '敌人都定住了，你随便走：回车开始打字，也能开口、按招式键；打字时空着回车提前收束');
   }
 
   /**
@@ -1469,7 +1502,7 @@ export function start(root, opts = {}) {
 
   /** 把念咒的界面收掉（输入框、麦克风的慢放、提示行） */
   function domainDone() {
-    trial.held = false;
+    trial.domain = false;
     chantPending = 0;
     slowSince = 0; slowSpent = false;
     fx.setListening(false);
@@ -1508,21 +1541,21 @@ export function start(root, opts = {}) {
     hud.frame.clear();
   }
 
-  /** 每帧走一步（真实时间）：返回这一帧世界要不要定住 @param {number} rdt @returns {boolean} */
+  /** 每帧走一步（真实时间）：返回这一帧世界的钟走几成 @param {number} rdt @returns {number} */
   function stepDomain(rdt) {
     hud.setDomainBtn(canChant(S.domain) ? '收束' : domainReady() && !domainOn(S.domain) ? '法域' : '');
-    if (!domainOn(S.domain)) return false;
-    if (S.phase !== 'playing' || !trial.fighting) { closeDomain(); return false; }
+    if (!domainOn(S.domain)) return 1;
+    if (S.phase !== 'playing' || !trial.fighting) { closeDomain(); return 1; }
     const r = tickDomain(S.domain, rdt, chantPending > 0 || !!pend || mic !== 'idle');
     S.domain = r.d;
     hud.frame.progress(domainLeft(S.domain));
     if (r.event === 'chant') domainChant();
-    if (r.event === 'strike') { domainStrike(r.lines); return false; }
-    return true;
+    if (r.event === 'strike') { domainStrike(r.lines); return 1; }
+    return domainPace(S.domain);
   }
 
   // ---------------------------------------------------------------- 化身（设计文档第 4 节"化身"，走段在 rules/avatar.js）
-  /** 这一次化身打出去的（元素是开局选的第一个，战报卡的账记在「化身」上） @type {{ el: string, tally?: Tally }} */
+  /** 这一次化身打出去的（元素是拿卡时选的，战报卡的账记在「化身」上） @type {{ el: string, tally?: Tally }} */
   let avatarSrc = { el: 'ice' };
   /** 这一次闪避已经打过的敌人 @type {Set<string>} */
   const dashed = new Set();
@@ -1531,7 +1564,7 @@ export function start(root, opts = {}) {
 
   /** 时间一停：回血，画框亮相，人变成墨色身躯 */
   function startAvatar() {
-    const el = S.talents[0] ?? 'ice';
+    const el = avatarElement(S.run, S.talents);
     S.avatar = openAvatar();
     avatarSrc = { el, tally: newTally('化身') };
     trial.held = true;
@@ -2773,14 +2806,15 @@ export function start(root, opts = {}) {
     if (mic !== 'idle' && S.phase !== 'playing') { if (mic === 'on' || mic === 'tap') recorder?.stop(); micReset(); }
     hud.setMicShown(micAllowed() || mic !== 'idle');
     const stop = frozen || setUi.paused;   // 写咒对话框、设置面板开着：游戏停住，画面照画
-    // 法域开着、化身亮相：世界的钟停住（法术等收束才放）；法域和亮相自己走真实时间
-    const held = stepDomain(stop ? 0 : realDt) || S.avatar.phase === 'pose';
-    let dt = stop || held ? 0 : realDt * timeScale * lab.speed;   // 试验场可放慢、定格
+    // 法域铺开时世界一点点慢下来，铺满了停住（法术等收束才放）；化身亮相时停住。这两样自己走真实时间
+    const pace = S.avatar.phase === 'pose' ? 0 : stepDomain(stop ? 0 : realDt);
+    let dt = stop ? 0 : realDt * timeScale * lab.speed * pace;   // 试验场可放慢、定格
     // 施法者自己的钟：开口慢放时世界慢、人照常（不然 0.8 秒的咏唱里手还没抬起来）；顿帧照样顿
     let cdt = stop ? 0 : realDt * lab.speed;
     if (fx.hitStop > 0) { fx.hitStop -= realDt; dt *= 0.06; cdt *= 0.06; }
     // 心法刹那：完美闪避后全场慢下来，玩家自己照常快。pdt 是玩家的时间：走位、闪避冷却、回法力、心法窗口都按它走
     const pdt = dt;
+    const walk = domainOn(S.domain) ? cdt : pdt;   // 法域里敌人定住，人照常走（世界的钟还是停的，所以只有走位用这个）
     stepAvatar(stop ? 0 : realDt, pdt);
     if (S.slowT > 0) { S.slowT -= pdt; dt *= RUN.arts.slow.scale; }
     S.counterT = Math.max(0, S.counterT - pdt); S.afterT = Math.max(0, S.afterT - pdt);
@@ -2791,7 +2825,7 @@ export function start(root, opts = {}) {
     if (S.phase === 'playing' || S.phase === 'rest') {
       S.mana = regenMana(S.mana, pdt, S.mods.manaRegen);
       if (S.mode === 'trial') {   // 试炼：走位、小怪潮与 boss 轮换（三选一时停住）
-        trial.update(dt, steer, pdt);
+        trial.update(dt, steer, walk);
         if (view.mode === 'first' && trial.on) firstHand();
       }
       else updateWave(dt);
@@ -2985,7 +3019,7 @@ export function start(root, opts = {}) {
     gaugeCols: () => [...S.gaugeCols],
     /** 法域：domain() 按一下按钮（开或提前收束）；domainState 看走到哪、念了几句 */
     domain: pressDomain,
-    domainState: () => ({ phase: S.domain.phase, t: S.domain.t, lines: S.domain.lines.length, pending: chantPending, held: trial.held, ink: { ...inkWash } }),
+    domainState: () => ({ phase: S.domain.phase, t: S.domain.t, lines: S.domain.lines.length, pending: chantPending, ink: { ...inkWash } }),
     ward: () => ({ ...trial.ward }),
     avatar: () => pressAvatar(),
     avatarState: () => ({ ...S.avatar, free: trial.free, held: trial.held }),

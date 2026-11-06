@@ -5,7 +5,7 @@ import { AUTOPLAY, Autoplay, TYPE, autoMove } from '../game/modes/autoplay.js';
 import { parseKeywords } from '../game/rules/keywords.js';
 import { sanitizeIntent } from '../game/rules/intent.js';
 import { planCast } from '../game/rules/arbiter.js';
-import { MOMENTUM_MAX } from '../game/rules/numbers.js';
+import { MOMENTUM_MAX, RUN } from '../game/rules/numbers.js';
 import { inCircle } from '../game/rules/trial.js';
 
 const typedSteps = AUTOPLAY.filter((s) => s.type);
@@ -32,6 +32,18 @@ test('字幕说什么，放出来就是什么：分两步、融合、气势、�
   assert.ok(planOf(find('反噬')).plan.backlash);
   assert.equal(planOf(find('召龙')).plan.summon?.el, 'ice');
   assert.equal(typedSteps.filter((_, i) => planOf(i).plan.backlash).length, 1, '只有一句越权');
+});
+
+test('法域这一段：等展开完才念，两句打完赶得上时限，念完再收束，接着放龙', () => {
+  const at = AUTOPLAY.findIndex((s) => s.call === 'domain');
+  assert.equal(AUTOPLAY[at].until, 'chanting');
+  const lines = AUTOPLAY.slice(at + 1, at + 3);
+  assert.ok(lines.every((s) => s.type));
+  assert.equal(AUTOPLAY[at + 3].call, 'strike');
+  assert.equal(AUTOPLAY[at + 4].call, 'dragon');
+  assert.ok(lines.length <= RUN.domain.lines);
+  const sec = lines.reduce((a, s) => a + [...s.type].length * TYPE.char + TYPE.hold + (s.sec ?? 0), 0);
+  assert.ok(sec < RUN.domain.sec, `念两句要 ${sec.toFixed(1)} 秒`);
 });
 
 test('整段不超过 3 分钟（打字、等待都按最长算）', () => {

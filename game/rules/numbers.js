@@ -245,7 +245,7 @@ export const RUN = {
   // 法域（game/rules/domain.js）：open 展开几秒、sec 最多念几秒、lines 最多几句（都是真实时间）；mult 念的法术的威力；slash 收束这一笔打全场多少；
   // stun 这一笔定住敌人几秒（等法术落到）；gap 法术一招接一招隔几秒（同时落，只错开一点，冰火还能打出反应）；wait 时间到了最多等解析几秒（比 PARSE_TIMEOUT_MS 长一点）；
   // inkR 水墨铺到多大（半径，屏高 = 1，够盖住最宽的屏幕的四角）；fade 收束后几秒褪掉
-  domain: { open: 1, sec: 8, lines: 3, mult: 1.5, slash: 60, stun: 1.5, gap: 0.08, wait: 5, inkR: 2, fade: 0.45 },
+  domain: { open: 2.4, sec: 8, lines: 3, mult: 1.5, slash: 60, stun: 1.5, gap: 0.08, wait: 5, inkR: 1.9, fade: 0.45 },
   // 化身（game/rules/avatar.js）：pose 亮相时世界定住几秒；heal 回多少气血；sec 变身多久；low 气血低于几成能自己开；scale 人大几倍；
   // dash 闪避穿过敌人：reach 米加身宽之内的都挨 dmg，一次闪避同一只只挨一下；burst 结束时周身 r 米挨 dmg，小怪往外掀 fling 米每秒
   avatar: { pose: 0.9, heal: 50, sec: 12, low: 0.3, scale: 1.25, dash: { dmg: 40, reach: 1 }, burst: { dmg: 80, r: 5, fling: 11 } },

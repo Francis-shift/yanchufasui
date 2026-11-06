@@ -1,7 +1,7 @@
 // @ts-check
 /**
- * 法域（设计文档第 4 节"法域"）：气势满了开，全场定住，念最多三句，收束时一起落下。
- * 这里只管走到哪一段、念的话收到哪；定格、画框、放法术都在 main.js。全场定住时世界的钟是停的，所以这里的秒都是真实时间。
+ * 法域（设计文档第 4 节"法域"）：气势满了开，水墨从脚下一点点铺满全场，敌人跟着慢下来直到定住，人随便走；念最多三句，收束时一起落下。
+ * 这里只管走到哪一段、念的话收到哪；定格、画框、放法术都在 main.js。定住时世界的钟是停的，所以这里的秒都是真实时间。
  */
 import { RUN } from './numbers.js';
 
@@ -15,6 +15,12 @@ export const DOMAIN_OFF = { phase: 'off', t: 0, lines: [] };
 
 /** @param {Domain} d */
 export const domainOn = (d) => d.phase !== 'off';
+
+/** 世界的钟走几成：墨铺开的时候一点点慢下来，铺满了全停；人不受这个管 @param {Domain} d */
+export function domainPace(d) {
+  if (d.phase === 'off') return 1;
+  return d.phase === 'open' ? (d.t / RUN.domain.open) ** 2 : 0;
+}
 
 /** 现在还能不能再念一句 @param {Domain} d */
 export const canChant = (d) => d.phase === 'chant' && d.lines.length < RUN.domain.lines;

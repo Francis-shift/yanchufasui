@@ -82,10 +82,12 @@ STUBS = {
 }
 # 游戏页不带模型（全是方块占位），摆模型的、读模型格式的换成空壳，又省约 8 KB（--dragon 要真读龙，不换）。11-06 加法域时超了 512 KB
 # 战报卡的二维码编码器也换掉（卡上那一格是空的，预览不验它）：11-06 加化身时只剩不到 200 字节
+# 战报卡本身也换掉（--dragon 不换，要验战报卡走那条）：11-06 把法域改成能走、加水墨画框时超了 600 字节
 MODEL_STUBS = {
     "game/world/props.js": "export const loadProps = () => {};",
     "game/world/drg2.js": "const no = async () => { throw new Error('预览页没有模型'); }; export { no as decodeDRG2, no as fetchBytes };",
     "game/ui/qr.js": "export const qrMatrix = () => [[true]];",
+    "game/ui/report.js": "export const makeReport = () => document.createElement('canvas'); export const topNames = () => [];",
 }
 
 
@@ -203,6 +205,12 @@ TARGETS = {
                 " assets[s.dataset.asset] = URL.createObjectURL(new Blob([Uint8Array.from(atob(s.textContent.trim()), (c) => c.charCodeAt(0))]));"
                 " startCasterCheck(document.getElementById('app'), assets);",
                 "言出法随 · 施法者模型检查", "casters.html"),
+    "frames": ("game/dev/framecheck.js", "import { startFrameCheck } from '@local/game/dev/framecheck.js';"
+               " const assets = {};"
+               " for (const s of document.querySelectorAll('script[data-asset]'))"
+               " assets[s.dataset.asset] = URL.createObjectURL(new Blob([Uint8Array.from(atob(s.textContent.trim()), (c) => c.charCodeAt(0))], { type: 'image/webp' }));"
+               " startFrameCheck(document.getElementById('app'), assets);",
+               "言出法随 · 画框检查", "frames.html"),
     "bosses": ("game/dev/bosscheck.js", "import { startBossCheck } from '@local/game/dev/bosscheck.js';"
                " const assets = {};"
                " for (const s of document.querySelectorAll('script[data-asset]'))"
