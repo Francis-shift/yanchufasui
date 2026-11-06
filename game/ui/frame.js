@@ -1,23 +1,23 @@
 // @ts-check
 /**
  * 全屏画框（设计文档第 4 节"全屏画框"）：放大招时四边刷一圈墨、描一道元素色，大字竖着写在边上。
- * 三级：small 召龙、护身，亮一下就退；mid 化身，亮相后四边留一圈呼吸；large 法域，合拢后一直留着当倒计时，收束时一笔斩过。
+ * 三级：small 召龙、护身，亮一下就退；mid 化身亮相，之后四边留一圈呼吸（aura，单独一层）；large 法域，合拢后一直留着当倒计时，收束时一笔斩过。
  * 中间永远不放东西：红圈要看得见。用网页叠层画，不走后期，手机流畅档也有。两个同时来只放强的（outranks）。
  * 墨迹没有素材，开框时用画布现画；计时用真实时间（法域里世界的钟是停的）。
  */
 
-/** thick：墨带多宽（屏幕短边的几成）；hold：亮几秒（0 是一直留着）；rest：亮完留一圈呼吸；rank：谁压谁 */
+/** thick：墨带多宽（屏幕短边的几成）；hold：亮几秒（0 是一直留着）；rank：谁压谁 */
 export const LEVELS = {
-  small: { rank: 1, thick: 0.1, hold: 1, rest: false },
-  mid: { rank: 2, thick: 0.13, hold: 1, rest: true },
-  large: { rank: 3, thick: 0.15, hold: 0, rest: false },
+  small: { rank: 1, thick: 0.1, hold: 1 },
+  mid: { rank: 2, thick: 0.13, hold: 1 },
+  large: { rank: 3, thick: 0.15, hold: 0 },
 };
 
 /**
- * 新来的压不压得过现在这个：强的压弱的，一样强的新的换旧的，弱的不打断强的。退场的和留着呼吸的不算占着
- * @param {{ level: keyof typeof LEVELS, on: boolean } | null} cur @param {keyof typeof LEVELS} next
+ * 新来的压不压得过现在这个：强的压弱的，一样强的新的换旧的，弱的不打断强的。退场了就不算占着
+ * @param {{ level: keyof typeof LEVELS } | null} cur @param {keyof typeof LEVELS} next
  */
-export const outranks = (cur, next) => !cur || !cur.on || LEVELS[next].rank >= LEVELS[cur.level].rank;
+export const outranks = (cur, next) => !cur || LEVELS[next].rank >= LEVELS[cur.level].rank;
 
 /** 墨带内沿那道亮色：比战斗里的元素色提一点亮度，压在黑墨上才跳 */
 export const FRAME_GLOW = /** @type {Record<string, string>} */ ({ ice: '#7cc8ff', fire: '#ff8f45', thunder: '#ffdc55', wind: '#74e6b6', earth: '#dcaa64' });
@@ -30,11 +30,11 @@ export const FRAME_CSS = `
 .yc-frame.on canvas { transform: none; }
 .yc-frame.large canvas { transform: scale(1.3); transition: transform .5s cubic-bezier(.2,.8,.2,1); }
 .yc-frame.large.on canvas { transform: none; }
-.yc-frame.rest canvas { transform: scale(1.09); transition: transform .5s; animation: yc-fbreath 1.6s ease-in-out infinite; }
+.yc-aura { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0; transform: scale(1.09); transition: opacity .4s; }
+.yc-aura.on { opacity: 1; animation: yc-fbreath 1.6s ease-in-out infinite; }
 @keyframes yc-fbreath { 50% { opacity: .55; } }
 .yc-frame b { position: absolute; left: 3.2vmin; top: 50%; transform: translateY(-50%); writing-mode: vertical-rl; font-weight: normal; line-height: 1; letter-spacing: .08em;
   color: #fbf4e6; text-shadow: 0 0 .35em var(--c), 0 .04em .12em rgba(0,0,0,.8); transition: opacity .25s; }
-.yc-frame.rest b, .yc-frame.rest i { opacity: 0; }
 .yc-frame i { position: absolute; font-style: normal; width: 1.1em; height: 1.1em; line-height: 1.1em; text-align: center; border-radius: 2px; background: #b3261e; color: #fbefe6; transform: rotate(-4deg); }
 .yc-fbar { position: absolute; left: 12%; right: 12%; bottom: 2.4vmin; height: 3px; background: rgba(251,244,230,.28); }
 .yc-fbar[hidden] { display: none; }
@@ -49,7 +49,7 @@ export const FRAME_CSS = `
 .yc-slash.go { opacity: 1; animation: yc-fslash .14s ease-in both; }
 .yc-slash.out { opacity: 0; transition: opacity .5s ease-in; }
 @keyframes yc-fslash { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
-.yc-on-cover .yc-frame, .yc-on-result .yc-frame, .yc-on-cover .yc-sky, .yc-on-result .yc-sky { visibility: hidden; }
+.yc-on-cover .yc-frame, .yc-on-result .yc-frame, .yc-on-cover .yc-sky, .yc-on-result .yc-sky, .yc-on-cover .yc-aura, .yc-on-result .yc-aura { visibility: hidden; }
 `;
 
 /** 不跟着 Math.random 走：同一个种子画出来一样，也不多耗随机数 @param {number} seed */
@@ -166,6 +166,7 @@ export class ScreenFrame {
     this.el = make('<div class="yc-frame"><canvas></canvas><b></b><i>敕</i><div class="yc-fbar" hidden><u></u></div></div>');
     this.sky = make('<div class="yc-sky"></div>');
     this.cut = /** @type {HTMLCanvasElement} */ (make('<canvas class="yc-slash"></canvas>'));
+    this.halo = /** @type {HTMLCanvasElement} */ (make('<canvas class="yc-aura"></canvas>'));
     this.canvas = /** @type {HTMLCanvasElement} */ (this.el.querySelector('canvas'));
     this.text = /** @type {HTMLElement} */ (this.el.querySelector('b'));
     this.seal = /** @type {HTMLElement} */ (this.el.querySelector('i'));
@@ -173,8 +174,8 @@ export class ScreenFrame {
     this.fill = /** @type {HTMLElement} */ (this.el.querySelector('u'));
     this.el.style.fontFamily = this.sky.style.fontFamily = font;
     this.root = root;
-    root.prepend(this.el, this.sky, this.cut);   // 排在最前：压在界面下面，按钮和血条照常露着
-    /** @type {{ level: keyof typeof LEVELS, on: boolean } | null} */
+    root.prepend(this.halo, this.el, this.sky, this.cut);   // 排在最前：压在界面下面，按钮和血条照常露着
+    /** @type {{ level: keyof typeof LEVELS } | null} */
     this.cur = null;
     this.seed = 20261106;
     this.left = -1;
@@ -208,18 +209,21 @@ export class ScreenFrame {
     this.bar.hidden = level !== 'large';
     this.progress(1);
     this.el.className = `yc-frame ${level}`;
-    this.cur = { level, on: true };
+    this.cur = { level };
     void this.el.offsetWidth;   // 换了类名、位置，要先落一帧，过渡才走得起来
     this.el.classList.add('on');
-    if (L.hold) this.timer = window.setTimeout(() => (L.rest ? this.rest() : this.close()), L.hold * 1000);
+    if (L.hold) this.timer = window.setTimeout(() => this.close(), L.hold * 1000);
     return true;
   }
 
-  /** 亮相完：墨带退到屏幕边上，留一圈呼吸的元素色，大字收掉（化身用）。这时候别的画框可以压过它 */
-  rest() {
-    if (!this.cur) return;
-    this.cur.on = false;
-    this.el.classList.add('rest');
+  /**
+   * 化身期间四边留一圈呼吸：单独一层，别的画框来了又走都碰不到它。不给颜色就收掉
+   * @param {string} [color]
+   */
+  aura(color) {
+    const c = this.halo;
+    if (color) { const g = this.fit(c); paintBand(g, c.width, c.height, Math.min(c.width, c.height) * LEVELS.mid.thick, color, rng(this.seed++)); }
+    c.classList.toggle('on', !!color);
   }
 
   /** 收掉画框 */
@@ -269,6 +273,7 @@ export class ScreenFrame {
     this.cur = null;
     this.el.className = 'yc-frame';
     this.cut.className = 'yc-slash';
+    this.halo.className = 'yc-aura';
     this.sky.replaceChildren();
     this.sky.classList.remove('cut');
   }

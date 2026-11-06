@@ -33,6 +33,8 @@ import {
   REACTIONS, RUN, SLOWMO_MAX_SEC, SLOWMO_SCALE, SPILL, SUMMONS, TALENTS, TOPPLE, TORNADO, TRIAL, WALL,
 } from './rules/numbers.js';
 import { DOMAIN_OFF, addLine, canChant, canOpen, domainLeft, domainOn, endChant, inkStep, openDomain, tickDomain } from './rules/domain.js';
+import { AVATAR_OFF, avatarFree, avatarHeal, avatarOn, canAvatar, canSave, openAvatar, tickAvatar } from './rules/avatar.js';
+import { PALETTE, scaleArr } from './fx/common.js';
 import { FRAME_GLOW } from './ui/frame.js';
 import { Caster } from './actors/caster.js';
 import { Enemies } from './actors/enemies.js';
@@ -219,7 +221,8 @@ export function start(root, opts = {}) {
     loadRig(opts.caster.mesh, opts.caster.tex).then((r) => caster.use(r), (err) => console.warn('施法者模型没下载成功，继续用胶囊占位', err));
   }
   const trial = new Trial(scene, { enemies, fx, particles, hud, caster: layout.caster, origins: [origin, fx.origin],
-    dodge: () => caster.dodge(), ghost: (mat) => caster.ghost(mat),
+    dodge: () => { caster.dodge(); dashed.clear(); }, ghost: (mat) => caster.ghost(mat),
+    dashThrough, lastStand,
     fireWave: (from, dir) => fusions.beam(new THREE.Vector3(from.x, 1.3, from.z), new THREE.Vector3(dir.x, 0, dir.z), null),   // 火灵的火浪借豪火灭却的火云
     canvas: renderer.domElement, mobile, floatText: floatAt, win: trialWon, lose: trialLost,
     blockers: () => walls.obstacles(),   // 土墙挡路、挡冲锋
@@ -445,6 +448,8 @@ export function start(root, opts = {}) {
     slowT: 0, counterT: 0, afterT: 0,
     /** 法域走到哪（rules/domain.js）；domainEl：开的时候气势槽哪种颜色最多，那一笔就是什么元素 */
     domain: DOMAIN_OFF, domainEl: 'ice',
+    /** 化身走到哪（rules/avatar.js） */
+    avatar: AVATAR_OFF,
   };
   /** 按游戏时间延后执行（慢放、顿帧时一起变慢） */
   const timers = [];
@@ -507,6 +512,7 @@ export function start(root, opts = {}) {
     preloadFonts(true);   // 开局后把其余一级字也下好，免得冷门字第一次出现时先闪成别的字体
     clearField();
     closeDomain();
+    closeAvatar();
     Object.assign(S, { mode, phase: 'playing', mana: MANA_MAX, core: CORE_HP, gauge: 0, lastCombo: null, seen: [], said: new Set(),
       wave: 0, queue: [], busy: false, restT: 0, inv: 0, run: newRun(), slowT: 0, counterT: 0, afterT: 0 });   // 新的一局天先放晴，再随第一波慢慢压上来
     S.mods = runMods(S.run);
@@ -516,7 +522,7 @@ export function start(root, opts = {}) {
     S.binds = Object.fromEntries(Object.entries(S.binds).filter(([k, b]) => S.talents.includes(k) && !b.auto));
     applyKeys();   // 按钮下面写哪个键：试炼按设置里绑的，守关是数字
     hud.setSkills(S.talents.map((el) => ({ el, ...skillLabel(el) })),
-      { cast: pressTalent, pen: openWrite, summon: pressSummon, domain: pressDomain, dash: mode === 'trial' ? () => trial.dash() : undefined });
+      { cast: pressTalent, pen: openWrite, summon: pressSummon, domain: pressDomain, avatar: pressAvatar, dash: mode === 'trial' ? () => trial.dash() : undefined });
     hud.setCore(S.core, CORE_HP);
     layout.core.visible = mode !== 'trial';   // 试炼用不上阵眼：阵盘、水晶、石桩整组藏起来（也不挡路，见 trial.js BLOCK）
     if (mode === 'trial') trial.prepare();   // 试炼：战前先写咒、试招，点"开战"boss 才出来
@@ -596,6 +602,7 @@ export function start(root, opts = {}) {
   function backToTitle() {
     clearField();
     closeDomain();
+    closeAvatar();
     trial.stop();
     landscape(false);
     Object.assign(S, { mode: 'defense', phase: 'title', mana: MANA_MAX, core: CORE_HP, gauge: 0, wave: 0, queue: [], busy: false, restT: 0 });
@@ -861,8 +868,8 @@ export function start(root, opts = {}) {
   function applyKeys() {
     const L = (/** @type {import('./rules/keymap.js').Action} */ a) => keyLabel(keys[a]);
     hud.setKeyLabels(S.mode === 'trial'
-      ? { dash: L('dash'), skills: [L('skill1'), L('skill2'), L('skill3')], ult: L('ult'), domain: L('domain'), view: L('view'), lock: L('lock') }
-      : { dash: L('dash'), skills: ['1', '2', '3'], ult: '4', domain: L('domain'), view: L('view'), lock: L('lock') });
+      ? { dash: L('dash'), skills: [L('skill1'), L('skill2'), L('skill3')], ult: L('ult'), domain: L('domain'), avatar: L('avatar'), view: L('view'), lock: L('lock') }
+      : { dash: L('dash'), skills: ['1', '2', '3'], ult: '4', domain: L('domain'), avatar: L('avatar'), view: L('view'), lock: L('lock') });
     trial.keyText = { skills: [L('skill1'), L('skill2'), L('skill3')].join('、'), ult: L('ult'), dash: L('dash'), home: L('home'), lock: L('lock') };
   }
   /** 试炼里按下绑了动作的键：放招可以按住连发（同原来的数字键），闪避、大招、切视角、镜头回正、锁定开关按一下算一下 @param {import('./rules/keymap.js').Action} a @param {boolean} repeat */
@@ -872,6 +879,7 @@ export function start(root, opts = {}) {
     if (a === 'dash') trial.dash();
     else if (a === 'ult') pressSummon();
     else if (a === 'domain') pressDomain();
+    else if (a === 'avatar') pressAvatar();
     else if (a === 'home') camHome();
     else if (a === 'lock') toggleLock();
     else cycleView();
@@ -1329,8 +1337,9 @@ export function start(root, opts = {}) {
     }
     const firstEl = intent.summon && intent.summon !== 'thunder' ? intent.summon : intent.steps[0]?.el;
     if (firstEl) fx.retint(firstEl);
-    // 法域里不耗法力、不召龙（气势刚花掉，念龙就只算这句话里别的招）
-    let plan = planCast(inDomain ? { ...intent, summon: null } : intent, { mana: inDomain ? MANA_MAX : S.mana, lastCombo: S.lastCombo, seen: S.seen, said: S.said, text: c.button ? '' : text,
+    // 法域里不耗法力、不召龙（气势刚花掉，念龙就只算这句话里别的招）；化身里也不耗法力
+    const noMana = inDomain || avatarFree(S.avatar);
+    let plan = planCast(inDomain ? { ...intent, summon: null } : intent, { mana: noMana ? MANA_MAX : S.mana, lastCombo: S.lastCombo, seen: S.seen, said: S.said, text: c.button ? '' : text,
       gauge: S.gauge, ult: S.mods.ult, button: !!c.button, fusions: castFusions() });
     if (inDomain) plan = boostPlan(plan, RUN.domain.mult);
     // 心法反手、余威：窗口里放出去的这一招加伤（按放出那一刻算，飞到时窗口关了也照样加）；反手只管一招
@@ -1342,7 +1351,7 @@ export function start(root, opts = {}) {
       floatAt(new THREE.Vector3(CASTER_POS.x, 2.6, CASTER_POS.z), `${tag} ×${+boost.k.toFixed(2)}`, '#ffd76a');
     }
     if (!inDomain) {
-      S.mana -= plan.cost;
+      if (!noMana) S.mana -= plan.cost;
       setGauge(plan.gaugeSpent ? 0 : Math.min(S.mods.ult, S.gauge + plan.gaugeGain), stepEls(plan.steps));
     }
     if (intent.summon) dragon.preload(intent.summon);
@@ -1423,7 +1432,7 @@ export function start(root, opts = {}) {
   /** 还能不能再念一句：解析中的也算占了名额 */
   const chantRoom = () => canChant(S.domain) && S.domain.lines.length + chantPending < RUN.domain.lines;
   /** 按钮亮不亮：气势满了、场上有敌人才值得开（小怪潮打完到下一段之间开了也是空斩） */
-  const domainReady = () => S.mode === 'trial' && S.phase === 'playing' && S.mods.domain && trial.fighting && enemies.list.length > 0 && S.gauge >= S.mods.ult;
+  const domainReady = () => S.mode === 'trial' && S.phase === 'playing' && S.mods.domain && trial.fighting && enemies.list.length > 0 && S.gauge >= S.mods.ult && S.avatar.phase !== 'pose';
 
   /** 气势满了开法域；念咒时再按一下就是提前收束 */
   function pressDomain() {
@@ -1512,6 +1521,90 @@ export function start(root, opts = {}) {
     return true;
   }
 
+  // ---------------------------------------------------------------- 化身（设计文档第 4 节"化身"，走段在 rules/avatar.js）
+  /** 这一次化身打出去的（元素是开局选的第一个，战报卡的账记在「化身」上） @type {{ el: string, tally?: Tally }} */
+  let avatarSrc = { el: 'ice' };
+  /** 这一次闪避已经打过的敌人 @type {Set<string>} */
+  const dashed = new Set();
+  /** 按钮亮不亮 */
+  const avatarReady = () => S.mode === 'trial' && S.phase === 'playing' && !domainOn(S.domain) && canAvatar(S.avatar, { has: S.mods.avatar, fighting: trial.fighting, hp: trial.hp, max: TRIAL.hp });
+
+  /** 时间一停：回血，画框亮相，人变成墨色身躯 */
+  function startAvatar() {
+    const el = S.talents[0] ?? 'ice';
+    S.avatar = openAvatar();
+    avatarSrc = { el, tally: newTally('化身') };
+    trial.held = true;
+    trial.hp = avatarHeal(trial.hp, TRIAL.hp);
+    hud.setCore(trial.hp, TRIAL.hp);
+    hud.frame.show('mid', { text: '化身', color: FRAME_GLOW[el] });
+    sound.play('frameM');
+    fx.shake = Math.max(fx.shake, 0.5);
+    caster.setAvatar(FRAME_GLOW[el], RUN.avatar.scale);
+  }
+
+  function pressAvatar() { if (avatarReady()) startAvatar(); }
+
+  /** 气血归零（trial.hurt 问的）：救得了就救，返回 true 这一局接着打 */
+  function lastStand() {
+    if (!canSave(S.avatar, S.mods.avatar)) return false;
+    startAvatar();
+    return true;
+  }
+
+  /** 闪避穿过敌人：这一帧滑过的这一段碰到的都挨一下，一次闪避同一只只挨一下 @param {{ x: number, z: number }} a @param {{ x: number, z: number }} b */
+  function dashThrough(a, b) {
+    const D = RUN.avatar.dash;
+    for (const e of [...enemies.list]) {
+      if (dashed.has(e.id) || distToSegment(e.pos, a, b) > D.reach + trial.bodyR(e)) continue;
+      dashed.add(e.id);
+      fx.burst(e.pos.clone().setY(e.pos.y + 1), avatarSrc.el, 1.1, 0.45);
+      hitEnemy(e, avatarSrc, D.dmg, e.pos.clone(), {});
+    }
+  }
+
+  /** 变回来（外形、闪避、四边那圈） */
+  function avatarOff() {
+    trial.free = false;
+    caster.setAvatar(null);
+    hud.frame.aura();
+  }
+
+  /** 这一局没了：一笔勾销（用过的记录也清掉，下一局还能用） */
+  function closeAvatar() {
+    if (avatarOn(S.avatar)) { trial.held = false; avatarOff(); }
+    S.avatar = AVATAR_OFF;
+  }
+
+  /** 走完了：一圈爆开，没有虚弱 */
+  function avatarBurst() {
+    const { dmg, r, fling } = RUN.avatar.burst, p = atGround(trial.p.x, trial.p.z);
+    avatarOff();
+    fx.burst(p, avatarSrc.el, r, 0.8);
+    shove(p, r, avatarSrc, dmg, fling);
+  }
+
+  /**
+   * 每帧走一步：亮相走真实时间，变身走玩家的钟
+   * @param {number} rdt @param {number} pdt
+   */
+  function stepAvatar(rdt, pdt) {
+    hud.setAvatarBtn(avatarReady());
+    if (!avatarOn(S.avatar)) return;
+    if (S.phase !== 'playing' && S.phase !== 'rest') { closeAvatar(); return; }
+    const r = tickAvatar(S.avatar, rdt, trial.fighting ? pdt : 0);
+    S.avatar = r.a;
+    if (r.event === 'on') { trial.held = false; trial.free = true; dashed.clear(); hud.frame.aura(FRAME_GLOW[avatarSrc.el]); }
+    if (r.event === 'end') avatarBurst();
+    if (!avatarFree(S.avatar) || pdt <= 0) return;
+    const pal = PALETTE[avatarSrc.el], p = trial.p;   // 身上飘这个元素的粒子
+    for (let i = 0; i < 2; i++) {
+      const a = Math.random() * Math.PI * 2, d = 0.3 + Math.random() * 0.5;
+      particles.emit(p.x + Math.cos(a) * d, 0.2 + Math.random() * 2, p.z + Math.sin(a) * d, 0, 1 + Math.random(), 0, 0.5 + Math.random() * 0.4, 0.06 + Math.random() * 0.08,
+        scaleArr(pal.primary, 2), scaleArr(pal.secondary, 0.6), { drag: 1.5 });
+    }
+  }
+
   /**
    * 字诀「连」再放一次：伤害 × lian.mult、不花法力、不会再连；打谁这时重新定（第一次可能已经打死了）。按键的命中照样攒气势
    * @param {import('./rules/arbiter.js').PlannedStep[]} steps @param {number} m
@@ -1574,7 +1667,7 @@ export function start(root, opts = {}) {
 
   /** @param {string} el */
   function pressTalent(el) {
-    if (S.phase !== 'playing' || !S.talents.includes(el) || !hud.write.hidden) return;
+    if (S.phase !== 'playing' || !S.talents.includes(el) || !hud.write.hidden || S.avatar.phase === 'pose') return;
     if (domainOn(S.domain) && !chantRoom()) return;   // 法域展开时、念满了：按钮不算数
     if (pend) {
       if (pend.els.length < 2 && !pend.els.includes(el)) { pend.els.push(el); hud.setCharging(pend.els); fireButtons(); }
@@ -1605,7 +1698,7 @@ export function start(root, opts = {}) {
 
   /** 气势满了点"召唤"：召气势槽里颜色最多的那条龙（gaugeDragon），按气势 0 档召（开口召的吃那句话的气势，更猛） */
   function pressSummon() {
-    if (S.phase !== 'playing' || S.busy || pend || S.gauge < S.mods.ult || !hud.write.hidden || domainOn(S.domain)) return;
+    if (S.phase !== 'playing' || S.busy || pend || S.gauge < S.mods.ult || !hud.write.hidden || domainOn(S.domain) || S.avatar.phase === 'pose') return;
     S.busy = true;
     buttonChant = true;
     const el = /** @type {keyof typeof SUMMONS} */ (gaugeDragon(S.gaugeCols));
@@ -1817,10 +1910,18 @@ export function start(root, opts = {}) {
     floatAt(at.clone().setY(3.1), '反震', '#ffd76a');
     fx.burst(p, el, reach, 0.55);   // 炸在人身上，又隔零点几秒一下：1 的话整屏发白，红圈都看不见（实测）
     trial.shatter(p, p, reach);
+    shove(p, reach, { el, tally }, sm.dmg * k, fling);
+  }
+
+  /**
+   * 周身一圈：reach 米里的敌人挨一下、吃这个元素，小怪往外掀（反震、化身结束时用）
+   * @param {THREE.Vector3} p @param {number} reach @param {{ el: string, tally?: Tally }} src @param {number} dmg @param {number} fling
+   */
+  function shove(p, reach, src, dmg, fling) {
     for (const e of [...enemies.list]) {
       const dx = e.pos.x - p.x, dz = e.pos.z - p.z, d = Math.hypot(dx, dz) || 1;
       if (d > reach + trial.bodyR(e)) continue;
-      hitEnemy(e, { el, tally }, sm.dmg * k, p, {});
+      hitEnemy(e, src, dmg, p, {});
       enemies.fling(e, (dx / d) * fling, 5, (dz / d) * fling);
     }
   }
@@ -2672,13 +2773,15 @@ export function start(root, opts = {}) {
     if (mic !== 'idle' && S.phase !== 'playing') { if (mic === 'on' || mic === 'tap') recorder?.stop(); micReset(); }
     hud.setMicShown(micAllowed() || mic !== 'idle');
     const stop = frozen || setUi.paused;   // 写咒对话框、设置面板开着：游戏停住，画面照画
-    const held = stepDomain(stop ? 0 : realDt);   // 法域开着：世界的钟停住，法术等收束才放；法域自己走真实时间
+    // 法域开着、化身亮相：世界的钟停住（法术等收束才放）；法域和亮相自己走真实时间
+    const held = stepDomain(stop ? 0 : realDt) || S.avatar.phase === 'pose';
     let dt = stop || held ? 0 : realDt * timeScale * lab.speed;   // 试验场可放慢、定格
     // 施法者自己的钟：开口慢放时世界慢、人照常（不然 0.8 秒的咏唱里手还没抬起来）；顿帧照样顿
     let cdt = stop ? 0 : realDt * lab.speed;
     if (fx.hitStop > 0) { fx.hitStop -= realDt; dt *= 0.06; cdt *= 0.06; }
     // 心法刹那：完美闪避后全场慢下来，玩家自己照常快。pdt 是玩家的时间：走位、闪避冷却、回法力、心法窗口都按它走
     const pdt = dt;
+    stepAvatar(stop ? 0 : realDt, pdt);
     if (S.slowT > 0) { S.slowT -= pdt; dt *= RUN.arts.slow.scale; }
     S.counterT = Math.max(0, S.counterT - pdt); S.afterT = Math.max(0, S.afterT - pdt);
     idleT += dt;
@@ -2884,6 +2987,8 @@ export function start(root, opts = {}) {
     domain: pressDomain,
     domainState: () => ({ phase: S.domain.phase, t: S.domain.t, lines: S.domain.lines.length, pending: chantPending, held: trial.held, ink: { ...inkWash } }),
     ward: () => ({ ...trial.ward }),
+    avatar: () => pressAvatar(),
+    avatarState: () => ({ ...S.avatar, free: trial.free, held: trial.held }),
     /** 天赋按键：按一个，或在 0.6 秒内按两个（press('wind','fire') 出火卷风）；summonBtn 是金色召唤按钮 */
     press: (...els) => els.forEach((el) => pressTalent(el)),
     summonBtn: () => pressSummon(),

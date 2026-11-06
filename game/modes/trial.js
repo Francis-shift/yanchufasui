@@ -91,6 +91,7 @@ export class Trial {
    *           local: (x: number, y: number) => { x: number, y: number }, pick: (insight: boolean, done: () => void) => void,
    *           strike: (e: any, dmg: number, at: { x: number, z: number }) => void,
    *           dodge?: () => void, ghost?: (mat: THREE.Material) => THREE.Object3D | null,
+   *           dashThrough?: (a: { x: number, z: number }, b: { x: number, z: number }) => void, lastStand?: () => boolean,
    *           fireWave?: (from: { x: number, z: number }, dir: { x: number, z: number }) => void }} d
    *   origins：法术起点（施法者胸口高度），跟着玩家走；blockers：此刻的土墙（挡路、挡冲锋）；
    *   shields：此刻挡弹幕的墙段（四种墙都算；bounce 的写了字诀「返」，把冰锥弹回去）；
@@ -124,6 +125,8 @@ export class Trial {
     this.dashT = 0; this.dashDir = new THREE.Vector3(); this.hurtT = 0; this.flash = 0;
     /** 护身无敌（rules/guard.js）；挡下一击时报给谁；身上亮什么颜色 */
     this.ward = GUARD_OFF; /** @type {Blocked | null} */ this.warded = null; this.wardTint = new THREE.Color();
+    /** 化身中（rules/avatar.js）：闪避不花精力，闪避穿过敌人打它一下 */
+    this.free = false;
     // 精力：还剩几格（攒到一半也算数）、离上次按闪避过了几秒；shownSta 是闪避按钮上画成什么样（变了才重画）
     // dashLock：字诀「重」放完这几秒不能闪避；slowTele：字诀「凝」冻住了 boss，下一招预警变慢
     this.stamina = TRIAL.stamina.max; this.sinceDash = Infinity; this.shownSta = ''; this.dashLock = 0; this.slowTele = false;
@@ -633,7 +636,7 @@ export class Trial {
     this.dashAt = -Infinity; this.perfectUsed = true; this.glow = 0; this.lastMove = '';
     this.keys.clear(); this.ptr = null; this.stick.x = this.stick.y = 0;
     this.dashT = 0; this.hurtT = 0; this.flash = 0;
-    this.ward = GUARD_OFF; this.warded = null;
+    this.ward = GUARD_OFF; this.warded = null; this.free = false;
     this.stamina = TRIAL.stamina.max; this.sinceDash = Infinity; this.shownSta = ''; this.dashLock = 0; this.slowTele = false;
     this.pending.length = 0;
     for (const e of this.d.enemies.list) if (e.strip) this.dropStrip(e);
@@ -661,11 +664,12 @@ export class Trial {
 
   // ---------------------------------------------------------------- 玩家
   dash() {
-    if (!this.on || !canDash(this.stamina, this.sinceDash) || this.dashLock > 0 || this.hp <= 0 || this.held) return;
+    if (!this.on || !canDash(this.free ? TRIAL.stamina.max : this.stamina, this.sinceDash) || this.dashLock > 0 || this.hp <= 0 || this.held) return;
     const mv = this.input();
     this.dashDir.copy(mv.lengthSq() > 0.01 ? mv.normalize() : this.face);
     this.dashT = TRIAL.dash.sec;
-    this.stamina -= 1; this.sinceDash = 0;
+    if (!this.free) this.stamina -= 1;
+    this.sinceDash = 0;
     this.dashAt = this.clock; this.dashFrom.copy(this.p); this.perfectUsed = false;
     this.showStamina();
     this.d.dodge?.();
@@ -749,7 +753,9 @@ export class Trial {
     const { particles } = this.d;
     if (this.dashT > 0) {
       this.dashT -= dt;
+      const from = { x: this.p.x, z: this.p.z };
       this.p.addScaledVector(this.dashDir, (TRIAL.dash.dist / TRIAL.dash.sec) * dt);
+      if (this.free) this.d.dashThrough?.(from, this.p);
       for (let i = 0; i < 3; i++) {
         particles.emit(this.p.x + rand(-0.2, 0.2), rand(0.2, 1.4), this.p.z + rand(-0.2, 0.2), -this.dashDir.x * 2, rand(0, 0.5), -this.dashDir.z * 2,
           rand(0.25, 0.45), rand(0.08, 0.16), [1.4, 1.4, 1.5], [0.6, 0.65, 0.75], { alpha: 0.35, drag: 3 });
@@ -830,7 +836,7 @@ export class Trial {
     this.d.fx.sound?.play('hurt');
     this.d.floatText(at, `-${dmg}`, '#ff6b5a');
     this.d.hud.setCore(this.hp, TRIAL.hp);
-    if (this.hp <= 0) this.end(false);
+    if (this.hp <= 0 && !this.d.lastStand?.()) this.end(false);   // 领悟了化身：这一下救回来（一局一次）
     return true;
   }
 

@@ -16,8 +16,10 @@ test('三级：法域最大，化身次之，召龙最小；两个同时来只�
   assert.equal(outranks(null, 'small'), true);
 });
 
-test('化身亮相完留着呼吸时不占位：这时候召龙的小画框照样亮', () => {
-  assert.equal(outranks({ level: 'mid', on: false }, 'small'), true);
+test('化身的呼吸是单独一层：不挡手，封面、结算页上看不见，弹进弹出也不会盖住画框的过渡', () => {
+  assert.match(FRAME_CSS, /\.yc-aura \{[^}]*pointer-events: none/);
+  assert.match(FRAME_CSS, /\.yc-on-cover \.yc-aura, \.yc-on-result \.yc-aura/);
+  assert.match(FRAME_CSS, /\.yc-aura\.on \{[^}]*animation: yc-fbreath/);
 });
 
 test('中间不放东西：墨带最宽也只占短边一成半，大字贴在左边，天上的字在上半屏', () => {
@@ -31,8 +33,6 @@ test('入场 0.12 秒，小的和中的亮 1 秒，法域的一直留着等收�
   assert.match(FRAME_CSS, /\.yc-frame \{[^}]*transition: opacity \.12s/);
   assert.equal(LEVELS.small.hold, 1);
   assert.equal(LEVELS.mid.hold, 1);
-  assert.equal(LEVELS.mid.rest, true);
-  assert.equal(LEVELS.small.rest, false);
   assert.equal(LEVELS.large.hold, 0);
 });
 

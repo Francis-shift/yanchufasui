@@ -147,6 +147,7 @@ export function startCasterCheck(root, assets) {
     pause: (on) => { paused = on; },
     /** 停着时手动推进 sec 秒（每步 1/60） @param {number} sec */
     step: (sec) => { for (let s = 0; s < sec; s += 1 / 60) tick(1 / 60); render(); },
+    avatar: (color, scale = 1.25) => { for (const c of all) c.setAvatar(color, scale); render(); },   // 化身的样子
     snap: (sw = 960, sh = 540) => { w = sw; h = sh; render(); return renderer.domElement.toDataURL('image/jpeg', 0.8); },
   };
   /** @type {any} */ (window).cc = cc;

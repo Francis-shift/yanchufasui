@@ -6,19 +6,19 @@
  * 守关要打字，不走这套，照旧用数字 1～4。
  */
 
-export const ACTIONS = /** @type {const} */ (['dash', 'skill1', 'skill2', 'skill3', 'ult', 'view', 'home', 'lock', 'domain']);
+export const ACTIONS = /** @type {const} */ (['dash', 'skill1', 'skill2', 'skill3', 'ult', 'view', 'home', 'lock', 'domain', 'avatar']);
 /** @typedef {typeof ACTIONS[number]} Action */
 /** @typedef {Record<Action, string>} KeyMap */
 
 /** @type {Record<Action, string>} */
-export const ACTION_NAMES = { dash: '闪避', skill1: '第一招', skill2: '第二招', skill3: '第三招', ult: '大招（召龙）', domain: '法域（领悟后）', view: '切换视角', home: '镜头回正',
+export const ACTION_NAMES = { dash: '闪避', skill1: '第一招', skill2: '第二招', skill3: '第三招', ult: '大招（召龙）', domain: '法域（领悟后）', avatar: '化身（领悟后、低血）', view: '切换视角', home: '镜头回正',
   lock: '锁定开关' };
 
 /** @type {KeyMap} */
-export const DEFAULT_KEYS = { dash: 'ShiftLeft', skill1: 'KeyQ', skill2: 'KeyE', skill3: 'KeyR', ult: 'KeyV', domain: 'KeyG', view: 'KeyB', home: 'KeyC', lock: 'KeyF' };
+export const DEFAULT_KEYS = { dash: 'ShiftLeft', skill1: 'KeyQ', skill2: 'KeyE', skill3: 'KeyR', ult: 'KeyV', domain: 'KeyG', avatar: 'KeyX', view: 'KeyB', home: 'KeyC', lock: 'KeyF' };
 
 /** 第一版（10-30）之后才加的动作：存的键位里可能还没有它们 */
-const LATER = new Set(['home', 'lock', 'domain']);
+const LATER = new Set(['home', 'lock', 'domain', 'avatar']);
 /** 后加的动作默认键已经被别的动作占了，就从这里挑第一个空着的 */
 const SPARE =['KeyC', 'KeyF', 'KeyG', 'KeyX', 'KeyZ', 'KeyT', 'KeyY', 'KeyU', 'KeyI', 'KeyO', 'KeyP', 'KeyH', 'KeyJ', 'KeyK', 'KeyL', 'KeyN', 'KeyM'];
 

@@ -81,9 +81,11 @@ STUBS = {
                         " return new Proxy(t, { get: (o, k) => (k in o ? o[k] : () => {}) }); } }",
 }
 # 游戏页不带模型（全是方块占位），摆模型的、读模型格式的换成空壳，又省约 8 KB（--dragon 要真读龙，不换）。11-06 加法域时超了 512 KB
+# 战报卡的二维码编码器也换掉（卡上那一格是空的，预览不验它）：11-06 加化身时只剩不到 200 字节
 MODEL_STUBS = {
     "game/world/props.js": "export const loadProps = () => {};",
     "game/world/drg2.js": "const no = async () => { throw new Error('预览页没有模型'); }; export { no as decodeDRG2, no as fetchBytes };",
+    "game/ui/qr.js": "export const qrMatrix = () => [[true]];",
 }
 
 

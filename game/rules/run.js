@@ -71,6 +71,7 @@ export const CARDS = [
   { id: 'twin', kind: 'insight', name: '双龙', text: '一次召两条龙，各打满额，分扑两群（只有一群就前后砸两下）', max: 1, ready: true },
   { id: 'guard', kind: 'insight', name: '护身', text: `龙不扑出去，绕着自己转 ${RUN.dragon.guard.sec} 秒：这几秒什么都打不动你，碰到的冰锥全碎，撞到的敌人吃它的元素；和「双龙」同在时，挡下一击反震一圈`, max: 1, ready: true },
   { id: 'domain', kind: 'insight', name: '法域', text: `气势满了可以不召龙：全场定住，最多 ${RUN.domain.sec} 秒里念 ${RUN.domain.lines} 句咒，收束时一起落下，不耗法力，威力 ×${RUN.domain.mult}`, max: 1, ready: true },
+  { id: 'avatar', kind: 'insight', name: '化身', text: `气血归零时不死，回 ${RUN.avatar.heal} 气血，化身 ${RUN.avatar.sec} 秒：法力、闪避都不花，闪避穿过敌人打它一下，结束时一圈爆开。一局一次，气血低于 ${RUN.avatar.low * 100}% 时也能自己开`, max: 1, ready: true },
 ];
 
 /**
@@ -340,10 +341,10 @@ export const upLabel = (run, c) => (c.kind !== 'move' && level(run, c.id) > 0 ? 
  * 这一局拿过的心法合成的加成（守关、没拿的时候就是原值）。
  * @param {Run} run
  * @returns {{ perfectWindow: number, perfectGauge: number, manaRegen: number, ult: number,
- *             chana: boolean, fanshou: boolean, canying: boolean, yuwei: boolean, twin: boolean, guard: boolean, domain: boolean }}
+ *             chana: boolean, fanshou: boolean, canying: boolean, yuwei: boolean, twin: boolean, guard: boolean, domain: boolean, avatar: boolean }}
  *   perfectWindow：完美闪避窗口（秒）；perfectGauge：完美闪避加几格气势；manaRegen：法力回复倍数；ult：召龙要几格气势；
  *   chana / fanshou / canying / yuwei：拿没拿刹那、反手、残影、余威（怎么生效在 main.js 与 modes/trial.js）；
- *   twin / guard：领悟了双龙、护身没有（召龙时在 main.js 换召法）；domain：领悟了法域没有（气势满了多一个按钮）
+ *   twin / guard：领悟了双龙、护身没有（召龙时在 main.js 换召法）；domain：领悟了法域没有（气势满了多一个按钮）；avatar：领悟了化身没有（气血归零时救一次）
  */
 export function runMods(run) {
   const has = (/** @type {string} */ id) => level(run, id) > 0;
@@ -353,7 +354,7 @@ export function runMods(run) {
     manaRegen: has('huiyuan') ? RUN.arts.regen : 1,
     ult: has('longyin') ? RUN.arts.ult : ULT_GAUGE,
     chana: has('chana'), fanshou: has('fanshou'), canying: has('canying'), yuwei: has('yuwei'),
-    twin: has('twin'), guard: has('guard'), domain: has('domain'),
+    twin: has('twin'), guard: has('guard'), domain: has('domain'), avatar: has('avatar'),
   };
 }
 

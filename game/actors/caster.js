@@ -11,6 +11,8 @@ import * as THREE from 'three';
 import { makeRig, playRig } from './rig.js';
 
 const HEIGHT = 1.75;
+/** 化身时的身子：墨色，边上描 RIM 倍亮的元素色 */
+const INK = 0x24262c, RIM = 2.6;
 /** 上半身的骨：边走边放时只有这几根跟动作层走 */
 const UPPER = /^(Spine|Spine1|Spine2|Neck|Head|(Left|Right)(Shoulder|Arm|ForeArm|Hand))$/;
 /**
@@ -71,6 +73,25 @@ export class Caster {
     this.cur = '';
     /** 残影用的另一份模型（第一次闪避时才做） @type {{ group: THREE.Group, bones: Record<string, THREE.Bone> } | null} */
     this.g = null;
+    // 袍子边上描一道亮色：越侧对镜头越亮，平时是 0。占位的胶囊和模型共用这份材质，所以在这里改一次就够
+    this.robe = /** @type {THREE.MeshStandardMaterial} */ (/** @type {THREE.Mesh} */ (group.children[0]).material);
+    this.rim = { value: new THREE.Color(0, 0, 0) };
+    this.plain = this.robe.color.getHex();
+    this.robe.onBeforeCompile = (sh) => {
+      sh.uniforms.uRim = this.rim;
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 uRim;')
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += uRim * pow(1. - saturate(dot(normal, normalize(vViewPosition))), 2.5);');
+    };
+  }
+
+  /**
+   * 化身的样子：墨色身躯，描元素色的边，人大一圈。不给颜色就变回来
+   * @param {string | null} color @param {number} [scale]
+   */
+  setAvatar(color, scale = 1) {
+    if (color) { this.plain = this.robe.color.getHex(); this.robe.color.set(INK); this.rim.value.set(color).multiplyScalar(RIM); }
+    else { this.robe.color.set(this.plain); this.rim.value.setRGB(0, 0, 0); }
+    this.group.scale.setScalar(color ? scale : 1);
   }
 
   /** 模型下载好了：套上贴图、挂进施法者组。袍子沿用占位胶囊的材质（试炼挨打泛红、完美闪避泛白改的就是它） @param {import('./rig.js').Rig} rig */
