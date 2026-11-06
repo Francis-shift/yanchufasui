@@ -97,6 +97,54 @@ test('出卡：只出效果做好的；某一类抽不出就从别的能出的�
   assert.deepEqual(offer(full, { els: ELS, insight: true }, rng(3)), []);
 });
 
+const BIG = ['twin', 'guard', 'domain', 'avatar'];
+const third = (/** @type {import('../game/rules/run.js').Run} */ run, seed = 1) => offer(run, { els: ELS, insight: true }, rng(seed), [], ALL)[2];
+const seen = (/** @type {import('../game/rules/run.js').Run} */ run) => new Set(Array.from({ length: 200 }, (_, i) => third(run, i + 1).id));
+
+test('大招类就是这四张，都做好了', () => {
+  assert.deepEqual(CARDS.filter((c) => c.big).map((c) => c.id).sort(), [...BIG].sort());
+  for (const id of BIG) assert.equal(CARDS.find((c) => c.id === id)?.ready, true, id);
+});
+
+test('第一次领悟只出大招类，四张都轮得到；第一次没拿，下回还是大招', () => {
+  const run = { ...newRun(), picks: 2 };
+  assert.deepEqual([...seen(run)].sort(), [...BIG].sort());
+  const skipped = take(run, byId('jianqie'));
+  assert.deepEqual([...seen(skipped)].sort(), [...BIG].sort(), '拿了别的卡不算领悟过');
+});
+
+test('拿过领悟以后，什么领悟都能出：大招没拿的那几张也还在', () => {
+  const afterBig = seen(take({ ...newRun(), picks: 2 }, byId('twin')));
+  assert.ok(afterBig.has('slot') === false && afterBig.has('he-fire-wind'), '合字能出；「双诀」要学过字诀');
+  assert.ok(afterBig.has('guard') && !afterBig.has('twin'));
+  const afterFuse = seen(take({ ...newRun(), picks: 2 }, byId('he-fire-wind')));
+  assert.ok(afterFuse.has('he-wind-fire') && afterFuse.has('domain'), '拿的是普通领悟也算领悟过');
+});
+
+test('第一次领悟重抽：换一张别的大招，不掉到普通领悟', () => {
+  const run = { ...newRun(), picks: 2 };
+  const ctx = { els: ELS, insight: true };
+  for (let seed = 1; seed <= 100; seed++) {
+    const shown = offer(run, ctx, rng(seed), [], ALL);
+    const again = reroll(run, ctx, rng(seed + 1000), shown, ALL);
+    assert.ok(BIG.includes(again?.cards[2].id ?? ''));
+    assert.notEqual(again?.cards[2].id, shown[2].id);
+  }
+});
+
+test('平常的选卡不出大招；这池卡里没有大招时领悟照常出', () => {
+  const run = { ...newRun(), picks: 2 };
+  for (let seed = 1; seed <= 100; seed++) assert.notEqual(offer(run, { els: ELS, insight: false }, rng(seed), [], ALL)[2].kind, 'insight');
+  const pool = ALL.filter((c) => !c.big);
+  assert.equal(offer(run, { els: ELS, insight: true }, rng(1), [], pool)[2].kind, 'insight');
+});
+
+test('大招类里效果没做好的不出', () => {
+  const run = { ...newRun(), picks: 2 };
+  const pool = ALL.map((c) => (c.id === 'avatar' ? { ...c, ready: false } : c));
+  for (let seed = 1; seed <= 200; seed++) assert.notEqual(offer(run, { els: ELS, insight: true }, rng(seed), [], pool)[2].id, 'avatar');
+});
+
 test('押过的元素：带这个元素的卡出现的分量 × RUN.owned，抽到的次数约是两倍', () => {
   const run = newRun();
   assert.equal(weight(byId('liao'), run), 1);

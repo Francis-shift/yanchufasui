@@ -24,9 +24,9 @@ export const BOSS_COUNT = RUN_STAGES.filter((s) => s.kind === 'boss').length;
 /**
  * @typedef {'move' | 'rune' | 'art' | 'insight'} CardKind 招式字 / 字诀 / 心法 / 领悟（合字属于领悟）
  * @typedef {{ id: string, kind: CardKind, name: string, text: string, max: number, ready: boolean,
- *             el?: string, need?: string[], lack?: string, fuse?: string }} Card
+ *             el?: string, need?: string[], lack?: string, fuse?: string, big?: boolean }} Card
  *   el：这张卡属于哪个元素（字诀里的燎凝回返引）；need：手上要有这几个元素才出（合字）；lack：手上没有这个元素才出（领悟新元素）；
- *   fuse：合字领悟的是哪种融合（FUSIONS 的键）；max：最多拿几次，第二次起是升级
+ *   fuse：合字领悟的是哪种融合（FUSIONS 的键）；max：最多拿几次，第二次起是升级；big：大招类领悟，还没拿过领悟时领悟那一格只出这几张
  */
 export const KIND_NAMES = { move: '招式字', rune: '字诀', art: '心法', insight: '领悟' };
 
@@ -68,10 +68,10 @@ export const CARDS = [
     id: `learn-${el}`, kind: 'insight', name, lack: el, text: `领悟「${name}」，多一个${name}的按钮`, max: 1, ready: false })),
   { id: 'slot', kind: 'insight', name: '双诀', text: '每句咒多认一个字诀', max: 1, ready: true },
   { id: 'button', kind: 'insight', name: '一心二用', text: '多一个按钮，同一个元素能装两种招', max: 1, ready: false },
-  { id: 'twin', kind: 'insight', name: '双龙', text: '一次召两条龙，各打满额，分扑两群（只有一群就前后砸两下）', max: 1, ready: true },
-  { id: 'guard', kind: 'insight', name: '护身', text: `龙不扑出去，绕着自己转 ${RUN.dragon.guard.sec} 秒：这几秒什么都打不动你，碰到的冰锥全碎，撞到的敌人吃它的元素；和「双龙」同在时，挡下一击反震一圈`, max: 1, ready: true },
-  { id: 'domain', kind: 'insight', name: '法域', text: `气势满了可以不召龙：全场定住，最多 ${RUN.domain.sec} 秒里念 ${RUN.domain.lines} 句咒，收束时一起落下，不耗法力，威力 ×${RUN.domain.mult}`, max: 1, ready: true },
-  { id: 'avatar', kind: 'insight', name: '化身', text: `气血归零时不死，回 ${RUN.avatar.heal} 气血，化身 ${RUN.avatar.sec} 秒：法力、闪避都不花，闪避穿过敌人打它一下，结束时一圈爆开。一局一次，气血低于 ${RUN.avatar.low * 100}% 时也能自己开`, max: 1, ready: true },
+  { id: 'twin', kind: 'insight', name: '双龙', text: '一次召两条龙，各打满额，分扑两群（只有一群就前后砸两下）', max: 1, ready: true, big: true },
+  { id: 'guard', kind: 'insight', name: '护身', text: `龙不扑出去，绕着自己转 ${RUN.dragon.guard.sec} 秒：这几秒什么都打不动你，碰到的冰锥全碎，撞到的敌人吃它的元素；和「双龙」同在时，挡下一击反震一圈`, max: 1, ready: true, big: true },
+  { id: 'domain', kind: 'insight', name: '法域', text: `气势满了可以不召龙：全场定住，最多 ${RUN.domain.sec} 秒里念 ${RUN.domain.lines} 句咒，收束时一起落下，不耗法力，威力 ×${RUN.domain.mult}`, max: 1, ready: true, big: true },
+  { id: 'avatar', kind: 'insight', name: '化身', text: `气血归零时不死，回 ${RUN.avatar.heal} 气血，化身 ${RUN.avatar.sec} 秒：法力、闪避都不花，闪避穿过敌人打它一下，结束时一圈爆开。一局一次，气血低于 ${RUN.avatar.low * 100}% 时也能自己开`, max: 1, ready: true, big: true },
 ];
 
 /**
@@ -274,6 +274,7 @@ function draw(list, run, rnd) {
 
 /**
  * 出卡：三张——第一张从招式字和字诀里抽，第二张心法，第三张随机（打完 boss 那次必是领悟）；第一次选卡，第一张必是招式字。
+ * 一张领悟都没拿过时，领悟那一格只出大招类（big）。
  * 哪一格这一类抽不出（拿完了、效果还没做），就从剩下能出的卡里补（领悟只在打完 boss 那次出）；再没有就少一张。
  * avoid：重抽时尽量不出刚才那几张（不够了才出）。
  * @param {Run} run @param {{ els: string[], insight: boolean }} ctx els：玩家现有的元素；insight：打完 boss 的那次
@@ -284,15 +285,17 @@ export function offer(run, ctx, rnd, avoid = [], pool = CARDS) {
   const all = pool.filter((c) => eligible(c, run, ctx.els));
   const of = (/** @type {CardKind[]} */ kinds) => all.filter((c) => kinds.includes(c.kind));
   const firstMove = run.picks === 0 && of(['move']).length > 0;
-  /** @type {CardKind[][]} */
-  const slots = [firstMove ? ['move'] : ['move', 'rune'], ['art'], ctx.insight ? ['insight'] : ['move', 'rune', 'art']];
   const common = of(['move', 'rune', 'art']);
+  const big = all.filter((c) => c.big);
+  const noInsight = !pool.some((c) => c.kind === 'insight' && level(run, c.id) > 0);
+  const insights = noInsight && big.length ? big : of(['insight']);
+  const slots = [of(firstMove ? ['move'] : ['move', 'rune']), of(['art']), ctx.insight ? insights : common];
   /** @type {Card[]} */
   const out = [];
-  for (const kinds of slots) {
+  for (const slot of slots) {
     const free = (/** @type {Card[]} */ l) => l.filter((c) => !out.includes(c));
     const fresh = (/** @type {Card[]} */ l) => free(l).filter((c) => !avoid.includes(c.id));
-    const tries = [fresh(of(kinds)), fresh(common), free(of(kinds)), free(common)];
+    const tries = [fresh(slot), fresh(common), free(slot), free(common)];
     const list = tries.find((l) => l.length);
     if (list) out.push(draw(list, run, rnd));
   }
