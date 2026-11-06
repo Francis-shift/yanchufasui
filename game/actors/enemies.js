@@ -11,7 +11,7 @@ import * as CANNON from 'cannon-es';
 import { BOSS, ELEMENTS, ENEMIES, FLAME, MINION, REACTIONS, STONE } from '../rules/numbers.js';
 import { archerIntent, keepInArena } from '../rules/trial.js';
 import { attachToBone, makeRig, playRig } from './rig.js';
-import { CASTER_POS, CORE_POS, groundHeightAt, OBSTACLES, PATHS, PLAZA_R, SPAWN_FOG } from '../world/layout.js';
+import { backOnPath, CASTER_POS, CORE_POS, groundHeightAt, OBSTACLES, PATHS, PLAZA_R, SPAWN_FOG } from '../world/layout.js';
 import { FlowField } from '../world/flowfield.js';
 import { col, PALETTE, rand } from '../fx/common.js';
 
@@ -577,10 +577,10 @@ export class Enemies {
           e.vel.y -= 22 * dt;
           if (e.pos.y <= h) { e.pos.y = h; e.vel.y = 0; }
           if (Math.hypot(e.vel.x, e.vel.z) < 0.4 && e.pos.y <= h + 0.01) {
-            // 站稳后接着走：试炼里的小傀儡接着追施法者；在广场上就跟流场；被吹回石阶或索桥上，就沿直线回到广场再说
+            // 站稳后接着走：试炼里的小傀儡接着追施法者；在广场上就跟流场；被吹回石阶或索桥上，就接回原来那条路
             if (e.chase) e.mode = 'chase';
             else if (this.field.distAt(e.pos.x, e.pos.z) !== null) e.mode = 'field';
-            else { e.path = pathInfo([e.pos.clone(), CORE_FRONT.clone()]); e.s = 0; e.mode = 'walk'; e.lateral = 0; }
+            else { e.path = pathInfo(backOnPath(e.path.pts, e.pos)); e.s = 0; e.mode = 'walk'; e.lateral = 0; }
           }
         }
       } else if (e.mode === 'boss') {

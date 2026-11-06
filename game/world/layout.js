@@ -45,6 +45,13 @@ const HUABIAO_TILT = 0.2;
 export const PILLARS = [-1, 1].map((s) => ({ x: s * HUABIAO_X, z: HUABIAO_Z, dir: { x: -s * Math.cos(HUABIAO_TILT), z: -s * Math.sin(HUABIAO_TILT) } }));
 /** 香炉：广场两侧（目标图里在正中，但广场中间是敌人的路）。模型高 1.5、连龙耳宽 1.54、四足落地约 1.06 见方 */
 const CENSER_X = 7.2, CENSER_Z = 1.5;
+/** 两只香炉往哪倒：都往路中间（炭火才洒得到路上）。dir 是水平单位向量，下标 0 左 1 右 */
+export const CENSERS = [-1, 1].map((s) => ({ x: s * CENSER_X, z: CENSER_Z, dir: { x: -s, z: 0 } }));
+/**
+ * 香炉翻了炭火洒到哪几处。
+ * @param {{ x: number, z: number, dir: { x: number, z: number } }} p @param {number[]} at 离香炉多远
+ */
+export const spillSpots = (p, at) => at.map((t) => ({ x: p.x + p.dir.x * t, z: p.z + p.dir.z * t }));
 /**
  * 石灯（模型高 1.2、底座约 0.4 见方）：栏杆里侧一圈（离台边 0.8 米），正面朝广场中心；桥头两旁各一盏。
  * 石阶口两旁是牌坊柱子和石兽，正前方是阵眼，都不放。角度从 +x 往 +z 量
@@ -130,6 +137,20 @@ export function setDropped(circle) {
   STONE_SOLID.min[1] = circle ? 0 : STONE_BOTTOM;
   STONE_SOLID.max[1] = circle ? STONE.height : STONE.ringTop;
   refreshObstacles();
+}
+
+/** 索桥从广场这头到邻峰地面有多长：再往前脚下已经是山头了，滑不下去 */
+const BRIDGE_HANG = BRIDGE.a.distanceTo(PEAK.c) - PEAK.r;
+
+/**
+ * 站在 (x, z) 的在不在索桥悬空的那一段上。在的话给往哪边滑（朝离得近的那边的单位向量），不在给 null。
+ * @param {number} x @param {number} z @returns {{ x: number, z: number } | null}
+ */
+export function slipDir(x, z) {
+  const px = x - BRIDGE.a.x, pz = z - BRIDGE.a.y, along = px * BRIDGE_DIR.x + pz * BRIDGE_DIR.y;
+  if (along < 0 || along > BRIDGE_HANG) return null;
+  const off = BRIDGE_DIR.x * pz - BRIDGE_DIR.y * px, s = off >= 0 ? 1 : -1;
+  return Math.abs(off) > BRIDGE.halfW + 0.2 ? null : { x: -BRIDGE_DIR.y * s, z: BRIDGE_DIR.x * s };
 }
 
 /** 模型摆放的位置（props.js 用）：牌坊、两只石兽（右边那只镜像）、镇山石（模型原点在底面中心） */
@@ -244,6 +265,21 @@ export const PATHS = [
 ].map((pts) => pts.map(([x, z]) => new THREE.Vector3(x, groundHeightAt(x, z) ?? 0, z)));
 
 /**
+ * 被冲下路的敌人在石阶、索桥、邻峰上站稳后怎么接回去：找离 p 最近的一段，先奔这段的终点，后面照原路走。
+ * 这几处地面都是凸的，这一程踩不到悬空的地方（一条直线奔阵眼会从云海上走过去）。
+ * @param {THREE.Vector3[]} pts 原来的路 @param {THREE.Vector3} p @returns {THREE.Vector3[]}
+ */
+export function backOnPath(pts, p) {
+  const seg = new THREE.Line3(), q = new THREE.Vector3();
+  let best = 1, d = Infinity;
+  for (let i = 1; i < pts.length; i++) {
+    const k = seg.set(pts[i - 1], pts[i]).closestPointToPoint(p, true, q).distanceToSquared(p);
+    if (k < d) { d = k; best = i; }
+  }
+  return [p.clone(), ...pts.slice(best)];
+}
+
+/**
  * @param {THREE.Scene} scene
  * @param {{ tex?: number, reflect?: number }} [opts] tex：台面贴图边长（电影档 2048、流畅档 1024）；reflect：水洼平面反射图的宽（电影档 1024，不给只照出天）
  */
@@ -313,10 +349,13 @@ export function buildLayout(scene, opts = {}) {
   }
   for (const sx of [-CENSER_X, CENSER_X]) {
     const bowl = shadowy(new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.5, 0.8, 16), bronze));
-    bowl.position.set(sx, 0.95, CENSER_Z);
+    bowl.position.set(0, 0.95, 0);
     const foot = shadowy(new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.45, 0.6, 10), bronze));
-    foot.position.set(sx, 0.3, CENSER_Z);
-    censerBox.add(bowl, foot);
+    foot.position.set(0, 0.3, 0);
+    const one = new THREE.Group();
+    one.position.set(sx, 0, CENSER_Z);
+    one.add(bowl, foot);
+    censerBox.add(one);
   }
   scene.add(huabiaoBox, censerBox);
 
@@ -332,6 +371,9 @@ export function buildLayout(scene, opts = {}) {
   }
   planks.castShadow = planks.receiveShadow = true;
   scene.add(planks);
+  const planksIce = new THREE.MeshStandardMaterial({ color: 0xbfe6ff, roughness: 0.18, metalness: 0.1, emissive: 0x2a6fa8, emissiveIntensity: 0.35 });
+  /** 桥面结冰、化开 @param {boolean} on */
+  const frostBridge = (on) => { planks.material = on ? planksIce : wood; };
   // 铁索（10-23 由麻绳改铁链，目标图是铁索桥）：两侧扶手各一根往下垂的铁链、桥面两边各一根贴着木板，
   // 中间几根竖链把扶手吊在桥面上；两头各立一对石桩拴住。全部铁链一次画完
   const lines = [];
@@ -387,7 +429,7 @@ export function buildLayout(scene, opts = {}) {
   caster.position.copy(CASTER_POS);
   scene.add(caster);
 
-  return { core, coreSigil, crystal, caster, gateBox, stoneBox, stoneChains, huabiaoBox, censerBox, peakRock: peak, plaza, ambience };
+  return { core, coreSigil, crystal, caster, gateBox, stoneBox, stoneChains, huabiaoBox, censerBox, frostBridge, peakRock: peak, plaza, ambience };
 }
 
 /**

@@ -36,10 +36,11 @@ export function totalCost(steps) {
  *   ult：召龙要几格气势（默认 ULT_GAUGE；试炼拿了心法「龙吟」变少，见 run.js runMods）
  *   fusions：能合成哪些融合（默认 FUSION_OPEN；试炼里只有领悟了的合字，见 run.js runFusions）
  * @typedef {Step & { cost: number, dmgTotal: number, dmgEach: number, first: boolean, repeat: number,
- *             fusion?: string, fusionName?: string, idiom?: string, wallNamed?: boolean, pillars?: number[], cut?: boolean }} PlannedStep
- *   fusion 是融合的键（如 wind>fire）；wallNamed：这一招风是句子里点名吹土墙的（见 namesWall）；pillars：这一招落地时推倒哪几根华表（见 pickPillars）
+ *             fusion?: string, fusionName?: string, idiom?: string, wallNamed?: boolean, pillars?: number[], cut?: boolean,
+ *             tips?: number[], freeze?: boolean }} PlannedStep
+ *   fusion 是融合的键（如 wind>fire）；wallNamed：这一招风是句子里点名吹土墙的（见 namesWall）；pillars：这一招落地时推倒哪几根华表（见 pickOfTwo）
  * @typedef {{ el: string, name: string, target: string, dmg: number, radius: number, cast: boolean, ghost: boolean,
- *             first?: boolean, pillars?: number[], cut?: boolean }} SummonPlan cast = 真召出来了；ghost = 差一口气，只演龙影（法术已换成 steps 里的雨）
+ *             first?: boolean, pillars?: number[], cut?: boolean, tips?: number[], freeze?: boolean }} SummonPlan cast = 真召出来了；ghost = 差一口气，只演龙影（法术已换成 steps 里的雨）
  * @typedef {{ ok: boolean, steps: PlannedStep[], cost: number, momentum: number, momentumHalved: boolean,
  *             downgrades: string[], backlash: boolean, gaugeGain: number, gaugeSpent?: boolean, summon?: SummonPlan,
  *             lastCombo: { key: string, streak: number } | null, newlySeen: string[], saidKey: string }} CastPlan
@@ -326,15 +327,15 @@ export function topples(step, text) {
 export const saysDown = (text) => /[倒翻塌断]/.test(text);
 
 /**
- * 华表：这句话说的是哪几根（下标，0 左 1 右，方位按屏幕）。说了两根、都、左和右，就是还立着的全部；说了左或右听它的；
+ * 华表、香炉：这句话说的是哪几根（下标，0 左 1 右，方位按屏幕）。说了两根、都、左和右，就是还立着的全部；说了左或右听它的；
  * 都没说挑离最前面那只敌人最近的（倒下来挡得到它）。倒了的不算，都倒了返回空。
  * @param {string} text @param {{ x: number, z: number, up: boolean }[]} pillars @param {EnemyView[]} enemies
  * @returns {number[]}
  */
-export function pickPillars(text, pillars, enemies) {
+export function pickOfTwo(text, pillars, enemies) {
   const up = pillars.map((p, i) => ({ ...p, i })).filter((p) => p.up);
   const left = text.includes('左'), right = text.includes('右');
-  if ((left && right) || /两根|两座|两边|双|一对|所有|全部|都/.test(text)) return up.map((p) => p.i);
+  if ((left && right) || /两根|两座|两只|两个|两边|双|一对|所有|全部|都/.test(text)) return up.map((p) => p.i);
   if (left || right) return up.filter((p) => p.i === (left ? 0 : 1)).map((p) => p.i);
   if (up.length < 2 || !enemies.length) return up.slice(0, 1).map((p) => p.i);
   const head = enemies.reduce((a, e) => (e.distToCore < a.distToCore ? e : a));
@@ -388,6 +389,20 @@ export function stoneDrop(t, h) {
 
 /** 镇山石砸到地上，离落点 d 米的挨多少 @param {number} d @returns {number} */
 export const dropDamage = (d) => (d <= DROP.r ? DROP.dmg : d <= DROP.ringR ? DROP.ringDmg : 0);
+
+/** 这句话说的是把东西打翻（没说风的时候要说这些才算）@param {string} text */
+export const saysTip = (text) => /[踢倒翻掀撞砸]/.test(text);
+
+/**
+ * 这一招翻不翻得了香炉：要点名香炉，风不用多说，别的元素要说踢、倒、翻、掀、撞、砸。
+ * @param {{ el: string, target: string }} step @param {string} text 原话
+ */
+export function tips(step, text) {
+  return step.target === 'censer' && (step.el === 'wind' || saysTip(text));
+}
+
+/** 这一招冻不冻得住索桥：要点名索桥，只有冰才行 @param {{ el: string, target: string }} step */
+export const freezes = (step) => step.target === 'bridge' && step.el === 'ice';
 
 /**
  * 雷的连锁：从被打中的敌人跳向 range 米内最近、这一下还没打过的敌人，最多跳 jumps 次；

@@ -263,6 +263,13 @@ export const TOPPLE = { name: '华表', hinge: 0.5, len: 4.6, rest: 1.5, lean: 0
  * r 米内受 dmg（砸得死小怪，巨像不死），ringR 米内受 ringDmg；落地后占一个半径 body 的圆，留在门洞正中。
  */
 export const DROP = { name: '镇山石', hold: 0.15, g: 14, r: 1.7, dmg: 200, ringR: 3.4, ringDmg: 60, body: 0.95 };
+/**
+ * 香炉（设计文档第 2 节：踢翻 → 地面起火）：往路中间倒，炭火洒成一溜，at 是每一片离香炉多远。
+ * 每片半径 r、烧 sec 秒，和字诀「燎」的地火一样隔一会烧一下，一下 dmg。hinge：转轴离中心多远
+ */
+export const SPILL = { hinge: 0.45, at: [1.4, 2.8, 4.2, 5.6], r: 1.3, sec: 8, dmg: 6 };
+/** 索桥（设计文档第 2 节：冻住 → 敌人滑落）：冻 sec 秒，这期间桥上的敌人以 slide 米/秒往旁边滑，滑出桥面就掉下去 */
+export const BRIDGE_ICE = { sec: 6, slide: 4.5 };
 
 /**
  * 当前批次开放的原件。中期只开火 / 冰 / 风 × 弹 / 爆，第一批起火冰风土雷 × 弹爆墙雨全开；

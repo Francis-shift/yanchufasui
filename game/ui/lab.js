@@ -37,6 +37,8 @@ export const LAB_PRESETS = [
   ['落石', { s: [{ e: 'earth', f: 'wall', t: 'front' }, { e: 'wind', f: 'burst', t: 'front' }], m: 1 }],
   ['推倒华表', { s: [{ e: 'wind', f: 'bolt', t: 'pillar' }], m: 1 }],
   ['烧断铁链', { s: [{ e: 'fire', f: 'bolt', t: 'rope' }], m: 1 }],
+  ['踢翻香炉', { s: [{ e: 'wind', f: 'bolt', t: 'censer' }], m: 1 }],
+  ['冻住索桥', { s: [{ e: 'ice', f: 'bolt', t: 'bridge' }], m: 1 }],
   ['召唤冰龙', { s: [], c: 'ice', m: 3 }],
   ['召唤火龙', { s: [], c: 'fire', m: 3 }],
   ['召唤雷龙', { s: [], c: 'thunder', m: 3 }],

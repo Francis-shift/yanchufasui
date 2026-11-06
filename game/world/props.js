@@ -110,8 +110,8 @@ export function pinePlacements(perches, pines, spots) {
  * @param {THREE.Scene} scene
  * @param {{ gateBox: THREE.Object3D, stoneBox: THREE.Object3D, huabiaoBox?: THREE.Object3D, censerBox?: THREE.Object3D,
  *   peakRock?: THREE.Object3D, plaza?: { base: THREE.Object3D }, huabiao?: import('./huabiao.js').Huabiao,
- *   zhenshan?: import('./zhenshan.js').Zhenshan }} layout 占位（方块、代码合成的邻峰和台底）；
- *   huabiao：给了就把华表模型交给它，推倒时跟着转；zhenshan：同样，把镇山石模型交给它，断铁链时跟着掉
+ *   zhenshan?: import('./zhenshan.js').Zhenshan, censers?: import('./tipper.js').Tipper }} layout 占位（方块、代码合成的邻峰和台底）；
+ *   huabiao、censers：给了就把模型交给它，倒的时候跟着转；zhenshan：同样，把镇山石模型交给它，断铁链时跟着掉
  * @param {'cinema' | 'smooth'} tier
  * @param {string | ((file: string) => string)} src 模型目录的地址（以 / 结尾），或按文件名给地址的函数（预览页用内嵌的文件）
  * @param {THREE.WebGLRenderer} renderer
@@ -225,7 +225,10 @@ export function loadProps(scene, layout, tier, src, renderer, env) {
     load('gate').then((m) => { place(m, PROP_SPOTS.gate); layout.gateBox.visible = false; }).catch(warn('gate')),
     load('lion').then((m) => { for (const s of PROP_SPOTS.lions) place(m, s); }).catch(warn('lion')),
     load('stone').then((m) => { const mesh = place(m, PROP_SPOTS.stone); layout.zhenshan?.use(mesh); layout.stoneBox.visible = false; }).catch(warn('stone')),
-    load('censer').then((m) => { for (const s of PROP_SPOTS.censers) place(m, s); if (layout.censerBox) layout.censerBox.visible = false; }).catch(warn('censer')),
+    load('censer').then((m) => {
+      PROP_SPOTS.censers.forEach((s, i) => { const mesh = place(m, s); layout.censers?.use(i, mesh); });
+      if (layout.censerBox) layout.censerBox.visible = false;
+    }).catch(warn('censer')),
     load('huabiao').then((m) => {
       PROP_SPOTS.huabiao.forEach((s, i) => { const mesh = place(m, s); layout.huabiao?.use(i, mesh); });
       if (layout.huabiaoBox) layout.huabiaoBox.visible = false;

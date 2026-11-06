@@ -4,7 +4,7 @@ import { test } from 'node:test';
 
 import * as THREE from 'three';
 
-import { damageTo, pickPillars, saysDown, topples, toppleAngle, underLog } from '../game/rules/arbiter.js';
+import { damageTo, pickOfTwo, saysDown, topples, toppleAngle, underLog } from '../game/rules/arbiter.js';
 import { sanitizeIntent } from '../game/rules/intent.js';
 import { parseKeywords } from '../game/rules/keywords.js';
 import { ELEMENTS, ENEMIES, TOPPLE } from '../game/rules/numbers.js';
@@ -38,22 +38,22 @@ test('打字就能推：关键词解析认得出华表和没说元素的说法�
 });
 
 test('哪一根：左右听原话；两根、都、左和右是全部；倒了的不算', () => {
-  assert.deepEqual(pickPillars('推倒左边的华表', views(), []), [0]);
-  assert.deepEqual(pickPillars('推倒右边的华表', views(), []), [1]);
-  assert.deepEqual(pickPillars('把两根华表都推倒', views(), []), [0, 1]);
-  assert.deepEqual(pickPillars('推倒左边和右边的华表', views(), []), [0, 1]);
-  assert.deepEqual(pickPillars('把两根华表都推倒', views(false, true), []), [1], '倒了的不再算');
-  assert.deepEqual(pickPillars('推倒左边的华表', views(false, true), []), [], '点名的那根已经倒了，别改去推另一根');
-  assert.deepEqual(pickPillars('推倒华表', views(false, false), []), []);
+  assert.deepEqual(pickOfTwo('推倒左边的华表', views(), []), [0]);
+  assert.deepEqual(pickOfTwo('推倒右边的华表', views(), []), [1]);
+  assert.deepEqual(pickOfTwo('把两根华表都推倒', views(), []), [0, 1]);
+  assert.deepEqual(pickOfTwo('推倒左边和右边的华表', views(), []), [0, 1]);
+  assert.deepEqual(pickOfTwo('把两根华表都推倒', views(false, true), []), [1], '倒了的不再算');
+  assert.deepEqual(pickOfTwo('推倒左边的华表', views(false, true), []), [], '点名的那根已经倒了，别改去推另一根');
+  assert.deepEqual(pickOfTwo('推倒华表', views(false, false), []), []);
 });
 
 test('哪一根：没说左右挑离最前面那只最近的，只剩一根就是它，没敌人先左边', () => {
   const front = [enemy(3, -5, 12), enemy(-3, -6, 14)];
-  assert.deepEqual(pickPillars('推倒华表', views(), front), [1], '离阵眼最近的那只在右边');
-  assert.deepEqual(pickPillars('推倒华表', views(), [...front].reverse()), [1], '和排列顺序无关');
-  assert.deepEqual(pickPillars('推倒华表', views(), [enemy(-3, -6, 9), enemy(3, -5, 12)]), [0]);
-  assert.deepEqual(pickPillars('推倒华表', views(true, false), front), [0]);
-  assert.deepEqual(pickPillars('推倒华表', views(), []), [0]);
+  assert.deepEqual(pickOfTwo('推倒华表', views(), front), [1], '离阵眼最近的那只在右边');
+  assert.deepEqual(pickOfTwo('推倒华表', views(), [...front].reverse()), [1], '和排列顺序无关');
+  assert.deepEqual(pickOfTwo('推倒华表', views(), [enemy(-3, -6, 9), enemy(3, -5, 12)]), [0]);
+  assert.deepEqual(pickOfTwo('推倒华表', views(true, false), front), [0]);
+  assert.deepEqual(pickOfTwo('推倒华表', views(), []), [0]);
 });
 
 test('倒的过程：先慢、越倒越快、到底弹一下，最后躺在 rest', () => {
