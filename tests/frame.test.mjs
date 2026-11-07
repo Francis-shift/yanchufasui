@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { GradePass } from '../game/fx/grade.js';
-import { FRAME_ART, FRAME_CSS, FRAME_GLOW, FRAME_SETTLE, LEVELS, outranks } from '../game/ui/frame.js';
+import { FRAME_ART, FRAME_CSS, FRAME_GLOW, FRAME_SETTLE, FRAME_SKILLS, LEVELS, outranks } from '../game/ui/frame.js';
 import { RUN, SUMMONS } from '../game/rules/numbers.js';
 import * as THREE from 'three';
 
@@ -31,7 +31,25 @@ test('法域的画框：水墨铺开时一笔笔落下，铺满之后人物退�
   assert.equal(LEVELS.large.hold, 0);
   assert.ok(FRAME_SETTLE >= RUN.domain.open && FRAME_SETTLE <= RUN.domain.open + 1);
   assert.match(FRAME_CSS, /\.yc-frame\.large \{ --d: \.5s; --g: \.34s;/);
-  assert.match(FRAME_CSS, /\.yc-frame\.settle \.p, \.yc-frame\.settle em \{ opacity: 0;/);
+  assert.match(FRAME_CSS, /\.yc-frame\.settle \.k, \.yc-frame\.settle \.p, \.yc-frame\.settle em \{ opacity: 0;/);
+});
+
+test('每个技能一张图：五条龙、护身、双龙护身、化身、法域都有，一张不大，三处放大招都点了名', async () => {
+  const { readFileSync, statSync } = await import('node:fs');
+  for (const n of FRAME_SKILLS) assert.ok(statSync(new URL(`../public/frame/skill-${n}.webp`, import.meta.url)).size <= 160 * 1024, n);
+  for (const el of Object.keys(SUMMONS)) assert.ok(FRAME_SKILLS.includes(el), el);
+  const main = readFileSync(new URL('../game/main.js', import.meta.url), 'utf8');
+  assert.match(main, /text: '法域', [^\n]*skill: 'domain' \}/);
+  assert.match(main, /text: '化身', [^\n]*skill: 'avatar' \}/);
+  assert.match(main, /skill: guard \? \(twin \? 'twin' : 'guard'\) : el \}/);
+});
+
+test('技能图贴左下角，自带边线，所以立绘和两笔都让开；法域铺满后图退场，那两笔才出来当倒计时', () => {
+  assert.match(FRAME_CSS, /\.yc-frame \.k \{ left: 0; bottom: 0; height: calc\(var\(--h\) \* 1\.33\); aspect-ratio: 16 \/ 9;/);
+  assert.match(FRAME_CSS, /\.yc-frame\.own \.p, \.yc-frame\.own em \{ display: none; \}/);
+  assert.match(FRAME_CSS, /\.yc-frame\.own:not\(\.settle\) \.l, \.yc-frame\.own:not\(\.settle\) \.d \{ opacity: 0; \}/);
+  assert.match(FRAME_CSS, /\.yc-frame\.inked \.k \{ display: none; \}\n\.yc-frame\.own \.k \{ display: block; \}/, '没有这张图时不留空块');
+  assert.match(FRAME_CSS, /\.yc-frame\.own \{ --t: calc\(var\(--h\) \* \.92\); \}/, '大字让到主体右边');
 });
 
 test('画框遮得少：人物贴左下角，最高不过屏幕六成多，右边和中间什么都不放，几笔只贴左边和底边', () => {

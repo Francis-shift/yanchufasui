@@ -1475,7 +1475,7 @@ export function start(root, opts = {}) {
     setGauge(0);
     S.domain = openDomain();
     trial.domain = true;
-    hud.frame.show('large', { text: '法域', color: FRAME_GLOW[S.domainEl] });
+    hud.frame.show('large', { text: '法域', color: FRAME_GLOW[S.domainEl], skill: 'domain' });
     sound.play('frameL');
     fx.shake = Math.max(fx.shake, 0.5);
   }
@@ -1570,7 +1570,7 @@ export function start(root, opts = {}) {
     trial.held = true;
     trial.hp = avatarHeal(trial.hp, TRIAL.hp);
     hud.setCore(trial.hp, TRIAL.hp);
-    hud.frame.show('mid', { text: '化身', color: FRAME_GLOW[el] });
+    hud.frame.show('mid', { text: '化身', color: FRAME_GLOW[el], skill: 'avatar' });
     sound.play('frameM');
     fx.shake = Math.max(fx.shake, 0.5);
     caster.setAvatar(FRAME_GLOW[el], RUN.avatar.scale);
@@ -1824,7 +1824,7 @@ export function start(root, opts = {}) {
     if (play.on) sm.dmg *= AUTO.dragon;
     const el = /** @type {keyof typeof SUMMONS} */ (sm.el), k = sm.dmg / SUMMONS[el].dmg;
     const twin = S.mods.twin, guard = S.mods.guard && S.mode === 'trial';
-    hud.frame.show('small', { text: guard ? (twin ? '双龙护身' : '护身') : `${sm.name}现世`, color: FRAME_GLOW[el] });
+    hud.frame.show('small', { text: guard ? (twin ? '双龙护身' : '护身') : `${sm.name}现世`, color: FRAME_GLOW[el], skill: guard ? (twin ? 'twin' : 'guard') : el });
     sound.play('frameS');
     fx.launchBurst(el);
     sound.play('dragon', { el });

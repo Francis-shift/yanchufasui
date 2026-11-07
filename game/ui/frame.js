@@ -1,10 +1,11 @@
 // @ts-check
 /**
- * 全屏画框（设计文档第 4 节"全屏画框"）：放大招时左边、底边贴一道细笔触，人物立绘压在左下角的泼墨上，大字竖写在人物旁边，画面中间和右边都空着。
+ * 全屏画框（设计文档第 4 节"全屏画框"）：放大招时左下角亮这个技能自己的那张图（九张，FRAME_SKILLS），大字竖写在主体旁边，画面中间和右边都空着。
+ * 那张图没到时退回立绘：左边、底边贴一道细笔触，人物压在左下角的泼墨上。
  * 三级：small 召龙、护身，亮一下就退；mid 化身亮相，之后四边留一圈呼吸（aura，单独一层）；large 法域，随着水墨铺开一笔笔落下，
  * 人物退场后几笔留在边上，底下那一笔当倒计时，收束时一笔斩过。
  * 用网页叠层画，不走后期，手机流畅档也有。两个同时来只放强的（outranks）。
- * 笔触是素材（public/frame/，tools/ink_art.py、ink_hero.py 画的）；还没下载到、下载不了时退回现画的墨带。计时用真实时间（法域里世界的钟是停的）。
+ * 素材在 public/frame/（笔触和立绘是 tools/ink_art.py、ink_hero.py 画的，技能图是 tools/ink_skill.py 抠的）；笔触还没下载到、下载不了时退回现画的墨带。计时用真实时间（法域里世界的钟是停的）。
  */
 
 /** thick：现画的墨带多宽（屏幕短边的几成）；text：大字多大；hold：亮几秒（0 是一直留着）；rank：谁压谁 */
@@ -16,6 +17,8 @@ export const LEVELS = {
 
 /** 素材：几笔、元素色那一团、收束那一笔、立绘 */
 export const FRAME_ART = ['left', 'bottom', 'top', 'splash', 'tint', 'slash', 'hero'];
+/** 每个技能自己的画框图：五条龙、护身、双龙护身、化身、法域（public/frame/skill-*.webp，16:9，主体压在左下角） */
+export const FRAME_SKILLS = ['ice', 'fire', 'wind', 'earth', 'thunder', 'guard', 'twin', 'avatar', 'domain'];
 /** 法域的画框开多久之后人物退场、几笔收到边上，让出地方走位（秒） */
 export const FRAME_SETTLE = 3;
 
@@ -43,19 +46,26 @@ export const FRAME_CSS = `
 .yc-frame s, .yc-frame em { position: absolute; display: none; background: center / 100% 100% no-repeat; transition: transform .7s ease-in-out, opacity .7s ease-in; }
 .yc-frame.inked s, .yc-frame.inked em { display: block; }
 .yc-frame.inked .yc-fbar { display: none; }
-.yc-frame { --d: .14s; --g: .05s; --h: min(50vh, 42vw); }
+.yc-frame.inked .k { display: none; }
+.yc-frame.own .k { display: block; }
+.yc-frame.own .p, .yc-frame.own em { display: none; }
+.yc-frame.own:not(.settle) .l, .yc-frame.own:not(.settle) .d { opacity: 0; }
+.yc-frame { --d: .14s; --g: .05s; --h: min(50vh, 42vw); --t: calc(2vmin + var(--h) * .62); }
+.yc-frame.own { --t: calc(var(--h) * .92); }
 .yc-frame.mid { --d: .18s; --g: .07s; --h: min(56vh, 46vw); }
 .yc-frame.large { --d: .5s; --g: .34s; --h: min(62vh, 50vw); }
 .yc-frame .l { left: -9.6vmin; top: 0; height: 100%; width: 24vmin; background-image: var(--ink-left); }
 .yc-frame .d { left: 0; right: 24%; bottom: -4.5vmin; height: 18vmin; background-image: var(--ink-bottom); }
 .yc-frame .p { left: 0; bottom: 0; height: calc(var(--h) * 1.08); width: calc(var(--h) * .92); background-image: var(--ink-splash); }
 .yc-frame em { left: 2vmin; bottom: 0; height: var(--h); aspect-ratio: 908 / 1200; background-image: var(--ink-hero); }
+.yc-frame .k { left: 0; bottom: 0; height: calc(var(--h) * 1.33); aspect-ratio: 16 / 9; transform-origin: 0 100%; }
 .yc-frame.on .l { animation: yc-sup var(--d) ease-out backwards; }
 .yc-frame.inked.on canvas { animation: yc-sfade calc(var(--d) * 2) ease-out backwards; }
 .yc-frame.on .d { animation: yc-srt var(--d) ease-out var(--g) backwards; }
 .yc-frame.on .p { animation: yc-srt var(--d) ease-out calc(var(--g) * 2) backwards; }
 .yc-frame.on em { animation: yc-shero calc(var(--d) * 1.8) cubic-bezier(.2,.8,.2,1) calc(var(--g) * 3) backwards; }
-.yc-frame.settle .p, .yc-frame.settle em { opacity: 0; transform: translateX(-14%); }
+.yc-frame.on .k { animation: yc-shero calc(var(--d) * 1.8) cubic-bezier(.2,.8,.2,1) var(--g) backwards; }
+.yc-frame.settle .k, .yc-frame.settle .p, .yc-frame.settle em { opacity: 0; transform: translateX(-14%); }
 .yc-frame.settle canvas { opacity: 0; transition: opacity .7s ease-in; }
 .yc-frame.settle b, .yc-frame.settle i { opacity: 0; }
 @keyframes yc-sup { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0 0 0 0); } }
@@ -64,7 +74,7 @@ export const FRAME_CSS = `
 @keyframes yc-shero { from { opacity: 0; transform: translateX(-7%) scale(1.04); } }
 .yc-frame b { position: absolute; left: 3.2vmin; top: 50%; transform: translateY(-50%); writing-mode: vertical-rl; font-weight: normal; line-height: 1; letter-spacing: .08em;
   color: #fbf4e6; text-shadow: 0 0 .35em var(--c), 0 .04em .12em rgba(0,0,0,.8); transition: opacity .25s; }
-.yc-frame.inked b { left: calc(2vmin + var(--h) * .62); top: auto; bottom: 18vmin; transform: none; white-space: nowrap; text-shadow: 0 0 .1em #000, 0 0 .3em #000, 0 0 .6em rgba(0,0,0,.7); }
+.yc-frame.inked b { left: var(--t); top: auto; bottom: 18vmin; transform: none; white-space: nowrap; text-shadow: 0 0 .1em #000, 0 0 .3em #000, 0 0 .6em rgba(0,0,0,.7); }
 .yc-frame i { position: absolute; font-style: normal; width: 1.1em; height: 1.1em; line-height: 1.1em; text-align: center; border-radius: 2px; background: #b3261e; color: #fbefe6; transform: rotate(-4deg); transition: opacity .25s; }
 .yc-fbar { position: absolute; left: 12%; right: 12%; bottom: 2.4vmin; height: 3px; background: rgba(251,244,230,.28); }
 .yc-fbar[hidden] { display: none; }
@@ -249,7 +259,7 @@ export class ScreenFrame {
    */
   constructor(root, font, url = (name) => `/frame/${name}.webp`) {
     const make = (/** @type {string} */ html) => { const t = document.createElement('template'); t.innerHTML = html; return /** @type {HTMLElement} */ (t.content.firstElementChild); };
-    this.el = make('<div class="yc-frame"><canvas></canvas><s class="p"></s><s class="l"></s><s class="d"></s><em></em>'
+    this.el = make('<div class="yc-frame"><canvas></canvas><s class="p"></s><s class="l"></s><s class="d"></s><em></em><s class="k"></s>'
       + '<b></b><i>敕</i><div class="yc-fbar" hidden><u></u></div></div>');
     this.sky = make('<div class="yc-sky"></div>');
     this.cut = /** @type {HTMLCanvasElement} */ (make('<canvas class="yc-slash"></canvas>'));
@@ -260,6 +270,7 @@ export class ScreenFrame {
     this.bar = /** @type {HTMLElement} */ (this.el.querySelector('.yc-fbar'));
     this.fill = /** @type {HTMLElement} */ (this.el.querySelector('u'));
     this.under = /** @type {HTMLElement} */ (this.el.querySelector('.d'));
+    this.pic = /** @type {HTMLElement} */ (this.el.querySelector('.k'));
     this.el.style.fontFamily = this.sky.style.fontFamily = font;
     this.root = root;
     root.prepend(this.halo, this.el, this.sky, this.cut);   // 排在最前：压在界面下面，按钮和血条照常露着
@@ -271,10 +282,13 @@ export class ScreenFrame {
     /** @type {number | undefined} */ this.cutTimer = undefined;
     /** 素材：全到了才换成笔触，半路开着的画框不受影响 @type {Record<string, HTMLImageElement> | null} */
     this.art = null;
-    this.ready = Promise.all(FRAME_ART.map((n) => { const im = new Image(); im.src = url(n); return im.decode().then(() => /** @type {[string, HTMLImageElement]} */ ([n, im])); })).then((list) => {
+    /** 技能图：一张一张到，哪张没到这个技能就先用立绘 @type {Record<string, HTMLImageElement>} */
+    this.pics = {};
+    const strokes = Promise.all(FRAME_ART.map((n) => { const im = new Image(); im.src = url(n); return im.decode().then(() => /** @type {[string, HTMLImageElement]} */ ([n, im])); })).then((list) => {
       for (const n of FRAME_ART) this.el.style.setProperty(`--ink-${n}`, `url("${url(n)}")`);
       this.art = Object.fromEntries(list);
     }).catch(() => {});   // 下载不了：一直用现画的墨带
+    this.ready = Promise.all([strokes, ...FRAME_SKILLS.map((n) => { const im = new Image(); im.src = url(`skill-${n}`); return im.decode().then(() => { this.pics[n] = im; }).catch(() => {}); })]);
   }
 
   /** 按现在的屏幕大小定画布（物理像素太奢侈，墨迹本来就是毛的，按 CSS 像素画，封顶 1280 宽） @param {HTMLCanvasElement} c */
@@ -286,12 +300,14 @@ export class ScreenFrame {
 
   /**
    * 亮一个画框。压不过现在这个就不亮（返回 false）
-   * @param {keyof typeof LEVELS} level @param {{ text: string, color: string }} o
+   * @param {keyof typeof LEVELS} level @param {{ text: string, color: string, skill?: string }} o skill：FRAME_SKILLS 里的哪一张
    */
   show(level, o) {
     if (!outranks(this.cur, level)) return false;
     const L = LEVELS[level], g = this.fit(this.canvas), W = this.canvas.width, H = this.canvas.height, sh = Math.min(this.root.clientWidth, this.root.clientHeight);
     clearTimeout(this.timer);
+    const pic = this.art && o.skill ? this.pics[o.skill] : undefined;
+    if (pic) this.pic.style.backgroundImage = `url("${pic.src}")`;
     if (this.art) paintWash(g, W, H, this.art, o.color);
     else paintBand(g, W, H, Math.min(W, H) * L.thick, o.color, rng(this.seed++));
     this.el.style.setProperty('--c', o.color);
@@ -299,14 +315,14 @@ export class ScreenFrame {
     const size = Math.round(sh * (this.art ? L.text : L.thick * (level === 'large' ? 0.95 : 0.85)));
     this.text.style.fontSize = `${size}px`;
     this.seal.style.fontSize = `${Math.round(size * 0.34)}px`;
-    this.seal.style.left = this.art ? `calc(2vmin + var(--h) * .62 + ${Math.round(size * 0.16)}px)` : `calc(3.2vmin + ${Math.round(size * 0.3)}px)`;
+    this.seal.style.left = this.art ? `calc(var(--t) + ${Math.round(size * 0.16)}px)` : `calc(3.2vmin + ${Math.round(size * 0.3)}px)`;
     this.seal.style.top = this.art ? 'auto' : `calc(50% + ${Math.round((size * [...o.text].length * 1.08) / 2 + size * 0.2)}px)`;
     this.seal.style.bottom = this.art ? `calc(18vmin - ${Math.round(size * 0.52)}px)` : 'auto';
     this.bar.hidden = level !== 'large';
     this.under.style.clipPath = '';
     this.left = -1;
     this.progress(1);
-    this.el.className = `yc-frame ${level}${this.art ? ' inked' : ''}`;
+    this.el.className = `yc-frame ${level}${this.art ? ' inked' : ''}${pic ? ' own' : ''}`;
     this.cur = { level };
     void this.el.offsetWidth;   // 换了类名、位置，要先落一帧，过渡才走得起来
     this.el.classList.add('on');
