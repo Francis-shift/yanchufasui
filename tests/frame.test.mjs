@@ -30,11 +30,21 @@ test('素材都在：画框的笔触、立绘、收束那一笔缺一张就退�
 test('法域的画框：水墨铺开时一笔笔落下，铺满之后人物退场，几笔收到边上让出地方走位', () => {
   assert.equal(LEVELS.large.hold, 0);
   assert.ok(FRAME_SETTLE >= RUN.domain.open && FRAME_SETTLE <= RUN.domain.open + 1);
-  assert.match(FRAME_CSS, /\.yc-frame\.large \{ --d: \.5s; --g: \.34s; \}/);
-  assert.match(FRAME_CSS, /\.yc-frame\.settle \.r, \.yc-frame\.settle em \{ opacity: 0;/);
+  assert.match(FRAME_CSS, /\.yc-frame\.large \{ --d: \.5s; --g: \.34s;/);
+  assert.match(FRAME_CSS, /\.yc-frame\.settle \.p, \.yc-frame\.settle em \{ opacity: 0;/);
 });
 
-test('中间不放东西：墨带最宽也只占短边一成半，大字贴在左边，天上的字在上半屏', () => {
+test('画框遮得少：人物贴左下角，最高不过屏幕六成多，右边和中间什么都不放，几笔只贴左边和底边', () => {
+  assert.match(FRAME_CSS, /\.yc-frame em \{ left: 2vmin; bottom: 0; height: var\(--h\);/);
+  assert.match(FRAME_CSS, /\.yc-frame \.p \{ left: 0; bottom: 0;/);
+  const hs = [...FRAME_CSS.matchAll(/--h: min\((\d+)vh, (\d+)vw\)/g)];
+  assert.equal(hs.length, 3, '三级各有一个高度');
+  for (const m of hs) assert.ok(+m[1] <= 62 && +m[2] <= 50, m[0]);
+  assert.match(FRAME_CSS, /\.yc-frame \.l \{ left: -9\.6vmin; top: 0; height: 100%; width: 24vmin;/, '左边那一笔只露一半');
+  assert.match(FRAME_CSS, /\.yc-frame \.d \{ left: 0; right: 24%; bottom: -4\.5vmin; height: 18vmin;/, '底边那一笔只露一半，到右边之前就停');
+});
+
+test('中间不放东西：现画的墨带最宽也只占短边一成半，大字贴在左边，天上的字在上半屏', () => {
   for (const L of Object.values(LEVELS)) assert.ok(L.thick <= 0.15);
   assert.match(FRAME_CSS, /\.yc-frame b \{ position: absolute; left: 3\.2vmin/);
   assert.match(FRAME_CSS, /\.yc-sky \{ position: absolute; left: 0; right: 0; top: max\(15%, 92px\)/, '手机上 boss 血条到 83 像素，天上的字排在它下面');

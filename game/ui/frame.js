@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * 全屏画框（设计文档第 4 节"全屏画框"）：放大招时几笔真的笔触刷进画面，人物立绘压在右边的泼墨上，大字竖着写在左边那一笔上。
+ * 全屏画框（设计文档第 4 节"全屏画框"）：放大招时左边、底边贴一道细笔触，人物立绘压在左下角的泼墨上，大字竖写在人物旁边，画面中间和右边都空着。
  * 三级：small 召龙、护身，亮一下就退；mid 化身亮相，之后四边留一圈呼吸（aura，单独一层）；large 法域，随着水墨铺开一笔笔落下，
  * 人物退场后几笔留在边上，底下那一笔当倒计时，收束时一笔斩过。
  * 用网页叠层画，不走后期，手机流畅档也有。两个同时来只放强的（outranks）。
@@ -9,13 +9,13 @@
 
 /** thick：现画的墨带多宽（屏幕短边的几成）；text：大字多大；hold：亮几秒（0 是一直留着）；rank：谁压谁 */
 export const LEVELS = {
-  small: { rank: 1, thick: 0.1, text: 0.11, hold: 1 },
-  mid: { rank: 2, thick: 0.13, text: 0.14, hold: 1 },
-  large: { rank: 3, thick: 0.15, text: 0.16, hold: 0 },
+  small: { rank: 1, thick: 0.1, text: 0.09, hold: 1 },
+  mid: { rank: 2, thick: 0.13, text: 0.1, hold: 1 },
+  large: { rank: 3, thick: 0.15, text: 0.12, hold: 0 },
 };
 
 /** 素材：几笔、元素色那一团、收束那一笔、立绘 */
-export const FRAME_ART = ['left', 'bottom', 'top', 'right', 'tint', 'slash', 'hero'];
+export const FRAME_ART = ['left', 'bottom', 'top', 'splash', 'tint', 'slash', 'hero'];
 /** 法域的画框开多久之后人物退场、几笔收到边上，让出地方走位（秒） */
 export const FRAME_SETTLE = 3;
 
@@ -43,38 +43,29 @@ export const FRAME_CSS = `
 .yc-frame s, .yc-frame em { position: absolute; display: none; background: center / 100% 100% no-repeat; transition: transform .7s ease-in-out, opacity .7s ease-in; }
 .yc-frame.inked s, .yc-frame.inked em { display: block; }
 .yc-frame.inked .yc-fbar { display: none; }
-.yc-frame { --d: .14s; --g: .05s; }
-.yc-frame.mid { --d: .18s; --g: .07s; }
-.yc-frame.large { --d: .5s; --g: .34s; }
-.yc-frame .l { left: 0; top: 0; height: 100%; width: 46.7vmin; background-image: var(--ink-left); }
-.yc-frame .d { left: 0; right: 0; bottom: 0; height: 32vmin; background-image: var(--ink-bottom); }
-.yc-frame .u { right: 0; top: 0; width: 72%; height: 24vmin; background-image: var(--ink-top); }
-.yc-frame .r { right: 0; top: 0; height: 100%; width: min(84vh, 62vw); background-image: var(--ink-right); }
-.yc-frame em { right: 2%; bottom: 0; height: min(100vh, 96vw); aspect-ratio: 908 / 1200; background-image: var(--ink-hero); }
-.yc-frame.small em { height: min(84vh, 80vw); }
-.yc-frame.small .r { opacity: .92; width: min(66vh, 52vw); }
-.yc-frame.on .l { animation: yc-swd var(--d) ease-out backwards; }
+.yc-frame { --d: .14s; --g: .05s; --h: min(50vh, 42vw); }
+.yc-frame.mid { --d: .18s; --g: .07s; --h: min(56vh, 46vw); }
+.yc-frame.large { --d: .5s; --g: .34s; --h: min(62vh, 50vw); }
+.yc-frame .l { left: -9.6vmin; top: 0; height: 100%; width: 24vmin; background-image: var(--ink-left); }
+.yc-frame .d { left: 0; right: 24%; bottom: -4.5vmin; height: 18vmin; background-image: var(--ink-bottom); }
+.yc-frame .p { left: 0; bottom: 0; height: calc(var(--h) * 1.08); width: calc(var(--h) * .92); background-image: var(--ink-splash); }
+.yc-frame em { left: 2vmin; bottom: 0; height: var(--h); aspect-ratio: 908 / 1200; background-image: var(--ink-hero); }
+.yc-frame.on .l { animation: yc-sup var(--d) ease-out backwards; }
 .yc-frame.inked.on canvas { animation: yc-sfade calc(var(--d) * 2) ease-out backwards; }
 .yc-frame.on .d { animation: yc-srt var(--d) ease-out var(--g) backwards; }
-.yc-frame.on .u { animation: yc-slt var(--d) ease-out calc(var(--g) * 2) backwards; }
-.yc-frame.on .r { animation: yc-slt var(--d) ease-out calc(var(--g) * 2) backwards; }
+.yc-frame.on .p { animation: yc-srt var(--d) ease-out calc(var(--g) * 2) backwards; }
 .yc-frame.on em { animation: yc-shero calc(var(--d) * 1.8) cubic-bezier(.2,.8,.2,1) calc(var(--g) * 3) backwards; }
-.yc-frame.settle .r, .yc-frame.settle em { opacity: 0; transform: translateX(14%); }
-.yc-frame.settle canvas { opacity: .4; transition: opacity .7s ease-in; }
-.yc-frame.settle .l { transform: translateX(-30%); }
-.yc-frame.settle .u { transform: translateY(-34%); }
-.yc-frame.settle .d { transform: translateY(26%); }
-.yc-frame.settle b, .yc-frame.settle i { transform: translate(-7vmin, -50%) scale(.72); }
-@keyframes yc-swd { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
+.yc-frame.settle .p, .yc-frame.settle em { opacity: 0; transform: translateX(-14%); }
+.yc-frame.settle canvas { opacity: 0; transition: opacity .7s ease-in; }
+.yc-frame.settle b, .yc-frame.settle i { opacity: 0; }
+@keyframes yc-sup { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0 0 0 0); } }
 @keyframes yc-srt { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
-@keyframes yc-slt { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0 0 0 0); } }
 @keyframes yc-sfade { from { opacity: 0; } }
-@keyframes yc-shero { from { opacity: 0; transform: translateX(7%) scale(1.04); } }
+@keyframes yc-shero { from { opacity: 0; transform: translateX(-7%) scale(1.04); } }
 .yc-frame b { position: absolute; left: 3.2vmin; top: 50%; transform: translateY(-50%); writing-mode: vertical-rl; font-weight: normal; line-height: 1; letter-spacing: .08em;
-  color: #fbf4e6; text-shadow: 0 0 .35em var(--c), 0 .04em .12em rgba(0,0,0,.8); transition: opacity .25s, transform .7s ease-in-out; }
-.yc-frame.inked b { left: calc(18.5vmin - .5em); white-space: nowrap; text-shadow: 0 0 .18em rgba(0,0,0,.85); }
-.yc-frame i { position: absolute; font-style: normal; width: 1.1em; height: 1.1em; line-height: 1.1em; text-align: center; border-radius: 2px; background: #b3261e; color: #fbefe6; transform: rotate(-4deg); transition: transform .7s ease-in-out; }
-.yc-frame.settle i { transform: translate(-7vmin, 0) rotate(-4deg) scale(.72); }
+  color: #fbf4e6; text-shadow: 0 0 .35em var(--c), 0 .04em .12em rgba(0,0,0,.8); transition: opacity .25s; }
+.yc-frame.inked b { left: calc(2vmin + var(--h) * .62); top: auto; bottom: 18vmin; transform: none; white-space: nowrap; text-shadow: 0 0 .1em #000, 0 0 .3em #000, 0 0 .6em rgba(0,0,0,.7); }
+.yc-frame i { position: absolute; font-style: normal; width: 1.1em; height: 1.1em; line-height: 1.1em; text-align: center; border-radius: 2px; background: #b3261e; color: #fbefe6; transform: rotate(-4deg); transition: opacity .25s; }
 .yc-fbar { position: absolute; left: 12%; right: 12%; bottom: 2.4vmin; height: 3px; background: rgba(251,244,230,.28); }
 .yc-fbar[hidden] { display: none; }
 .yc-fbar u { position: absolute; inset: 0; background: var(--c); transform-origin: 50% 50%; box-shadow: 0 0 6px var(--c); }
@@ -177,13 +168,12 @@ function paintStrokes(g, W, H, art, color) {
 }
 
 /**
- * 笔触底下化开的元素色：左边大字那一笔、右边人物背后各一团
+ * 笔触底下化开的元素色：只在左下角人物背后一团
  * @param {CanvasRenderingContext2D} g @param {number} W @param {number} H @param {Record<string, HTMLImageElement>} art @param {string} color
  */
 function paintWash(g, W, H, art, color) {
   g.clearRect(0, 0, W, H);
-  tinted(g, art.tint, color, -0.16 * H, 0.2 * H, 0.6 * H, 0.85 * H, 0.55);
-  tinted(g, art.tint, color, W - 0.85 * H, 0, 0.95 * H, H, 0.55);
+  tinted(g, art.tint, color, -0.2 * H, 0.42 * H, 0.75 * H, 0.7 * H, 0.5);
 }
 
 /**
@@ -259,7 +249,7 @@ export class ScreenFrame {
    */
   constructor(root, font, url = (name) => `/frame/${name}.webp`) {
     const make = (/** @type {string} */ html) => { const t = document.createElement('template'); t.innerHTML = html; return /** @type {HTMLElement} */ (t.content.firstElementChild); };
-    this.el = make('<div class="yc-frame"><canvas></canvas><s class="r"></s><s class="l"></s><s class="d"></s><s class="u"></s><em></em>'
+    this.el = make('<div class="yc-frame"><canvas></canvas><s class="p"></s><s class="l"></s><s class="d"></s><em></em>'
       + '<b></b><i>敕</i><div class="yc-fbar" hidden><u></u></div></div>');
     this.sky = make('<div class="yc-sky"></div>');
     this.cut = /** @type {HTMLCanvasElement} */ (make('<canvas class="yc-slash"></canvas>'));
@@ -309,8 +299,9 @@ export class ScreenFrame {
     const size = Math.round(sh * (this.art ? L.text : L.thick * (level === 'large' ? 0.95 : 0.85)));
     this.text.style.fontSize = `${size}px`;
     this.seal.style.fontSize = `${Math.round(size * 0.34)}px`;
-    this.seal.style.left = this.art ? `calc(18.5vmin + ${Math.round(size * 0.14)}px)` : `calc(3.2vmin + ${Math.round(size * 0.3)}px)`;
-    this.seal.style.top = `calc(50% + ${Math.round((size * [...o.text].length * 1.08) / 2 + size * 0.2)}px)`;
+    this.seal.style.left = this.art ? `calc(2vmin + var(--h) * .62 + ${Math.round(size * 0.16)}px)` : `calc(3.2vmin + ${Math.round(size * 0.3)}px)`;
+    this.seal.style.top = this.art ? 'auto' : `calc(50% + ${Math.round((size * [...o.text].length * 1.08) / 2 + size * 0.2)}px)`;
+    this.seal.style.bottom = this.art ? `calc(18vmin - ${Math.round(size * 0.52)}px)` : 'auto';
     this.bar.hidden = level !== 'large';
     this.under.style.clipPath = '';
     this.left = -1;

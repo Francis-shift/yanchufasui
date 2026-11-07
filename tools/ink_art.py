@@ -169,8 +169,8 @@ def top(rng):
     return finish(ink, rng, bleed=0.6)
 
 
-def right(rng):
-    """右边一大片：立绘背后的底，横着来回扫了几笔的泼墨"""
+def splash(rng):
+    """左下角一大片：立绘背后的底，横着来回扫了几笔的泼墨，从左边扫出来"""
     H, W = 900, 760
     a = np.zeros((H, W), np.float32)
     for pts, wd, dry in [
@@ -180,7 +180,8 @@ def right(rng):
     ]:
         ink = brush(H, W, pts, wd, line((0, 1), (0.6, 0.86), (1, 0.34)), rng, dry=dry, tail=0.3, power=1.5)
         a = np.maximum(a, finish(ink, rng, bleed=1.3))
-    return np.maximum(a, splatter(H, W, [(240, 330), (160, 560), (300, 800)], 110, 170, 3.6, rng))
+    a = np.maximum(a, splatter(H, W, [(240, 330), (160, 560), (300, 800)], 110, 170, 3.6, rng))
+    return a[:, ::-1]
 
 
 def tint(rng):
@@ -194,7 +195,7 @@ def tint(rng):
     return np.clip(a * 0.72 + edge, 0, 1)
 
 
-ART = {'slash': slash, 'left': left, 'bottom': bottom, 'top': top, 'right': right, 'tint': tint}
+ART = {'slash': slash, 'left': left, 'bottom': bottom, 'top': top, 'splash': splash, 'tint': tint}
 
 
 if __name__ == '__main__':
