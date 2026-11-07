@@ -648,9 +648,9 @@ export class Hud {
     /** @type {HTMLElement} */ (this.cover.querySelector('[data-back]')).addEventListener('click', () => this.coverStep(null));
     /** @type {HTMLElement} */ (this.cover.querySelector('[data-cgo]')).addEventListener('click', () => this.coverGo?.(this.coverMode));
     // 演示模式：封面上的入口、放的时候的字幕（setAutoplay）
-    /** @type {(() => void) | null} */
+    /** 点"看演示"；按住 Shift 点是跳过守关 @type {((skip: boolean) => void) | null} */
     this.onAutoplay = null;
-    /** @type {HTMLElement} */ (this.cover.querySelector('[data-auto]')).addEventListener('click', () => this.onAutoplay?.());
+    /** @type {HTMLElement} */ (this.cover.querySelector('[data-auto]')).addEventListener('click', (e) => this.onAutoplay?.(/** @type {MouseEvent} */ (e).shiftKey));
     // 咒语图鉴：封面和结算页上的入口（面板在 ui/book.js）
     /** @type {(() => void) | null} */
     this.onBook = null;

@@ -1,7 +1,8 @@
 // 演示模式：脚本里每句话关键词都认得、演得出该演的；总长不超过 3 分钟；引擎一步一步走、打字、等得到才走、等不到也走、放完从头来、退得掉；自动走位躲得开红圈。
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AUTOPLAY, Autoplay, TYPE, autoMove } from '../game/modes/autoplay.js';
+import { AUTOPLAY, AUTOPLAY_TRIAL, Autoplay, TYPE, autoMove } from '../game/modes/autoplay.js';
 import { parseKeywords } from '../game/rules/keywords.js';
 import { sanitizeIntent } from '../game/rules/intent.js';
 import { planCast } from '../game/rules/arbiter.js';
@@ -111,6 +112,23 @@ test('until：等到了才走、sec 没到也不走；max 到了等不到也走'
   assert.equal(q.i, 0);
   run(q, 0.2);
   assert.equal(q.i, 1, '等不到也不能把演示卡死');
+});
+
+test('上台用：能从试炼那段放起，后面法域、放龙都在，放完回封面', () => {
+  assert.equal(AUTOPLAY[AUTOPLAY_TRIAL].go, 'trial');
+  const went = [];
+  const a = new Autoplay({ say() {}, go: (m) => went.push(m), typed() {}, cast() {}, ready: () => true, call() {}, test: () => true });
+  a.start(AUTOPLAY_TRIAL);
+  assert.deepEqual(went, ['trial'], '不先开守关');
+  const rest = AUTOPLAY.slice(AUTOPLAY_TRIAL);
+  assert.ok(rest.some((s) => s.call === 'domain') && rest.some((s) => s.call === 'dragon'));
+  assert.equal(rest.at(-1).go, 'cover');
+});
+
+test('按住 Shift 点"看演示"：Shift 本身不算碰一下，不然按久了一开始就退', () => {
+  const main = readFileSync(new URL('../game/main.js', import.meta.url), 'utf8');
+  assert.match(main, /play\.start\(skip \? AUTOPLAY_TRIAL : 0\)/);
+  assert.match(main, /const onAutoExit = [^\n]*\n\s*if \(!play\.on \|\| \/\*\* @type \{KeyboardEvent\} \*\/ \(e\)\.key === 'Shift'/);
 });
 
 test('放完从头再来；退了就不动了，字幕和输入框都收干净', () => {

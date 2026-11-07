@@ -40,6 +40,9 @@ export const AUTOPLAY = [
   { go: 'cover', say: '轮到你了：点一下屏幕，或按任意键', sec: 9 },
 ];
 
+/** 试炼那段从第几步起：上台时守关现场打过了，按住 Shift 点"看演示"从这里放 */
+export const AUTOPLAY_TRIAL = AUTOPLAY.findIndex((s) => s.go === 'trial');
+
 export class Autoplay {
   /** @param {AutoplayApi} api @param {Step[]} [script] */
   constructor(api, script = AUTOPLAY) {
@@ -49,7 +52,8 @@ export class Autoplay {
     this.sent = true;   // 这一步的句子回车了没有（没有句子的步算回车了）
   }
 
-  start() { this.on = true; this.enter(0); }
+  /** @param {number} [from] 从第几步放起 */
+  start(from = 0) { this.on = true; this.enter(from); }
 
   stop() {
     this.on = false;

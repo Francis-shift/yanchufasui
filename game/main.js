@@ -40,7 +40,7 @@ import { Caster } from './actors/caster.js';
 import { Enemies } from './actors/enemies.js';
 import { loadRig } from './actors/rig.js';
 import { ARENA_R, Trial } from './modes/trial.js';
-import { Autoplay, autoMove } from './modes/autoplay.js';
+import { AUTOPLAY_TRIAL, Autoplay, autoMove } from './modes/autoplay.js';
 import { DragonFx } from './fx/dragon.js';
 import { Locks } from './fx/locks.js';
 import { distToSegment, Walls } from './fx/walls.js';
@@ -1072,10 +1072,11 @@ export function start(root, opts = {}) {
     call: (c) => autoCalls[c]?.(),
     test: (c) => !!autoTests[c]?.(),
   });
-  function startAuto() {
+  /** @param {boolean} [skip] 跳过守关，从试炼放起（按住 Shift 点"看演示"，上台用） */
+  function startAuto(skip = false) {
     auto.kept = { view: view.mode, locked: view.locked };
     setViewMode('follow', false);
-    play.start();
+    play.start(skip ? AUTOPLAY_TRIAL : 0);
   }
   function stopAuto() {
     play.stop();
@@ -1084,9 +1085,9 @@ export function start(root, opts = {}) {
     backToTitle();
   }
   hud.onAutoplay = startAuto;
-  /** 放着的时候碰一下键盘或屏幕就退（声音开关除外：展台上要能调）；这一下不再往下传 @param {Event} e */
+  /** 放着的时候碰一下键盘或屏幕就退（声音开关除外：展台上要能调；Shift 也除外：是按着它点的"看演示"，按久了会连发）；这一下不再往下传 @param {Event} e */
   const onAutoExit = (e) => {
-    if (!play.on || (e.target instanceof Element && e.target.closest('.yc-mute'))) return;
+    if (!play.on || /** @type {KeyboardEvent} */ (e).key === 'Shift' || (e.target instanceof Element && e.target.closest('.yc-mute'))) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     stopAuto();
